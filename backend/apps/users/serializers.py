@@ -1,0 +1,211 @@
+from rest_framework import serializers
+from django.contrib.auth.password_validation import validate_password
+from .models import User
+from apps.admin_api.models import SupportTicket, SupportTicketMessage
+
+
+class RegisterSerializer(serializers.ModelSerializer):
+    """
+    Serializer for user registration
+    """
+    password = serializers.CharField(
+        write_only=True, 
+        validators=[validate_password],
+        style={'input_type': 'password'}
+    )
+    confirm_password = serializers.CharField(
+        write_only=True,
+        style={'input_type': 'password'}
+    )
+
+    class Meta:
+        model = User
+        fields = ['username', 'email', 'password', 'confirm_password']
+
+    def validate(self, data):
+        if data['password'] != data['confirm_password']:
+            raise serializers.ValidationError({
+                'confirm_password': 'Passwords do not match'
+            })
+        return data
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError('Email already registered')
+        return value
+
+    def validate_username(self, value):
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError('Username already taken')
+        return value
+
+    def create(self, validated_data):
+        validated_data.pop('confirm_password')
+        user = User.objects.create_user(**validated_data)
+        return user
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    """
+    Serializer for user profile data
+    """
+    device_bound = serializers.SerializerMethodField()
+    available_balance = serializers.SerializerMethodField()
+    trust_score = serializers.SerializerMethodField()
+    trust_status = serializers.SerializerMethodField()
+    win_rate = serializers.SerializerMethodField()
+    avg_payout_kes = serializers.SerializerMethodField()
+    player_rank = serializers.SerializerMethodField()
+    member_since = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'email', 'wallet_balance', 'locked_balance',
+            'available_balance', 'device_bound', 'total_steps',
+            'challenges_won', 'challenges_joined', 'total_earned',
+            'current_streak', 'best_streak', 'best_day_steps',
+            'daily_goal', 'win_rate', 'avg_payout_kes',
+            'player_rank', 'member_since',
+            'trust_score', 'trust_status', 'created_at'
+        ]
+        read_only_fields = [
+            'wallet_balance', 'locked_balance', 'total_steps', 
+            'challenges_won', 'total_earned', 'current_streak',
+            'challenges_joined', 'best_streak', 'best_day_steps'
+        ]
+
+    def get_device_bound(self, obj):
+        return obj.device_id is not None
+
+    def get_available_balance(self, obj):
+        return str(obj.available_balance)
+
+    def get_trust_score(self, obj):
+        trust = getattr(obj, 'trust_score', None)
+        return trust.score if trust else 100
+
+    def get_trust_status(self, obj):
+        trust = getattr(obj, 'trust_score', None)
+        return trust.status if trust else 'GOOD'
+
+    def get_win_rate(self, obj):
+        played = getattr(obj, 'challenges_joined', 0) or 0
+        won = obj.challenges_won or 0
+        if played == 0:
+            return 0.0
+        return round((won / played) * 100, 1)
+
+    def get_avg_payout_kes(self, obj):
+        won = obj.challenges_won or 0
+        total = float(obj.total_earned or 0)
+        if won == 0:
+            return '0.00'
+        return str(round(total / won, 2))
+
+    def get_player_rank(self, obj):
+        played = getattr(obj, 'challenges_joined', 0) or 0
+        if played >= 100:
+            return 'Champion'
+        if played >= 50:
+            return 'Elite'
+        if played >= 25:
+            return 'Veteran'
+        if played >= 10:
+            return 'Competitor'
+        if played >= 3:
+            return 'Challenger'
+        return 'Newcomer'
+
+    def get_member_since(self, obj):
+        return obj.date_joined.strftime('%B %Y')
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """
+    Serializer for changing password
+    """
+    old_password = serializers.CharField(
+        required=True,
+        style={'input_type': 'password'}
+    )
+    new_password = serializers.CharField(
+        required=True,
+        validators=[validate_password],
+        style={'input_type': 'password'}
+    )
+    confirm_password = serializers.CharField(
+        required=True,
+        style={'input_type': 'password'}
+    )
+
+    def validate(self, data):
+        if data['new_password'] != data['confirm_password']:
+            raise serializers.ValidationError({
+                'confirm_password': 'Passwords do not match'
+            })
+        return data
+
+
+class LoginSerializer(serializers.Serializer):
+    """
+    Serializer for login
+    """
+    username = serializers.CharField(required=True)
+    password = serializers.CharField(
+        required=True,
+        style={'input_type': 'password'}
+    )
+
+
+class GoogleAuthSerializer(serializers.Serializer):
+    """
+    Serializer for Google OAuth access token auth
+    """
+    token = serializers.CharField(required=True, trim_whitespace=True)
+
+
+class SupportTicketCreateSerializer(serializers.Serializer):
+    """Serializer for creating support tickets from user app"""
+    subject = serializers.CharField(max_length=255)
+    category = serializers.ChoiceField(choices=SupportTicket.CATEGORY_CHOICES, default='general')
+    priority = serializers.ChoiceField(choices=SupportTicket.PRIORITY_CHOICES, default='medium')
+    message = serializers.CharField()
+
+
+class UserSupportTicketSerializer(serializers.ModelSerializer):
+    """Serializer for user's support ticket list/detail"""
+    message_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SupportTicket
+        fields = [
+            'id',
+            'subject',
+            'category',
+            'status',
+            'priority',
+            'message',
+            'admin_notes',
+            'resolved_at',
+            'created_at',
+            'updated_at',
+            'message_count',
+        ]
+
+    def get_message_count(self, obj):
+        return obj.messages.count()
+
+
+class UserSupportTicketMessageSerializer(serializers.ModelSerializer):
+    """Serializer for support ticket conversation messages shown to users"""
+
+    class Meta:
+        model = SupportTicketMessage
+        fields = [
+            'id',
+            'sender_username',
+            'is_admin',
+            'message',
+            'created_at',
+        ]
