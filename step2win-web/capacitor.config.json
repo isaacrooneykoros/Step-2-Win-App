@@ -1,0 +1,22 @@
+{
+  "appId": "com.step2win.app",
+  "appName": "Step2Win",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "hostname": "app.step2win.com",
+    "allowNavigation": [
+      "*.step2win.com"
+    ]
+  },
+  "android": {
+    "buildOptions": {
+      "keystorePath": "",
+      "keystorePassword": "",
+      "keystoreAlias": "",
+      "keystoreAliasPassword": "",
+      "releaseType": "APK"
+    }
+  }
+}

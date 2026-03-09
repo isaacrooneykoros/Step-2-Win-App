@@ -1,0 +1,185 @@
+export interface DashboardOverview {
+  users: {
+    total: number;
+    active_week: number;
+    new_week: number;
+  };
+  finance: {
+    week_deposits: string;
+    week_withdrawals: string;
+    pending_withdrawals: string;
+  };
+  challenges: {
+    live: number;
+    completed_month: number;
+  };
+  gamification: {
+    xp_distributed_week: number;
+  };
+  timestamp: string;
+}
+
+export interface AdminUser {
+  id: number;
+  username: string;
+  email: string;
+  phone_number?: string;
+  wallet_balance: string;
+  total_steps: number;
+  total_earned: string;
+  is_active: boolean;
+  is_staff: boolean;
+  created_at?: string;
+}
+
+export interface AdminChallenge {
+  id: number;
+  name: string;
+  status: 'pending' | 'active' | 'completed' | 'cancelled';
+  creator: number;
+  created_by_username: string;
+  entry_fee: string;
+  total_pool: string;
+  current_entries: number;
+  max_participants: number;
+  milestone: number;
+  start_date: string;
+  end_date: string;
+}
+
+export interface AdminTransaction {
+  id: number;
+  user: number | null;
+  user_username: string;
+  type: 'deposit' | 'withdrawal' | 'challenge_entry' | 'payout' | 'fee' | 'refund';
+  amount: string;
+  balance_before: string;
+  balance_after: string;
+  description: string;
+  reference_id: string | null;
+  created_at: string;
+}
+
+export interface AdminWithdrawal {
+  id: number;
+  user: number;
+  user_username: string;
+  amount: string;
+  account_details: string;
+  status: 'pending' | 'approved' | 'rejected' | 'processing';
+  rejection_reason: string;
+  reference_number: string;
+  created_at: string;
+  processed_at: string | null;
+}
+
+export interface AdminBadge {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  icon: string;
+  badge_type: string;
+  color: string;
+  users_earned: number;
+}
+
+export interface AdminAuthUser {
+  id: number;
+  username: string;
+  email: string;
+  is_staff: boolean;
+  is_active: boolean;
+}
+
+export interface AdminAuthResponse {
+  access: string;
+  refresh: string;
+  user: AdminAuthUser;
+}
+
+export interface SupportTicket {
+  id: number;
+  user: number;
+  user_username: string;
+  subject: string;
+  category: 'general' | 'account' | 'challenge' | 'payment' | 'technical' | 'other';
+  message: string;
+  status: 'open' | 'in_progress' | 'resolved' | 'closed';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  assigned_to: number | null;
+  assigned_to_username: string | null;
+  admin_notes: string;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface SupportTicketMessage {
+  id: number;
+  ticket: number;
+  sender: number | null;
+  sender_username: string;
+  is_admin: boolean;
+  message: string;
+  created_at: string;
+}
+
+export interface SupportTicketDetailResponse {
+  ticket: SupportTicket;
+  messages: SupportTicketMessage[];
+}
+
+export interface SupportAdminUser {
+  id: number;
+  username: string;
+  email: string;
+}
+
+export interface FraudFlag {
+  id: number;
+  user_username: string;
+  user_email: string;
+  flag_type: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  date: string;
+  details: Record<string, any>;
+  reviewed: boolean;
+  actioned: boolean;
+  created_at: string;
+}
+
+export interface FraudOverview {
+  open_flags: number;
+  critical_unread: number;
+  high_unread: number;
+  restricted_users: number;
+  suspended_users: number;
+  banned_users: number;
+  flags_today: number;
+  recent_flags: FraudFlag[];
+}
+
+export interface WithdrawalQueueItem {
+  id: string;
+  user_id: number;
+  username: string;
+  email: string;
+  phone: string;
+  amount_kes: string;
+  method: 'mpesa' | 'bank' | 'paybill';
+  destination: string;
+  status: 'pending_review' | 'approved' | 'processing' | 'completed' | 'rejected' | 'failed' | 'cancelled';
+  created_at: string;
+  age_hours: number;
+}
+
+export interface WithdrawalStats {
+  pending_count: number;
+  pending_total_kes: string;
+  approved_today: number;
+  completed_today: number;
+  failed_today: number;
+  total_paid_today: string;
+}

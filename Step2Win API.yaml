@@ -1,0 +1,3550 @@
+openapi: 3.0.3
+info:
+  title: Step2Win API
+  version: 1.0.0
+  description: Corporate-grade fitness challenge platform
+paths:
+  /api/admin/badges/:
+    get:
+      operationId: api_admin_badges_list
+      description: Admin badge management endpoint
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminBadgeList'
+          description: ''
+    post:
+      operationId: api_admin_badges_create
+      description: Admin badge management endpoint
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminBadge'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminBadge'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminBadge'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBadge'
+          description: ''
+  /api/admin/badges/{id}/:
+    get:
+      operationId: api_admin_badges_retrieve
+      description: Admin badge management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Badge.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBadge'
+          description: ''
+    put:
+      operationId: api_admin_badges_update
+      description: Admin badge management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Badge.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminBadge'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminBadge'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminBadge'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBadge'
+          description: ''
+    patch:
+      operationId: api_admin_badges_partial_update
+      description: Admin badge management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Badge.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminBadge'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminBadge'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminBadge'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBadge'
+          description: ''
+    delete:
+      operationId: api_admin_badges_destroy
+      description: Admin badge management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Badge.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/admin/badges/{id}/award_to_user/:
+    post:
+      operationId: api_admin_badges_award_to_user_create
+      description: Award badge to a user
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Badge.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminBadge'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminBadge'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminBadge'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBadge'
+          description: ''
+  /api/admin/badges/badge_stats/:
+    get:
+      operationId: api_admin_badges_badge_stats_retrieve
+      description: Get badge statistics
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBadge'
+          description: ''
+  /api/admin/challenges/:
+    get:
+      operationId: api_admin_challenges_list
+      description: Admin challenge management endpoint
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminChallengeList'
+          description: ''
+    post:
+      operationId: api_admin_challenges_create
+      description: Admin challenge management endpoint
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminChallenge'
+          description: ''
+  /api/admin/challenges/{id}/:
+    get:
+      operationId: api_admin_challenges_retrieve
+      description: Admin challenge management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this challenge.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminChallenge'
+          description: ''
+    put:
+      operationId: api_admin_challenges_update
+      description: Admin challenge management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this challenge.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminChallenge'
+          description: ''
+    patch:
+      operationId: api_admin_challenges_partial_update
+      description: Admin challenge management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this challenge.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminChallenge'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminChallenge'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminChallenge'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminChallenge'
+          description: ''
+    delete:
+      operationId: api_admin_challenges_destroy
+      description: Admin challenge management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this challenge.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/admin/challenges/{id}/approve_challenge/:
+    post:
+      operationId: api_admin_challenges_approve_challenge_create
+      description: Approve a pending challenge
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this challenge.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminChallenge'
+          description: ''
+  /api/admin/challenges/{id}/cancel_challenge/:
+    post:
+      operationId: api_admin_challenges_cancel_challenge_create
+      description: Cancel an active challenge
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this challenge.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminChallenge'
+          description: ''
+  /api/admin/challenges/{id}/reject_challenge/:
+    post:
+      operationId: api_admin_challenges_reject_challenge_create
+      description: Reject a pending challenge
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this challenge.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminChallenge'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminChallenge'
+          description: ''
+  /api/admin/challenges/{id}/results/:
+    get:
+      operationId: api_admin_challenges_results_retrieve
+      description: Get challenge results and leaderboard
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this challenge.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminChallenge'
+          description: ''
+  /api/admin/challenges/challenge_stats/:
+    get:
+      operationId: api_admin_challenges_challenge_stats_retrieve
+      description: Get challenge statistics
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminChallenge'
+          description: ''
+  /api/admin/dashboard/overview/:
+    get:
+      operationId: api_admin_dashboard_overview_retrieve
+      description: Get complete dashboard overview
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/admin/dashboard/revenue_chart/:
+    get:
+      operationId: api_admin_dashboard_revenue_chart_retrieve
+      description: Get revenue data for chart
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/admin/transactions/:
+    get:
+      operationId: api_admin_transactions_list
+      description: Admin transaction history endpoint
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminTransactionList'
+          description: ''
+  /api/admin/transactions/{id}/:
+    get:
+      operationId: api_admin_transactions_retrieve
+      description: Admin transaction history endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this wallet transaction.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTransaction'
+          description: ''
+  /api/admin/transactions/daily_volume/:
+    get:
+      operationId: api_admin_transactions_daily_volume_retrieve
+      description: Get daily transaction volume for last 30 days
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTransaction'
+          description: ''
+  /api/admin/transactions/transaction_stats/:
+    get:
+      operationId: api_admin_transactions_transaction_stats_retrieve
+      description: Get transaction statistics
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTransaction'
+          description: ''
+  /api/admin/users/:
+    get:
+      operationId: api_admin_users_list
+      description: Admin user management endpoint
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminUserList'
+          description: ''
+    post:
+      operationId: api_admin_users_create
+      description: Admin user management endpoint
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+  /api/admin/users/{id}/:
+    get:
+      operationId: api_admin_users_retrieve
+      description: Admin user management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+    put:
+      operationId: api_admin_users_update
+      description: Admin user management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+    patch:
+      operationId: api_admin_users_partial_update
+      description: Admin user management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminUser'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminUser'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminUser'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+    delete:
+      operationId: api_admin_users_destroy
+      description: Admin user management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/admin/users/{id}/ban_user/:
+    post:
+      operationId: api_admin_users_ban_user_create
+      description: Ban a specific user
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+  /api/admin/users/{id}/make_staff/:
+    post:
+      operationId: api_admin_users_make_staff_create
+      description: Promote user to staff
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+  /api/admin/users/{id}/remove_staff/:
+    post:
+      operationId: api_admin_users_remove_staff_create
+      description: Remove staff status from user
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+  /api/admin/users/{id}/unban_user/:
+    post:
+      operationId: api_admin_users_unban_user_create
+      description: Unban a specific user
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminUser'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+  /api/admin/users/top_earners/:
+    get:
+      operationId: api_admin_users_top_earners_retrieve
+      description: Get top earning users
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+  /api/admin/users/top_xp_users/:
+    get:
+      operationId: api_admin_users_top_xp_users_retrieve
+      description: Get top XP users
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+  /api/admin/users/user_stats/:
+    get:
+      operationId: api_admin_users_user_stats_retrieve
+      description: Get overall user statistics
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+  /api/admin/withdrawals/:
+    get:
+      operationId: api_admin_withdrawals_list
+      description: Admin withdrawal management endpoint
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminWithdrawalList'
+          description: ''
+    post:
+      operationId: api_admin_withdrawals_create
+      description: Admin withdrawal management endpoint
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminWithdrawal'
+          description: ''
+  /api/admin/withdrawals/{id}/:
+    get:
+      operationId: api_admin_withdrawals_retrieve
+      description: Admin withdrawal management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this withdrawal.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminWithdrawal'
+          description: ''
+    put:
+      operationId: api_admin_withdrawals_update
+      description: Admin withdrawal management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this withdrawal.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminWithdrawal'
+          description: ''
+    patch:
+      operationId: api_admin_withdrawals_partial_update
+      description: Admin withdrawal management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this withdrawal.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminWithdrawal'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminWithdrawal'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminWithdrawal'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminWithdrawal'
+          description: ''
+    delete:
+      operationId: api_admin_withdrawals_destroy
+      description: Admin withdrawal management endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this withdrawal.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/admin/withdrawals/{id}/approve_withdrawal/:
+    post:
+      operationId: api_admin_withdrawals_approve_withdrawal_create
+      description: Approve a withdrawal request
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this withdrawal.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminWithdrawal'
+          description: ''
+  /api/admin/withdrawals/{id}/reject_withdrawal/:
+    post:
+      operationId: api_admin_withdrawals_reject_withdrawal_create
+      description: Reject a withdrawal request
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this withdrawal.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminWithdrawal'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminWithdrawal'
+          description: ''
+  /api/admin/withdrawals/withdrawal_stats/:
+    get:
+      operationId: api_admin_withdrawals_withdrawal_stats_retrieve
+      description: Get withdrawal statistics
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminWithdrawal'
+          description: ''
+  /api/auth/bind-device/:
+    post:
+      operationId: api_auth_bind_device_create
+      description: Bind a device to user account for step tracking
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/auth/change-password/:
+    post:
+      operationId: api_auth_change_password_create
+      description: Change user password
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/auth/device-status/:
+    get:
+      operationId: api_auth_device_status_retrieve
+      description: Get device binding status and last sync info
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/auth/login/:
+    post:
+      operationId: api_auth_login_create
+      description: Authenticate user and return tokens
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/auth/logout/:
+    post:
+      operationId: api_auth_logout_create
+      description: Blacklist the refresh token
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/auth/profile/:
+    get:
+      operationId: api_auth_profile_retrieve
+      description: Get or update user profile
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+          description: ''
+    put:
+      operationId: api_auth_profile_update
+      description: Get or update user profile
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserProfile'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserProfile'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserProfile'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+          description: ''
+    patch:
+      operationId: api_auth_profile_partial_update
+      description: Get or update user profile
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedUserProfile'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedUserProfile'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedUserProfile'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+          description: ''
+  /api/auth/refresh/:
+    post:
+      operationId: api_auth_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+  /api/auth/register/:
+    post:
+      operationId: api_auth_register_create
+      description: Register a new user
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/auth/stats/:
+    get:
+      operationId: api_auth_stats_retrieve
+      description: Get detailed user statistics
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/challenges/:
+    get:
+      operationId: api_challenges_list
+      description: List all available challenges
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedChallengeList'
+          description: ''
+  /api/challenges/{id}/:
+    get:
+      operationId: api_challenges_retrieve
+      description: Get detailed challenge information
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengeDetail'
+          description: ''
+  /api/challenges/{id}/leaderboard/:
+    get:
+      operationId: api_challenges_leaderboard_retrieve
+      description: Get challenge leaderboard
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/challenges/{id}/leave/:
+    post:
+      operationId: api_challenges_leave_create
+      description: Leave a challenge (only before it becomes active or if it's still
+        in the first day)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/challenges/{id}/stats/:
+    get:
+      operationId: api_challenges_stats_retrieve
+      description: Get comprehensive challenge statistics
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/challenges/create/:
+    post:
+      operationId: api_challenges_create_create
+      description: Create a new challenge and automatically join as creator
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/challenges/join/:
+    post:
+      operationId: api_challenges_join_create
+      description: Join a challenge using invite code
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/challenges/my-challenges/:
+    get:
+      operationId: api_challenges_my_challenges_list
+      description: List challenges user is participating in
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedChallengeDetailList'
+          description: ''
+  /api/gamification/badges/:
+    get:
+      operationId: api_gamification_badges_list
+      description: Badge definitions and user badge tracking
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBadgeList'
+          description: ''
+  /api/gamification/badges/{slug}/:
+    get:
+      operationId: api_gamification_badges_retrieve
+      description: Badge definitions and user badge tracking
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Badge'
+          description: ''
+  /api/gamification/badges/{slug}/award_to_user/:
+    post:
+      operationId: api_gamification_badges_award_to_user_create
+      description: Admin endpoint to award badge to user
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Badge'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Badge'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Badge'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Badge'
+          description: ''
+  /api/gamification/badges/my_badges/:
+    get:
+      operationId: api_gamification_badges_my_badges_retrieve
+      description: Get current user's earned badges
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Badge'
+          description: ''
+  /api/gamification/badges/upcoming/:
+    get:
+      operationId: api_gamification_badges_upcoming_retrieve
+      description: Get badges user hasn't earned yet with progress
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Badge'
+          description: ''
+  /api/gamification/events/:
+    get:
+      operationId: api_gamification_events_list
+      description: XP event history
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedXPEventList'
+          description: ''
+  /api/gamification/events/{id}/:
+    get:
+      operationId: api_gamification_events_retrieve
+      description: XP event history
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/XPEvent'
+          description: ''
+  /api/gamification/events/recent/:
+    get:
+      operationId: api_gamification_events_recent_retrieve
+      description: Get recent XP events for current user
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/XPEvent'
+          description: ''
+  /api/gamification/events/summary/:
+    get:
+      operationId: api_gamification_events_summary_retrieve
+      description: Get XP summary for current user
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/XPEvent'
+          description: ''
+  /api/gamification/gamification/my_gamification/:
+    get:
+      operationId: api_gamification_gamification_my_gamification_retrieve
+      description: Get complete gamification profile
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/gamification/milestones/:
+    get:
+      operationId: api_gamification_milestones_list
+      description: Level milestones tracking
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedLevelMilestoneList'
+          description: ''
+  /api/gamification/milestones/{id}/:
+    get:
+      operationId: api_gamification_milestones_retrieve
+      description: Level milestones tracking
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LevelMilestone'
+          description: ''
+  /api/gamification/streaks/check_in/:
+    post:
+      operationId: api_gamification_streaks_check_in_create
+      description: Record a login and update streak
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/gamification/streaks/my_streak/:
+    get:
+      operationId: api_gamification_streaks_my_streak_retrieve
+      description: Get current user's login streak
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/gamification/xp/award_xp/:
+    post:
+      operationId: api_gamification_xp_award_xp_create
+      description: Admin endpoint to award XP to a user
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/gamification/xp/leaderboard/:
+    get:
+      operationId: api_gamification_xp_leaderboard_retrieve
+      description: Get top users by XP
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/gamification/xp/my_xp/:
+    get:
+      operationId: api_gamification_xp_my_xp_retrieve
+      description: Get current user's XP profile
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/steps/daily/:
+    get:
+      operationId: api_steps_daily_retrieve
+      description: Get all daily steps (paginated)
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/steps/goal/:
+    get:
+      operationId: api_steps_goal_retrieve
+      description: Get or update step goals
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: api_steps_goal_create
+      description: Get or update step goals
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    put:
+      operationId: api_steps_goal_update
+      description: Get or update step goals
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/steps/stats/:
+    get:
+      operationId: api_steps_stats_retrieve
+      description: Get comprehensive step statistics
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/steps/sync/:
+    post:
+      operationId: api_steps_sync_create
+      description: Sync steps from device
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/steps/today/:
+    get:
+      operationId: api_steps_today_retrieve
+      description: Get today's step count
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/steps/weekly/:
+    get:
+      operationId: api_steps_weekly_retrieve
+      description: Get past 7 days of step data
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/wallet/deposit/:
+    post:
+      operationId: api_wallet_deposit_create
+      description: Process a deposit (simulated for demo purposes)
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/wallet/summary/:
+    get:
+      operationId: api_wallet_summary_retrieve
+      description: Get comprehensive wallet summary
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/wallet/transactions/:
+    get:
+      operationId: api_wallet_transactions_list
+      description: List all transactions for authenticated user
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTransactionList'
+          description: ''
+  /api/wallet/transactions/stats/:
+    get:
+      operationId: api_wallet_transactions_stats_retrieve
+      description: Get transaction statistics for the user
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/wallet/withdraw/:
+    post:
+      operationId: api_wallet_withdraw_create
+      description: Create a withdrawal request
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/wallet/withdrawals/:
+    get:
+      operationId: api_wallet_withdrawals_list
+      description: List all withdrawal requests for authenticated user
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedWithdrawalList'
+          description: ''
+  /api/wallet/withdrawals/{reference_number}/:
+    get:
+      operationId: api_wallet_withdrawals_retrieve
+      description: Get details of a specific withdrawal
+      parameters:
+      - in: path
+        name: reference_number
+        schema:
+          type: string
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+components:
+  schemas:
+    AdminBadge:
+      type: object
+      description: Admin serializer for badge data
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        slug:
+          type: string
+          maxLength: 50
+          pattern: ^[-a-zA-Z0-9_]+$
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        icon:
+          type: string
+          description: Emoji or icon name
+          maxLength: 10
+        badge_type:
+          allOf:
+          - $ref: '#/components/schemas/BadgeTypeEnum'
+          default: achievement
+        color:
+          type: string
+          default: '#00F5E9'
+          description: Hex color code
+          maxLength: 7
+        criteria_type:
+          allOf:
+          - $ref: '#/components/schemas/CriteriaTypeEnum'
+          default: manual
+        criteria_value:
+          type: integer
+          nullable: true
+          description: Threshold value for criteria
+        users_earned:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - description
+      - icon
+      - id
+      - name
+      - slug
+      - users_earned
+    AdminChallenge:
+      type: object
+      description: Admin serializer for challenge data
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status645Enum'
+          default: pending
+        creator:
+          type: integer
+        created_by_username:
+          type: string
+          readOnly: true
+        entry_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        total_pool:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          default: '0.00'
+          description: Total prize pool (sum of all entry fees)
+        platform_fee:
+          type: string
+          readOnly: true
+        max_participants:
+          type: integer
+          maximum: 1000
+          minimum: 2
+          default: 50
+        current_entries:
+          type: string
+          readOnly: true
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        milestone:
+          allOf:
+          - $ref: '#/components/schemas/MilestoneEnum'
+          description: |-
+            Total steps required to qualify for payout
+
+            * `50000` - Beginner - 50K steps
+            * `70000` - Intermediate - 70K steps
+            * `90000` - Advanced - 90K steps
+        invite_code:
+          type: string
+          description: Unique code for joining the challenge
+          maxLength: 10
+        is_private:
+          type: boolean
+          default: false
+          description: Private challenges require invite code
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - created_by_username
+      - creator
+      - current_entries
+      - end_date
+      - entry_fee
+      - id
+      - milestone
+      - name
+      - platform_fee
+      - start_date
+      - updated_at
+    AdminTransaction:
+      type: object
+      description: Admin serializer for transaction data
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          nullable: true
+        user_username:
+          type: string
+          readOnly: true
+        type:
+          $ref: '#/components/schemas/TypeEnum'
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          description: Positive for credits, negative for debits
+        balance_before:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          default: '0.00'
+        balance_after:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        description:
+          type: string
+          maxLength: 255
+        reference_id:
+          type: string
+          nullable: true
+          description: External transaction reference
+          maxLength: 100
+        metadata:
+          nullable: true
+          description: Additional transaction data
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount
+      - balance_after
+      - created_at
+      - description
+      - id
+      - type
+      - user_username
+    AdminUser:
+      type: object
+      description: Admin serializer for user data with extended fields
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        wallet_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          default: '0.00'
+        locked_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          default: '0.00'
+          description: Balance locked in active challenges
+        total_steps:
+          type: integer
+          readOnly: true
+          description: Lifetime total steps
+        challenges_won:
+          type: integer
+          readOnly: true
+          description: Number of challenges won
+        total_earned:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          description: Total lifetime earnings
+        current_streak:
+          type: integer
+          readOnly: true
+          description: Current daily active streak
+        is_active:
+          type: boolean
+          default: true
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
+        is_staff:
+          type: boolean
+          default: false
+          title: Staff status
+          description: Designates whether the user can log into this admin site.
+        device_platform:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/DevicePlatformEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        xp_profile:
+          type: string
+          readOnly: true
+        badges_count:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - badges_count
+      - challenges_won
+      - created_at
+      - current_streak
+      - email
+      - id
+      - total_earned
+      - total_steps
+      - updated_at
+      - username
+      - xp_profile
+    AdminWithdrawal:
+      type: object
+      description: Admin serializer for withdrawal data
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+        user_username:
+          type: string
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        account_details:
+          type: string
+          description: Bank account or payment details
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status195Enum'
+          default: pending
+        processed_by:
+          type: integer
+          nullable: true
+        approved_by_username:
+          type: string
+          readOnly: true
+          nullable: true
+        admin_notes:
+          type: string
+          description: Internal admin notes
+        rejection_reason:
+          type: string
+          description: Reason for rejection (shown to user)
+        reference_number:
+          type: string
+          readOnly: true
+          description: Unique withdrawal reference
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        processed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - account_details
+      - amount
+      - approved_by_username
+      - created_at
+      - id
+      - processed_at
+      - reference_number
+      - user
+      - user_username
+    Badge:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        slug:
+          type: string
+          maxLength: 50
+          pattern: ^[-a-zA-Z0-9_]+$
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        icon:
+          type: string
+          description: Emoji or icon name
+          maxLength: 10
+        badge_type:
+          allOf:
+          - $ref: '#/components/schemas/BadgeTypeEnum'
+          default: achievement
+        color:
+          type: string
+          default: '#00F5E9'
+          description: Hex color code
+          maxLength: 7
+        criteria_type:
+          allOf:
+          - $ref: '#/components/schemas/CriteriaTypeEnum'
+          default: manual
+        criteria_value:
+          type: integer
+          nullable: true
+          description: Threshold value for criteria
+      required:
+      - description
+      - icon
+      - id
+      - name
+      - slug
+    BadgeTypeEnum:
+      enum:
+      - milestone
+      - achievement
+      - challenge
+      - streak
+      - rank
+      type: string
+      description: |-
+        * `milestone` - Milestone
+        * `achievement` - Achievement
+        * `challenge` - Challenge
+        * `streak` - Streak
+        * `rank` - Rank
+    BlankEnum:
+      enum:
+      - ''
+    Challenge:
+      type: object
+      description: Serializer for challenge list view
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+        creator:
+          type: integer
+          readOnly: true
+        creator_username:
+          type: string
+          readOnly: true
+        milestone:
+          allOf:
+          - $ref: '#/components/schemas/MilestoneEnum'
+          description: |-
+            Total steps required to qualify for payout
+
+            * `50000` - Beginner - 50K steps
+            * `70000` - Intermediate - 70K steps
+            * `90000` - Advanced - 90K steps
+        milestone_display:
+          type: string
+          readOnly: true
+        entry_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        total_pool:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
+          description: Total prize pool (sum of all entry fees)
+        max_participants:
+          type: integer
+          maximum: 1000
+          minimum: 2
+          default: 50
+        current_participants:
+          type: integer
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status645Enum'
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        invite_code:
+          type: string
+          readOnly: true
+          description: Unique code for joining the challenge
+        is_private:
+          type: boolean
+          default: false
+          description: Private challenges require invite code
+        days_remaining:
+          type: integer
+          readOnly: true
+        is_full:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - creator
+      - creator_username
+      - current_participants
+      - days_remaining
+      - end_date
+      - entry_fee
+      - id
+      - invite_code
+      - is_full
+      - milestone
+      - milestone_display
+      - name
+      - start_date
+      - status
+      - status_display
+      - total_pool
+    ChallengeDetail:
+      type: object
+      description: Detailed serializer with participant information
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+        creator:
+          type: integer
+          readOnly: true
+        creator_username:
+          type: string
+          readOnly: true
+        milestone:
+          allOf:
+          - $ref: '#/components/schemas/MilestoneEnum'
+          description: |-
+            Total steps required to qualify for payout
+
+            * `50000` - Beginner - 50K steps
+            * `70000` - Intermediate - 70K steps
+            * `90000` - Advanced - 90K steps
+        milestone_display:
+          type: string
+          readOnly: true
+        entry_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        total_pool:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
+          description: Total prize pool (sum of all entry fees)
+        max_participants:
+          type: integer
+          maximum: 1000
+          minimum: 2
+          default: 50
+        current_participants:
+          type: integer
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status645Enum'
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        invite_code:
+          type: string
+          readOnly: true
+          description: Unique code for joining the challenge
+        is_private:
+          type: boolean
+          default: false
+          description: Private challenges require invite code
+        days_remaining:
+          type: integer
+          readOnly: true
+        is_full:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/Participant'
+          readOnly: true
+        my_participation:
+          type: string
+          readOnly: true
+        platform_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
+        net_pool:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
+      required:
+      - created_at
+      - creator
+      - creator_username
+      - current_participants
+      - days_remaining
+      - end_date
+      - entry_fee
+      - id
+      - invite_code
+      - is_full
+      - milestone
+      - milestone_display
+      - my_participation
+      - name
+      - net_pool
+      - participants
+      - platform_fee
+      - start_date
+      - status
+      - status_display
+      - total_pool
+    CriteriaTypeEnum:
+      enum:
+      - first_challenge
+      - first_win
+      - step_milestone
+      - challenge_wins
+      - streak_days
+      - total_xp
+      - manual
+      type: string
+      description: |-
+        * `first_challenge` - First Challenge Joined
+        * `first_win` - First Challenge Won
+        * `step_milestone` - Step Milestone
+        * `challenge_wins` - Number of Challenge Wins
+        * `streak_days` - Streak Days
+        * `total_xp` - Total XP Earned
+        * `manual` - Manual Award
+    DevicePlatformEnum:
+      enum:
+      - android
+      - ios
+      type: string
+      description: |-
+        * `android` - Android
+        * `ios` - iOS
+    EventTypeEnum:
+      enum:
+      - daily_login
+      - challenge_join
+      - challenge_complete
+      - challenge_win
+      - step_milestone
+      - streak_milestone
+      - level_up
+      - manual_award
+      - admin_adjustment
+      type: string
+      description: |-
+        * `daily_login` - Daily Login
+        * `challenge_join` - Challenge Join
+        * `challenge_complete` - Challenge Complete
+        * `challenge_win` - Challenge Win
+        * `step_milestone` - Step Milestone
+        * `streak_milestone` - Streak Milestone
+        * `level_up` - Level Up
+        * `manual_award` - Manual Award
+        * `admin_adjustment` - Admin Adjustment
+    LevelMilestone:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+        level:
+          type: integer
+        reached_at:
+          type: string
+          format: date-time
+          readOnly: true
+        total_xp:
+          type: integer
+        reward_badge:
+          allOf:
+          - $ref: '#/components/schemas/Badge'
+          readOnly: true
+      required:
+      - id
+      - level
+      - reached_at
+      - reward_badge
+      - total_xp
+      - user
+    MilestoneEnum:
+      enum:
+      - 50000
+      - 70000
+      - 90000
+      type: integer
+      description: |-
+        * `50000` - Beginner - 50K steps
+        * `70000` - Intermediate - 70K steps
+        * `90000` - Advanced - 90K steps
+    NullEnum:
+      enum:
+      - null
+    PaginatedAdminBadgeList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminBadge'
+    PaginatedAdminChallengeList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminChallenge'
+    PaginatedAdminTransactionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminTransaction'
+    PaginatedAdminUserList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminUser'
+    PaginatedAdminWithdrawalList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminWithdrawal'
+    PaginatedBadgeList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Badge'
+    PaginatedChallengeDetailList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChallengeDetail'
+    PaginatedChallengeList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Challenge'
+    PaginatedLevelMilestoneList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/LevelMilestone'
+    PaginatedTransactionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+    PaginatedWithdrawalList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Withdrawal'
+    PaginatedXPEventList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/XPEvent'
+    Participant:
+      type: object
+      description: Serializer for challenge participants
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+        username:
+          type: string
+          readOnly: true
+        steps:
+          type: integer
+          readOnly: true
+          description: Total steps accumulated during challenge
+        qualified:
+          type: boolean
+          readOnly: true
+          description: Whether user met the milestone requirement
+        payout:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          description: Final payout amount (calculated at challenge end)
+        rank:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: Final rank in the challenge
+        joined_at:
+          type: string
+          format: date-time
+          readOnly: true
+        progress_percentage:
+          type: integer
+          readOnly: true
+      required:
+      - id
+      - joined_at
+      - payout
+      - progress_percentage
+      - qualified
+      - rank
+      - steps
+      - user
+      - username
+    PatchedAdminBadge:
+      type: object
+      description: Admin serializer for badge data
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        slug:
+          type: string
+          maxLength: 50
+          pattern: ^[-a-zA-Z0-9_]+$
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        icon:
+          type: string
+          description: Emoji or icon name
+          maxLength: 10
+        badge_type:
+          allOf:
+          - $ref: '#/components/schemas/BadgeTypeEnum'
+          default: achievement
+        color:
+          type: string
+          default: '#00F5E9'
+          description: Hex color code
+          maxLength: 7
+        criteria_type:
+          allOf:
+          - $ref: '#/components/schemas/CriteriaTypeEnum'
+          default: manual
+        criteria_value:
+          type: integer
+          nullable: true
+          description: Threshold value for criteria
+        users_earned:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedAdminChallenge:
+      type: object
+      description: Admin serializer for challenge data
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status645Enum'
+          default: pending
+        creator:
+          type: integer
+        created_by_username:
+          type: string
+          readOnly: true
+        entry_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        total_pool:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          default: '0.00'
+          description: Total prize pool (sum of all entry fees)
+        platform_fee:
+          type: string
+          readOnly: true
+        max_participants:
+          type: integer
+          maximum: 1000
+          minimum: 2
+          default: 50
+        current_entries:
+          type: string
+          readOnly: true
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        milestone:
+          allOf:
+          - $ref: '#/components/schemas/MilestoneEnum'
+          description: |-
+            Total steps required to qualify for payout
+
+            * `50000` - Beginner - 50K steps
+            * `70000` - Intermediate - 70K steps
+            * `90000` - Advanced - 90K steps
+        invite_code:
+          type: string
+          description: Unique code for joining the challenge
+          maxLength: 10
+        is_private:
+          type: boolean
+          default: false
+          description: Private challenges require invite code
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedAdminUser:
+      type: object
+      description: Admin serializer for user data with extended fields
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        wallet_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          default: '0.00'
+        locked_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          default: '0.00'
+          description: Balance locked in active challenges
+        total_steps:
+          type: integer
+          readOnly: true
+          description: Lifetime total steps
+        challenges_won:
+          type: integer
+          readOnly: true
+          description: Number of challenges won
+        total_earned:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          description: Total lifetime earnings
+        current_streak:
+          type: integer
+          readOnly: true
+          description: Current daily active streak
+        is_active:
+          type: boolean
+          default: true
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
+        is_staff:
+          type: boolean
+          default: false
+          title: Staff status
+          description: Designates whether the user can log into this admin site.
+        device_platform:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/DevicePlatformEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        xp_profile:
+          type: string
+          readOnly: true
+        badges_count:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedAdminWithdrawal:
+      type: object
+      description: Admin serializer for withdrawal data
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+        user_username:
+          type: string
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        account_details:
+          type: string
+          description: Bank account or payment details
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status195Enum'
+          default: pending
+        processed_by:
+          type: integer
+          nullable: true
+        approved_by_username:
+          type: string
+          readOnly: true
+          nullable: true
+        admin_notes:
+          type: string
+          description: Internal admin notes
+        rejection_reason:
+          type: string
+          description: Reason for rejection (shown to user)
+        reference_number:
+          type: string
+          readOnly: true
+          description: Unique withdrawal reference
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        processed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+    PatchedUserProfile:
+      type: object
+      description: Serializer for user profile data
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        wallet_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        locked_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          description: Balance locked in active challenges
+        available_balance:
+          type: string
+          readOnly: true
+        device_bound:
+          type: string
+          readOnly: true
+        total_steps:
+          type: integer
+          readOnly: true
+          description: Lifetime total steps
+        challenges_won:
+          type: integer
+          readOnly: true
+          description: Number of challenges won
+        total_earned:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          description: Total lifetime earnings
+        current_streak:
+          type: integer
+          readOnly: true
+          description: Current daily active streak
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+    Status195Enum:
+      enum:
+      - pending
+      - approved
+      - rejected
+      - processing
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `approved` - Approved
+        * `rejected` - Rejected
+        * `processing` - Processing
+    Status645Enum:
+      enum:
+      - pending
+      - active
+      - completed
+      - cancelled
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `active` - Active
+        * `completed` - Completed
+        * `cancelled` - Cancelled
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+      required:
+      - access
+      - refresh
+    Transaction:
+      type: object
+      description: Serializer for wallet transactions
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+          nullable: true
+        user_username:
+          type: string
+          readOnly: true
+        type:
+          $ref: '#/components/schemas/TypeEnum'
+        type_display:
+          type: string
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          description: Positive for credits, negative for debits
+        balance_before:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        balance_after:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        description:
+          type: string
+          maxLength: 255
+        reference_id:
+          type: string
+          nullable: true
+          description: External transaction reference
+          maxLength: 100
+        metadata:
+          nullable: true
+          description: Additional transaction data
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount
+      - balance_after
+      - balance_before
+      - created_at
+      - description
+      - id
+      - type
+      - type_display
+      - user
+      - user_username
+    TypeEnum:
+      enum:
+      - deposit
+      - withdrawal
+      - challenge_entry
+      - payout
+      - fee
+      - refund
+      type: string
+      description: |-
+        * `deposit` - Deposit
+        * `withdrawal` - Withdrawal
+        * `challenge_entry` - Challenge Entry
+        * `payout` - Payout
+        * `fee` - Platform Fee
+        * `refund` - Refund
+    UserProfile:
+      type: object
+      description: Serializer for user profile data
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        wallet_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        locked_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          description: Balance locked in active challenges
+        available_balance:
+          type: string
+          readOnly: true
+        device_bound:
+          type: string
+          readOnly: true
+        total_steps:
+          type: integer
+          readOnly: true
+          description: Lifetime total steps
+        challenges_won:
+          type: integer
+          readOnly: true
+          description: Number of challenges won
+        total_earned:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          description: Total lifetime earnings
+        current_streak:
+          type: integer
+          readOnly: true
+          description: Current daily active streak
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - available_balance
+      - challenges_won
+      - created_at
+      - current_streak
+      - device_bound
+      - email
+      - id
+      - locked_balance
+      - total_earned
+      - total_steps
+      - username
+      - wallet_balance
+    Withdrawal:
+      type: object
+      description: Serializer for withdrawal requests
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        account_details:
+          type: string
+          description: Bank account or payment details
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status195Enum'
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        rejection_reason:
+          type: string
+          readOnly: true
+          description: Reason for rejection (shown to user)
+        reference_number:
+          type: string
+          readOnly: true
+          description: Unique withdrawal reference
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        processed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - account_details
+      - amount
+      - created_at
+      - id
+      - processed_at
+      - reference_number
+      - rejection_reason
+      - status
+      - status_display
+    XPEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+        event_type:
+          $ref: '#/components/schemas/EventTypeEnum'
+        event_type_display:
+          type: string
+          readOnly: true
+        amount:
+          type: integer
+          minimum: -10000
+        challenge:
+          type: integer
+          nullable: true
+        description:
+          type: string
+          maxLength: 255
+        metadata: {}
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        processed:
+          type: boolean
+          default: false
+      required:
+      - amount
+      - created_at
+      - event_type
+      - event_type_display
+      - id
+      - user
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
