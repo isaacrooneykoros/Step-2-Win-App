@@ -25,6 +25,7 @@ const StepsHistoryScreen = lazy(() => import('./screens/StepsHistoryScreen'));
 const StepsDayDetailScreen = lazy(() => import('./screens/StepsDayDetailScreen'));
 const SupportScreen = lazy(() => import('./screens/SupportScreen'));
 const ActiveSessionsScreen = lazy(() => import('./screens/ActiveSessionsScreen'));
+const LegalDocumentScreen = lazy(() => import('./screens/LegalDocumentScreen'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -103,6 +104,7 @@ export default function App() {
               <Route path="/profile" element={withSuspense(<ProfileScreen />)} />
               <Route path="/profile/sessions" element={withSuspense(<ActiveSessionsScreen />)} />
               <Route path="/support" element={withSuspense(<SupportScreen />)} />
+              <Route path="/legal/:slug" element={withSuspense(<LegalDocumentScreen />)} />
             </Route>
 
             {/* Fallback */}

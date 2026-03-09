@@ -13,6 +13,7 @@ const navItems = [
   { to: '/transactions', label: 'Transactions' },
   { to: '/withdrawals', label: 'Withdrawals' },
   { to: '/badges', label: 'Badges' },
+  { to: '/legal', label: 'Legal Docs' },
   { to: '/activity', label: 'Activity Logs' },
   { to: '/support', label: 'Support' },
   { to: '/settings', label: 'Settings' },

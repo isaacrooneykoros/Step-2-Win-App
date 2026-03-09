@@ -30,24 +30,24 @@ class PochiPayAPIError(Exception):
 
 def get_token() -> str:
     """
-    Returns a valid PochPay access token.
+    Returns a valid PochiPay access token.
     Reads from cache. If missing or expired, fetches a new one.
     Token expires every 3600s — we refresh at 3500s to stay ahead.
     """
     token = cache.get(TOKEN_CACHE_KEY)
-    if token:
+    if token:   
         return token
     return _refresh_token()
 
 
 def _refresh_token() -> str:
-    """Fetches a fresh token from PochPay and caches it."""
+    """Fetches a fresh token from PochiPay and caches it."""
     credential = (getattr(settings, 'POCHIPAY_EMAIL', '') or '').strip()
     password = (getattr(settings, 'POCHIPAY_PASSWORD', '') or '').strip()
 
     if not credential or not password:
         raise PochiPayAPIError(
-            'PochPay credentials missing. Set POCHIPAY_EMAIL and POCHIPAY_PASSWORD in backend/.env'
+            'PochiPay credentials missing. Set POCHIPAY_EMAIL and POCHIPAY_PASSWORD in backend/.env'
         )
 
     endpoint = f'{POCHIPAY_BASE}/account/token'

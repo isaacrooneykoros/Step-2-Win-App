@@ -4,7 +4,6 @@ Run: python manage.py seed_legal
 Seeds the database with the two core legal documents as drafts.
 Admin must review and publish them from the admin panel.
 """
-import os
 from django.core.management.base import BaseCommand
 from apps.legal.models import LegalDocument
 

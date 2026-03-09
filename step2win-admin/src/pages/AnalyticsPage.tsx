@@ -1,362 +1,366 @@
-import { useEffect, useMemo, useState } from 'react';
-import { adminApi } from '../services/adminApi';
-import type { AdminChallenge, AdminTransaction, AdminUser, AdminWithdrawal, DashboardOverview } from '../types/admin';
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
-import { TrendingUp, Users, DollarSign, Activity } from 'lucide-react';
-import { formatKES } from '../utils/currency';
+import { useEffect, useMemo, useState } from 'react'
+import { format } from 'date-fns'
+import {
+  ResponsiveContainer,
+  CartesianGrid,
+  Tooltip,
+  XAxis,
+  YAxis,
+  Radar,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  RadialBarChart,
+  RadialBar,
+  ScatterChart,
+  Scatter,
+  Treemap,
+  ComposedChart,
+  Bar,
+  Line,
+} from 'recharts'
+import { adminApi } from '../services/adminApi'
+import type {
+  AdminChallenge,
+  AdminTransaction,
+  AdminUser,
+  AdminWithdrawal,
+  DashboardOverview,
+} from '../types/admin'
+import { formatKES } from '../utils/currency'
 
-type Timeframe = 'week' | 'month' | 'all';
+type Timeframe = 'week' | 'month' | 'all'
+
+function transactionTypeLabel(type: string): string {
+  switch (type) {
+    case 'deposit':
+      return 'Wallet Top-ups'
+    case 'withdrawal':
+      return 'M-Pesa/Bank Withdrawals'
+    case 'challenge_entry':
+      return 'Challenge Entry Fees'
+    case 'payout':
+      return 'Challenge Payouts'
+    case 'fee':
+      return 'Platform Fees'
+    case 'refund':
+      return 'Refunds'
+    default:
+      return type.replace('_', ' ')
+  }
+}
+
+function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-surface-border bg-[#0C1117] p-4">
+      <h3 className="text-sm font-semibold text-ink-primary">{title}</h3>
+      {subtitle && <p className="mt-0.5 text-[11px] text-ink-muted">{subtitle}</p>}
+      <div className="mt-3">{children}</div>
+    </section>
+  )
+}
 
 export function AnalyticsPage() {
-  const [overview, setOverview] = useState<DashboardOverview | null>(null);
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [challenges, setChallenges] = useState<AdminChallenge[]>([]);
-  const [transactions, setTransactions] = useState<AdminTransaction[]>([]);
-  const [withdrawals, setWithdrawals] = useState<AdminWithdrawal[]>([]);
-  const [timeframe, setTimeframe] = useState<Timeframe>('month');
-  const [error, setError] = useState('');
+  const [overview, setOverview] = useState<DashboardOverview | null>(null)
+  const [users, setUsers] = useState<AdminUser[]>([])
+  const [challenges, setChallenges] = useState<AdminChallenge[]>([])
+  const [transactions, setTransactions] = useState<AdminTransaction[]>([])
+  const [withdrawals, setWithdrawals] = useState<AdminWithdrawal[]>([])
+  const [timeframe, setTimeframe] = useState<Timeframe>('month')
+  const [error, setError] = useState('')
 
   useEffect(() => {
     Promise.all([
-      adminApi.getOverview(),
+      adminApi.getOverview(timeframe === 'week' ? 7 : timeframe === 'month' ? 30 : 90),
       adminApi.getUsers(),
       adminApi.getChallenges(),
       adminApi.getTransactions(),
       adminApi.getWithdrawals(),
     ])
       .then(([overviewData, usersData, challengesData, transactionsData, withdrawalsData]) => {
-        setOverview(overviewData);
-        setUsers(usersData);
-        setChallenges(challengesData);
-        setTransactions(transactionsData);
-        setWithdrawals(withdrawalsData);
+        setError('')
+        setOverview(overviewData)
+        setUsers(usersData)
+        setChallenges(challengesData)
+        setTransactions(transactionsData)
+        setWithdrawals(withdrawalsData)
       })
-      .catch((err: Error) => setError(err.message));
-  }, []);
+      .catch((err: Error) => setError(err.message))
+  }, [timeframe])
 
-  const metrics = useMemo(() => {
-    const now = new Date();
-    const cutoff = new Date(now);
+  const days = timeframe === 'week' ? 7 : timeframe === 'month' ? 30 : 90
 
-    if (timeframe === 'week') {
-      cutoff.setDate(now.getDate() - 7);
-    } else if (timeframe === 'month') {
-      cutoff.setDate(now.getDate() - 30);
-    } else {
-      cutoff.setFullYear(2000);
-    }
+  const filteredTransactions = useMemo(() => {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - days)
+    return transactions.filter((tx) => new Date(tx.created_at) >= cutoff)
+  }, [transactions, days])
 
-    const filteredTx = transactions.filter((tx) => new Date(tx.created_at) >= cutoff);
-    const filteredW = withdrawals.filter((w) => new Date(w.created_at) >= cutoff);
+  const filteredWithdrawals = useMemo(() => {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - days)
+    return withdrawals.filter((w) => new Date(w.created_at) >= cutoff)
+  }, [withdrawals, days])
 
-    const totalVolume = filteredTx.reduce((sum, tx) => sum + Number(tx.amount), 0);
-    const deposits = filteredTx.filter((tx) => tx.type === 'deposit').reduce((sum, tx) => sum + Number(tx.amount), 0);
-    const payouts = filteredTx.filter((tx) => tx.type === 'payout').reduce((sum, tx) => sum + Number(tx.amount), 0);
-    const withdrawalsAmount = filteredW.reduce((sum, w) => sum + Number(w.amount), 0);
+  const summary = useMemo(() => {
+    const deposits = filteredTransactions
+      .filter((tx) => tx.type === 'deposit')
+      .reduce((sum, tx) => sum + Number(tx.amount), 0)
+    const payouts = filteredTransactions
+      .filter((tx) => tx.type === 'payout')
+      .reduce((sum, tx) => sum + Number(tx.amount), 0)
+    const withdrawalAmount = filteredWithdrawals.reduce((sum, w) => sum + Number(w.amount), 0)
 
-    const activeUsers = users.filter((u) => u.is_active).length;
-    const suspendedUsers = users.length - activeUsers;
-    const pendingChallenges = challenges.filter((c) => c.status === 'pending').length;
-    const activeChallenges = challenges.filter((c) => c.status === 'active').length;
-    const completedChallenges = challenges.filter((c) => c.status === 'completed').length;
+    const totalOrders = filteredTransactions.length + filteredWithdrawals.length
+    const successRate = filteredWithdrawals.length
+      ? Math.round((filteredWithdrawals.filter((w) => w.status === 'approved' || w.status === 'processing').length / filteredWithdrawals.length) * 100)
+      : 100
+
+    const activeUsers = users.filter((u) => u.is_active).length
+    const completedChallenges = challenges.filter((c) => c.status === 'completed').length
 
     return {
-      totalVolume,
       deposits,
       payouts,
-      withdrawalsAmount,
+      withdrawalAmount,
+      revenue: Math.max(0, deposits - payouts),
+      totalOrders,
+      successRate,
       activeUsers,
-      suspendedUsers,
-      pendingChallenges,
-      activeChallenges,
       completedChallenges,
-    };
-  }, [transactions, withdrawals, users, challenges, timeframe]);
+    }
+  }, [filteredTransactions, filteredWithdrawals, users, challenges])
 
-  // Chart data transformations
-  const transactionTrendData = useMemo(() => {
-    const now = new Date();
-    const days = timeframe === 'week' ? 7 : timeframe === 'month' ? 30 : 90;
-    const data: { date: string; deposits: number; payouts: number; withdrawals: number }[] = [];
+  const radarData = useMemo(() => {
+    const totalChallenges = Math.max(challenges.length, 1)
+    const totalUsers = Math.max(users.length, 1)
+    return [
+      { metric: 'User Growth', value: Math.min(100, Math.round((summary.activeUsers / totalUsers) * 100)) },
+      { metric: 'Cashflow', value: Math.min(100, Math.round((summary.deposits / Math.max(summary.deposits + summary.payouts, 1)) * 100)) },
+      { metric: 'Retention', value: Math.min(100, Math.round((overview?.users?.active_week ?? 0) / Math.max(overview?.users?.total ?? 1, 1) * 100)) },
+      { metric: 'Challenge Ops', value: Math.min(100, Math.round((summary.completedChallenges / totalChallenges) * 100)) },
+      { metric: 'Risk', value: Math.max(10, 100 - Math.round((filteredWithdrawals.filter((w) => w.status === 'rejected').length / Math.max(filteredWithdrawals.length, 1)) * 100)) },
+      { metric: 'Engagement', value: Math.min(100, Math.round(((overview?.users?.new_week ?? 0) / Math.max(totalUsers, 1)) * 100 * 8)) },
+    ]
+  }, [challenges.length, filteredWithdrawals, overview?.users?.active_week, overview?.users?.new_week, overview?.users?.total, summary.activeUsers, summary.completedChallenges, summary.deposits, summary.payouts, users.length])
 
-    for (let i = days - 1; i >= 0; i--) {
-      const targetDate = new Date(now);
-      targetDate.setDate(now.getDate() - i);
-      const dateStr = targetDate.toISOString().split('T')[0];
+  const transactionMixData = useMemo(() => {
+    const totals = filteredTransactions.reduce<Record<string, number>>((acc, tx) => {
+      const key = tx.type
+      acc[key] = (acc[key] ?? 0) + Number(tx.amount)
+      return acc
+    }, {})
+    const totalAmount = Object.values(totals).reduce((sum, value) => sum + value, 0)
+    const palette = ['#22C55E', '#06B6D4', '#F59E0B', '#EF4444', '#8B5CF6', '#818CF8']
 
-      const dayDeposits = transactions
-        .filter((tx) => tx.type === 'deposit' && tx.created_at.startsWith(dateStr))
-        .reduce((sum, tx) => sum + Number(tx.amount), 0);
+    return Object.entries(totals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([name, value], index) => ({
+        name: transactionTypeLabel(name),
+        value: totalAmount > 0 ? Number(((value / totalAmount) * 100).toFixed(1)) : 0,
+        fill: palette[index % palette.length],
+      }))
+  }, [filteredTransactions])
 
-      const dayPayouts = transactions
-        .filter((tx) => tx.type === 'payout' && tx.created_at.startsWith(dateStr))
-        .reduce((sum, tx) => sum + Number(tx.amount), 0);
+  const scatterData = useMemo(() => {
+    const points = filteredTransactions.slice(-18).map((tx, idx) => {
+      const amount = Number(tx.amount)
+      return {
+        x: idx + 1,
+        y: Number((amount / 1000).toFixed(2)),
+        z: tx.type === 'deposit' ? 180 : 120,
+      }
+    })
+    return points.length ? points : [{ x: 1, y: 0.1, z: 120 }]
+  }, [filteredTransactions])
 
-      const dayWithdrawals = withdrawals
-        .filter((w) => w.created_at.startsWith(dateStr))
-        .reduce((sum, w) => sum + Number(w.amount), 0);
+  const allocationTree = useMemo(() => {
+    const challengeEntry = filteredTransactions
+      .filter((tx) => tx.type === 'challenge_entry')
+      .reduce((sum, tx) => sum + Number(tx.amount), 0)
+    const fee = filteredTransactions
+      .filter((tx) => tx.type === 'fee')
+      .reduce((sum, tx) => sum + Number(tx.amount), 0)
 
-      data.push({
-        date: targetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        deposits: Number(dayDeposits.toFixed(2)),
-        payouts: Number(dayPayouts.toFixed(2)),
-        withdrawals: Number(dayWithdrawals.toFixed(2)),
-      });
+    return [
+      { name: 'Wallet Top-ups', size: Math.max(1, Number(summary.deposits.toFixed(2))), fill: '#22C55E' },
+      { name: 'Challenge Payouts', size: Math.max(1, Number(summary.payouts.toFixed(2))), fill: '#06B6D4' },
+      { name: 'M-Pesa/Bank Withdrawals', size: Math.max(1, Number(summary.withdrawalAmount.toFixed(2))), fill: '#F59E0B' },
+      { name: 'Challenge Entry Fees', size: Math.max(1, Number(challengeEntry.toFixed(2))), fill: '#EF4444' },
+      { name: 'Platform Fees', size: Math.max(1, Number(fee.toFixed(2))), fill: '#8B5CF6' },
+    ]
+  }, [filteredTransactions, summary.deposits, summary.payouts, summary.withdrawalAmount])
+
+  const trendData = useMemo(() => {
+    const orderByDay = filteredTransactions.reduce<Record<string, number>>((acc, tx) => {
+      const key = format(new Date(tx.created_at), 'MMM dd')
+      acc[key] = (acc[key] ?? 0) + 1
+      return acc
+    }, {})
+
+    if (overview?.revenue_chart?.length) {
+      return overview.revenue_chart.map((item) => ({
+        label: item.date,
+        revenue: Math.max(0, Number(item.deposits) - Number(item.withdrawals)),
+        orders: orderByDay[item.date] ?? 0,
+      }))
     }
 
-    return data;
-  }, [transactions, withdrawals, timeframe]);
+    const labels = Array.from({ length: days }, (_, index) => {
+      const date = new Date()
+      date.setDate(date.getDate() - (days - index - 1))
+      return format(date, 'MMM dd')
+    })
 
-  const userGrowthData = useMemo(() => {
-    const now = new Date();
-    const days = timeframe === 'week' ? 7 : timeframe === 'month' ? 30 : 90;
-    const data: { date: string; newUsers: number; totalUsers: number }[] = [];
-
-    for (let i = days - 1; i >= 0; i--) {
-      const targetDate = new Date(now);
-      targetDate.setDate(now.getDate() - i);
-      const dateStr = targetDate.toISOString().split('T')[0];
-
-      const newUsersCount = users.filter((u) => u.created_at?.startsWith(dateStr)).length;
-      const totalUsersUntilDate = users.filter((u) => new Date(u.created_at || '') <= targetDate).length;
-
-      data.push({
-        date: targetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        newUsers: newUsersCount,
-        totalUsers: totalUsersUntilDate,
-      });
-    }
-
-    return data;
-  }, [users, timeframe]);
-
-  const challengeStatusData = useMemo(() => {
-    return [
-      { name: 'Pending', value: metrics.pendingChallenges, color: '#fbbf24' },
-      { name: 'Active', value: metrics.activeChallenges, color: '#00f5e9' },
-      { name: 'Completed', value: metrics.completedChallenges, color: '#22c55e' },
-      { name: 'Cancelled', value: challenges.filter((c) => c.status === 'cancelled').length, color: '#ef4444' },
-    ];
-  }, [metrics, challenges]);
-
-  const revenueBreakdownData = useMemo(() => {
-    return [
-      { category: 'Deposits', amount: metrics.deposits },
-      { category: 'Payouts', amount: metrics.payouts },
-      { category: 'Withdrawals', amount: metrics.withdrawalsAmount },
-    ];
-  }, [metrics]);
+    return labels.map((label) => ({ label, revenue: 0, orders: orderByDay[label] ?? 0 }))
+  }, [days, filteredTransactions, overview])
 
   if (error) {
-    return <p className="error">{error}</p>;
+    return <p className="text-down">{error}</p>
   }
 
   if (!overview) {
-    return <p>Loading analytics...</p>;
+    return <p className="text-ink-secondary">Loading analytics...</p>
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 600, color: '#fff' }}>Analytics Dashboard</h1>
-        <div className="filters" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <label htmlFor="timeframe" style={{ color: '#64748b' }}>Timeframe</label>
-          <select 
-            id="timeframe" 
-            value={timeframe} 
-            onChange={(event) => setTimeframe(event.target.value as Timeframe)}
-            style={{ 
-              padding: '8px 12px', 
-              borderRadius: '6px', 
-              background: '#1a2332', 
-              border: '1px solid #2d3748',
-              color: '#fff',
-              cursor: 'pointer'
-            }}
-          >
-            <option value="week">Last 7 days</option>
-            <option value="month">Last 30 days</option>
-            <option value="all">All time</option>
-          </select>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-ink-primary">Charts</h1>
+          <p className="text-xs text-ink-muted">Operational analytics based on live Step2Win activity</p>
+        </div>
+        <div className="flex items-center gap-1 rounded-xl border border-surface-border bg-[#0C1117] p-1">
+          {([
+            { key: 'week', label: '7D' },
+            { key: 'month', label: '30D' },
+            { key: 'all', label: '90D' },
+          ] as const).map((option) => (
+            <button
+              key={option.key}
+              onClick={() => setTimeframe(option.key)}
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold transition"
+              style={{
+                background: timeframe === option.key ? '#151A25' : 'transparent',
+                color: timeframe === option.key ? '#F0F2F8' : '#7B82A0',
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Key Metrics Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
-        <article className="stat-card" style={{ background: 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <h3 style={{ fontSize: '14px', color: '#93c5fd', marginBottom: '8px' }}>Transaction Volume</h3>
-              <p style={{ fontSize: '28px', fontWeight: 700, color: '#fff' }}>{formatKES(metrics.totalVolume)}</p>
-            </div>
-            <DollarSign size={32} color="#60a5fa" />
-          </div>
-        </article>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="xl:col-span-2">
+          <Card title="Team Skills Assessment" subtitle="Current KPI readiness across key areas">
+            <ResponsiveContainer width="100%" height={230}>
+              <RadarChart data={radarData}>
+                <PolarGrid stroke="#1F2937" />
+                <PolarAngleAxis dataKey="metric" tick={{ fill: '#7B82A0', fontSize: 11 }} />
+                <PolarRadiusAxis domain={[0, 100]} tick={{ fill: '#3D4260', fontSize: 10 }} />
+                <Radar name="Score" dataKey="value" stroke="#22C55E" fill="#22C55E" fillOpacity={0.35} />
+              </RadarChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
 
-        <article className="stat-card" style={{ background: 'linear-gradient(135deg, #065f46 0%, #047857 100%)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <h3 style={{ fontSize: '14px', color: '#6ee7b7', marginBottom: '8px' }}>Deposits</h3>
-              <p style={{ fontSize: '28px', fontWeight: 700, color: '#fff' }}>{formatKES(metrics.deposits)}</p>
-            </div>
-            <TrendingUp size={32} color="#34d399" />
+        <Card title="Transaction Mix" subtitle="Share by value across wallet and challenge flows">
+          <ResponsiveContainer width="100%" height={200}>
+            <RadialBarChart data={transactionMixData} innerRadius="20%" outerRadius="90%" barSize={10}>
+              <RadialBar background dataKey="value" cornerRadius={8} />
+              <Tooltip
+                contentStyle={{ background: '#191C28', border: '1px solid #21263A', borderRadius: 10 }}
+                formatter={(value: unknown, name: unknown) => [`${Number(value ?? 0)}%`, String(name ?? '')]}
+              />
+            </RadialBarChart>
+          </ResponsiveContainer>
+          <div className="mt-1 space-y-1">
+            {transactionMixData.map((entry) => (
+              <div key={entry.name} className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-2 text-ink-secondary">
+                  <span className="h-2 w-2 rounded-full" style={{ background: entry.fill }} />
+                  {entry.name}
+                </span>
+                <span className="mono text-ink-primary">{entry.value}%</span>
+              </div>
+            ))}
           </div>
-        </article>
-
-        <article className="stat-card" style={{ background: 'linear-gradient(135deg, #7c2d12 0%, #9a3412 100%)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <h3 style={{ fontSize: '14px', color: '#fca5a5', marginBottom: '8px' }}>Payouts</h3>
-              <p style={{ fontSize: '28px', fontWeight: 700, color: '#fff' }}>{formatKES(metrics.payouts)}</p>
-            </div>
-            <TrendingUp size={32} color="#f87171" style={{ transform: 'rotate(180deg)' }} />
-          </div>
-        </article>
-
-        <article className="stat-card" style={{ background: 'linear-gradient(135deg, #0e7490 0%, #0891b2 100%)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <h3 style={{ fontSize: '14px', color: '#67e8f9', marginBottom: '8px' }}>Active Users</h3>
-              <p style={{ fontSize: '28px', fontWeight: 700, color: '#fff' }}>{metrics.activeUsers}</p>
-            </div>
-            <Users size={32} color="#22d3ee" />
-          </div>
-        </article>
+        </Card>
       </div>
 
-      {/* Transaction Trends Chart */}
-      <div className="stat-card">
-        <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '20px', color: '#fff' }}>
-          <Activity size={20} style={{ display: 'inline', marginRight: '8px', verticalAlign: 'middle' }} />
-          Transaction Trends
-        </h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <AreaChart data={transactionTrendData}>
-            <defs>
-              <linearGradient id="colorDeposits" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
-                <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
-              </linearGradient>
-              <linearGradient id="colorPayouts" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
-                <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-              </linearGradient>
-              <linearGradient id="colorWithdrawals" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.3}/>
-                <stop offset="95%" stopColor="#fbbf24" stopOpacity={0}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-            <XAxis dataKey="date" stroke="#64748b" />
-            <YAxis stroke="#64748b" />
-            <Tooltip 
-              contentStyle={{ background: '#1a2332', border: '1px solid #2d3748', borderRadius: '6px' }}
-              labelStyle={{ color: '#fff' }}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="xl:col-span-2">
+          <Card title="Transaction Size Distribution" subtitle="Recent transaction amounts (KSh thousands)">
+            <ResponsiveContainer width="100%" height={200}>
+              <ScatterChart>
+                <CartesianGrid stroke="#1F2937" strokeDasharray="3 3" />
+                <XAxis dataKey="x" tick={{ fill: '#7B82A0', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis dataKey="y" tick={{ fill: '#7B82A0', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  cursor={{ strokeDasharray: '3 3' }}
+                  contentStyle={{ background: '#191C28', border: '1px solid #21263A', borderRadius: 10 }}
+                  formatter={(value: unknown) => [`KSh ${Number(value ?? 0).toFixed(2)}k`, 'Value']}
+                />
+                <Scatter data={scatterData} fill="#22C55E" />
+              </ScatterChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
+
+        <Card title="Cashflow Allocation" subtitle="Breakdown of live KSh movement by category">
+          <ResponsiveContainer width="100%" height={200}>
+            <Treemap data={allocationTree} dataKey="size" stroke="#0C1117" fill="#22C55E" />
+          </ResponsiveContainer>
+          <div className="mt-1 grid grid-cols-2 gap-1">
+            {allocationTree.map((item) => (
+              <p key={item.name} className="text-[11px] text-ink-secondary">
+                {item.name}: <span className="mono text-ink-primary">{formatKES(item.size)}</span>
+              </p>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      <Card title="Net Margin & Transaction Trend" subtitle="Derived from deposits, payouts, withdrawals and order volume">
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart data={trendData}>
+            <CartesianGrid stroke="#1F2937" strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: '#7B82A0', fontSize: 11 }} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="left" tick={{ fill: '#7B82A0', fontSize: 11 }} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="right" orientation="right" tick={{ fill: '#7B82A0', fontSize: 11 }} axisLine={false} tickLine={false} />
+            <Tooltip
+              contentStyle={{ background: '#191C28', border: '1px solid #21263A', borderRadius: 10 }}
+              formatter={(value: unknown, name: unknown) => {
+                if (name === 'revenue') return [formatKES(Number(value ?? 0)), 'Net Platform Margin']
+                return [String(value ?? 0), 'Transactions']
+              }}
             />
-            <Legend />
-            <Area type="monotone" dataKey="deposits" stroke="#22c55e" fillOpacity={1} fill="url(#colorDeposits)" />
-            <Area type="monotone" dataKey="payouts" stroke="#ef4444" fillOpacity={1} fill="url(#colorPayouts)" />
-            <Area type="monotone" dataKey="withdrawals" stroke="#fbbf24" fillOpacity={1} fill="url(#colorWithdrawals)" />
-          </AreaChart>
+            <Bar yAxisId="right" dataKey="orders" fill="#06B6D4" radius={[4, 4, 0, 0]} />
+            <Line yAxisId="left" type="monotone" dataKey="revenue" stroke="#22C55E" strokeWidth={2.2} dot={false} />
+          </ComposedChart>
         </ResponsiveContainer>
-      </div>
-
-      {/* Charts Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '16px' }}>
-        {/* User Growth Chart */}
-        <div className="stat-card">
-          <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '20px', color: '#fff' }}>User Growth</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={userGrowthData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="date" stroke="#64748b" />
-              <YAxis stroke="#64748b" />
-              <Tooltip 
-                contentStyle={{ background: '#1a2332', border: '1px solid #2d3748', borderRadius: '6px' }}
-                labelStyle={{ color: '#fff' }}
-              />
-              <Legend />
-              <Line type="monotone" dataKey="newUsers" stroke="#00f5e9" strokeWidth={2} name="New Users" />
-              <Line type="monotone" dataKey="totalUsers" stroke="#60a5fa" strokeWidth={2} name="Total Users" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Challenge Status Distribution */}
-        <div className="stat-card">
-          <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '20px', color: '#fff' }}>Challenge Distribution</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={challengeStatusData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, value }) => `${name}: ${value}`}
-                outerRadius={100}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {challengeStatusData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip 
-                contentStyle={{ background: '#1a2332', border: '1px solid #2d3748', borderRadius: '6px' }}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Revenue Breakdown */}
-        <div className="stat-card">
-          <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '20px', color: '#fff' }}>Revenue Breakdown</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={revenueBreakdownData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="category" stroke="#64748b" />
-              <YAxis stroke="#64748b" />
-              <Tooltip 
-                contentStyle={{ background: '#1a2332', border: '1px solid #2d3748', borderRadius: '6px' }}
-                labelStyle={{ color: '#fff' }}
-              />
-              <Bar dataKey="amount" fill="#00f5e9" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Additional Metrics */}
-        <div className="stat-card">
-          <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '20px', color: '#fff' }}>Additional Metrics</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#1a2332', borderRadius: '6px' }}>
-              <span style={{ color: '#64748b' }}>Pending Challenges</span>
-              <span style={{ color: '#fbbf24', fontWeight: 600 }}>{metrics.pendingChallenges}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#1a2332', borderRadius: '6px' }}>
-              <span style={{ color: '#64748b' }}>Active Challenges</span>
-              <span style={{ color: '#00f5e9', fontWeight: 600 }}>{metrics.activeChallenges}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#1a2332', borderRadius: '6px' }}>
-              <span style={{ color: '#64748b' }}>Completed Challenges</span>
-              <span style={{ color: '#22c55e', fontWeight: 600 }}>{metrics.completedChallenges}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#1a2332', borderRadius: '6px' }}>
-              <span style={{ color: '#64748b' }}>Suspended Users</span>
-              <span style={{ color: '#ef4444', fontWeight: 600 }}>{metrics.suspendedUsers}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#1a2332', borderRadius: '6px' }}>
-              <span style={{ color: '#64748b' }}>Weekly Active Users</span>
-              <span style={{ color: '#60a5fa', fontWeight: 600 }}>{overview.users.active_week}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#1a2332', borderRadius: '6px' }}>
-              <span style={{ color: '#64748b' }}>New Users (Week)</span>
-              <span style={{ color: '#34d399', fontWeight: 600 }}>{overview.users.new_week}</span>
-            </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+          <div className="rounded-lg border border-surface-border bg-surface-base p-2">
+            <p className="text-ink-muted">Revenue</p>
+            <p className="mono font-semibold text-ink-primary">{formatKES(summary.revenue)}</p>
+          </div>
+          <div className="rounded-lg border border-surface-border bg-surface-base p-2">
+            <p className="text-ink-muted">Wallet Top-ups</p>
+            <p className="mono font-semibold text-up">{formatKES(summary.deposits)}</p>
+          </div>
+          <div className="rounded-lg border border-surface-border bg-surface-base p-2">
+            <p className="text-ink-muted">Total Transactions</p>
+            <p className="mono font-semibold text-ink-primary">{summary.totalOrders.toLocaleString()}</p>
+          </div>
+          <div className="rounded-lg border border-surface-border bg-surface-base p-2">
+            <p className="text-ink-muted">Withdrawal Approval Rate</p>
+            <p className="mono font-semibold text-up">{summary.successRate}%</p>
           </div>
         </div>
-      </div>
+      </Card>
     </div>
-  );
+  )
 }

@@ -46,8 +46,6 @@ export default function ProfileScreen() {
   const lastStepsUpdateAt = useStepsSyncStore((state) => state.lastStepsUpdateAt);
   const { syncHealth, isSyncing } = useHealthSync();
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
-  const [showTermsModal, setShowTermsModal] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
     current_password: '',
     new_password: '',
@@ -435,8 +433,8 @@ export default function ProfileScreen() {
             { icon: Key, label: 'Change Password', iconColor: 'text-accent-blue', bgColor: 'bg-tint-blue', onClick: () => setShowPasswordModal(true) },
             { icon: Smartphone, label: 'Active Devices', iconColor: 'text-accent-purple', bgColor: 'bg-tint-purple', onClick: () => navigate('/profile/sessions') },
             { icon: LifeBuoy, label: 'Support Center', iconColor: 'text-accent-green', bgColor: 'bg-tint-green', onClick: () => navigate('/support') },
-            { icon: Shield, label: 'Privacy Policy', iconColor: 'text-accent-purple', bgColor: 'bg-tint-purple', onClick: () => setShowPrivacyModal(true) },
-            { icon: FileText, label: 'Terms of Service', iconColor: 'text-accent-purple', bgColor: 'bg-tint-purple', onClick: () => setShowTermsModal(true) },
+            { icon: Shield, label: 'Privacy Policy', iconColor: 'text-accent-purple', bgColor: 'bg-tint-purple', onClick: () => navigate('/legal/privacy-policy') },
+            { icon: FileText, label: 'Terms of Service', iconColor: 'text-accent-purple', bgColor: 'bg-tint-purple', onClick: () => navigate('/legal/terms-and-conditions') },
             { icon: LogOut, label: 'Logout', iconColor: 'text-accent-red', bgColor: 'bg-tint-red', onClick: handleLogout, danger: true },
           ].map(({ icon: Icon, label, iconColor, bgColor, onClick, danger }, i, arr) => (
             <button
@@ -516,53 +514,6 @@ export default function ProfileScreen() {
             {changePasswordMutation.isPending ? 'Updating...' : 'Update'}
           </button>
         </div>
-      </BaseModal>
-
-      {/* ── PRIVACY MODAL ────────────────────────── */}
-      <BaseModal open={showPrivacyModal} onClose={() => setShowPrivacyModal(false)}>
-        <h2 className="text-2xl font-black text-text-primary mb-2">Privacy Policy</h2>
-        <div className="space-y-3 text-sm text-text-muted max-h-96 overflow-y-auto">
-          <p>
-            <strong className="text-text-primary">Last updated:</strong> March 1, 2026
-          </p>
-          <p>
-            Step2Win is committed to protecting your privacy. This policy explains how we collect, use, and safeguard your information when using our platform.
-          </p>
-          <h3 className="text-text-primary font-bold mt-4">Information We Collect</h3>
-          <p>We collect account details, step data, challenge activity, and payment data needed to operate the app.</p>
-          <h3 className="text-text-primary font-bold mt-4">How We Use Information</h3>
-          <p>We use your data for challenge tracking, wallet operations, and account-related communication.</p>
-          <h3 className="text-text-primary font-bold mt-4">Data Security</h3>
-          <p>We apply security controls, but no internet transmission method is fully risk-free.</p>
-        </div>
-        <button
-          onClick={() => setShowPrivacyModal(false)}
-          className="w-full btn-primary py-3 rounded-2xl mt-6"
-        >
-          Got it
-        </button>
-      </BaseModal>
-
-      {/* ── TERMS MODAL ────────────────────────── */}
-      <BaseModal open={showTermsModal} onClose={() => setShowTermsModal(false)}>
-        <h2 className="text-2xl font-black text-text-primary mb-2">Terms of Service</h2>
-        <div className="space-y-3 text-sm text-text-muted max-h-96 overflow-y-auto">
-          <p>
-            By using Step2Win, you agree to fair challenge participation, accurate account details, and responsible wallet usage.
-          </p>
-          <h3 className="text-text-primary font-bold mt-4">Challenge Rules</h3>
-          <p>Entry fees are locked during active challenges. Payouts are distributed based on qualification and rank.</p>
-          <h3 className="text-text-primary font-bold mt-4">Account Responsibility</h3>
-          <p>You are responsible for account security and all activity under your credentials.</p>
-          <h3 className="text-text-primary font-bold mt-4">Wallet & Withdrawals</h3>
-          <p>Withdrawals may require review and can be delayed for verification and fraud prevention.</p>
-        </div>
-        <button
-          onClick={() => setShowTermsModal(false)}
-          className="w-full btn-primary py-3 rounded-2xl mt-6"
-        >
-          Accept
-        </button>
       </BaseModal>
     </div>
   );
