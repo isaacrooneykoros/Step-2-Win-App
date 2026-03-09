@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { Layout } from './components/Layout';
-import { OverviewPage } from './pages/OverviewPage';
+import { AdminLayout } from './components/AdminLayout';
+import { DashboardPage } from './pages/DashboardPage';
 import { UsersPage } from './pages/UsersPage';
 import { ChallengesPage } from './pages/ChallengesPage';
 import { TransactionsPage } from './pages/TransactionsPage';
@@ -15,6 +15,7 @@ import { SupportPage } from './pages/SupportPage';
 import { AdminRouteGuard } from './components/AdminRouteGuard';
 import { AdminLoginPage } from './pages/AdminLoginPage';
 import { AdminRegisterPage } from './pages/AdminRegisterPage';
+import LegalDocumentsPage from './pages/LegalDocumentsPage';
 
 import { AdminFraudPage } from './pages/AdminFraudPage';
 
@@ -23,9 +24,9 @@ function App() {
     <Routes>
       <Route path="/auth/login" element={<AdminLoginPage />} />
       <Route path="/auth/register" element={<AdminRegisterPage />} />
-      <Route path="/" element={<Layout />}>
+      <Route path="/" element={<AdminLayout />}>
         <Route element={<AdminRouteGuard />}>
-          <Route index element={<OverviewPage />} />
+          <Route index element={<DashboardPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="challenges" element={<ChallengesPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
@@ -38,6 +39,7 @@ function App() {
           <Route path="activity" element={<ActivityLogsPage />} />
           <Route path="support" element={<SupportPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="legal" element={<LegalDocumentsPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -201,8 +201,9 @@ export const adminApi = {
   },
   clearAuthSession,
 
-  // Overview & Dashboard
-  getOverview: () => request<DashboardOverview>('/api/admin/dashboard/overview/'),
+  // Overview & Dashboard (enhanced for Vault UI)
+  getOverview: (days: number = 7) => 
+    request<DashboardOverview>(`/api/admin/dashboard/overview/?days=${days}`),
 
   // Users Management
   getUsers: async () => unwrapList(await request<AdminUser[] | { results?: AdminUser[] }>('/api/admin/users/')),

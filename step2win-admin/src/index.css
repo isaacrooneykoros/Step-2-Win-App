@@ -1,188 +1,39 @@
-:root {
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  color: #e7eef9;
-  background: #091120;
-}
+@import 'tailwindcss';
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-* {
-  box-sizing: border-box;
-}
+@config '../tailwind.config.js';
+
+*, *::before, *::after { box-sizing: border-box; }
 
 body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  background-color: #0E1016;
+  color: #F0F2F8;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   margin: 0;
   min-width: 320px;
-  background: #091120;
 }
 
 #root {
   min-height: 100vh;
 }
 
-.app-shell {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  min-height: 100vh;
-}
+/* Monospace financial numbers */
+.mono { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
 
-.sidebar {
-  background: #050a14;
-  border-right: 1px solid rgba(59, 139, 255, 0.18);
-  padding: 24px 16px;
-}
+/* Scrollbar */
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #21263A; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #2E3450; }
 
-.brand {
-  margin: 0 0 24px;
-  font-size: 1.1rem;
-  color: #00f5e9;
-}
+/* Transitions */
+.sidebar-transition { transition: width 280ms cubic-bezier(0.4,0,0.2,1); }
+.fade-in { animation: fadeIn 200ms ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
 
-.nav-link {
-  display: block;
-  color: #8ba3c7;
-  text-decoration: none;
-  border-radius: 10px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-}
-
-.nav-link.active,
-.nav-link:hover {
-  background: rgba(0, 245, 233, 0.08);
-  color: #f0f6ff;
-}
-
-.session-box {
-  margin-top: 24px;
-  display: grid;
-  gap: 8px;
-}
-
-.session-label {
-  font-size: 0.8rem;
-  color: #8ba3c7;
-  margin: 0;
-}
-
-.session-user {
-  margin: 0;
-  font-weight: 700;
-  color: #f0f6ff;
-}
-
-.session-email {
-  margin: 0;
-  font-size: 0.85rem;
-  color: #8ba3c7;
-}
-
-.session-box button,
-button {
-  background: #00f5e9;
-  border: 0;
-  border-radius: 8px;
-  padding: 8px 12px;
-  color: #04111f;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.content {
-  padding: 20px;
-}
-
-.topbar h2 {
-  margin: 0 0 16px;
-}
-
-.panel {
-  background: #0d1929;
-  border: 1px solid rgba(59, 139, 255, 0.18);
-  border-radius: 14px;
-  padding: 16px;
-}
-
-.grid-cards {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-}
-
-.stat-card {
-  border: 1px solid rgba(59, 139, 255, 0.18);
-  border-radius: 12px;
-  background: #111f35;
-  padding: 14px;
-}
-
-.stat-card h3 {
-  margin: 0;
-  font-size: 0.9rem;
-  color: #8ba3c7;
-}
-
-.stat-card p {
-  margin: 8px 0 0;
-  font-size: 1.5rem;
-  color: #f0f6ff;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.table th,
-.table td {
-  text-align: left;
-  border-bottom: 1px solid rgba(59, 139, 255, 0.18);
-  padding: 10px;
-}
-
-.table th {
-  color: #8ba3c7;
-  font-weight: 600;
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-}
-
-.badge-grid {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-}
-
-.badge-card {
-  border: 1px solid;
-  background: #111f35;
-  border-radius: 12px;
-  padding: 14px;
-}
-
-.badge-head {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.badge-head h3 {
-  margin: 0;
-}
-
-.badge-icon {
-  font-size: 1.5rem;
-}
-
-.badge-meta {
-  margin-top: 12px;
-  display: flex;
-  justify-content: space-between;
-  color: #8ba3c7;
-  font-size: 0.85rem;
-}
-
+/* Legacy classes for backward compatibility */
 .error {
   color: #ff7b8b;
 }

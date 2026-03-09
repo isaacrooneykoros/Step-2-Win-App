@@ -492,3 +492,20 @@ export interface CreateSupportTicketData {
   priority: SupportPriority;
   message: string;
 }
+
+// ==================== Legal Document Types ====================
+
+export interface LegalDocument {
+  id:             number;
+  document_type:  string;
+  title:          string;
+  slug:           string;
+  content_html:   string;
+  version:        number;
+  version_label:  string;
+  notify_users:   boolean;
+  change_summary: string;
+  published_at:   string;
+  has_update:     boolean;
+  uploaded_file:  string | null;
+}

@@ -656,49 +656,239 @@ class AdminDashboardViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def overview(self, request):
-        """Get complete dashboard overview"""
+        """Get complete dashboard overview with enhanced metrics for Vault-style UI"""
+        from django.db.models import Count
+        from django.db.models.functions import TruncDate
+        from collections import defaultdict
+        from datetime import date
+        
+        days_param = int(request.query_params.get('days', 7))
         now = timezone.now()
+        start = now - timedelta(days=days_param)
+        prev_start = start - timedelta(days=days_param)  # Previous period for trends
+
+        # ═══════════════════════════════════════════════════════════════════
+        # USER METRICS
+        # ═══════════════════════════════════════════════════════════════════
+        total_users = User.objects.count()
+        users_current = User.objects.filter(created_at__gte=start).count()
+        users_previous = User.objects.filter(created_at__gte=prev_start, created_at__lt=start).count()
+        user_growth_pct = ((users_current - users_previous) / max(users_previous, 1)) * 100 if users_previous > 0 else 0
+        
+        # User sparkline (last 7 days)
+        user_spark_qs = (
+            User.objects.filter(created_at__gte=now - timedelta(days=7))
+            .annotate(d=TruncDate('created_at'))
+            .values('d')
+            .annotate(count=Count('id'))
+            .order_by('d')
+        )
+        user_spark = [entry['count'] for entry in user_spark_qs] if user_spark_qs else []
+        # Pad to 7 days if needed
+        user_spark = (user_spark + [0] * 7)[:7]
+        
+        # Recent users (last 6)
+        recent_users_qs = User.objects.order_by('-created_at')[:6]
+        recent_users = [
+            {
+                'id': u.id,
+                'username': u.username,
+                'email': u.email,
+                'joined': u.created_at.strftime('%b %d') if u.created_at else 'N/A',
+            }
+            for u in recent_users_qs
+        ]
+
+        # ═══════════════════════════════════════════════════════════════════
+        # REVENUE METRICS
+        # ═══════════════════════════════════════════════════════════════════
+        deposits_current = WalletTransaction.objects.filter(
+            type='deposit', created_at__gte=start
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        
+        deposits_previous = WalletTransaction.objects.filter(
+            type='deposit', created_at__gte=prev_start, created_at__lt=start
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        
+        revenue_growth_pct = (
+            ((deposits_current - deposits_previous) / deposits_previous) * 100
+            if deposits_previous > 0 else 0
+        )
+        
+        # Platform revenue = 10% of deposits (or adjust as needed)
+        revenue_kes = float(deposits_current) * 0.10
+        
+        # Revenue sparkline (last 7 days)
+        revenue_spark_qs = (
+            WalletTransaction.objects.filter(
+                type='deposit', created_at__gte=now - timedelta(days=7)
+            )
+            .annotate(d=TruncDate('created_at'))
+            .values('d')
+            .annotate(total=Sum('amount'))
+            .order_by('d')
+        )
+        revenue_spark = [float(entry['total']) for entry in revenue_spark_qs] if revenue_spark_qs else []
+        revenue_spark = (revenue_spark + [0] * 7)[:7]
+
+        # ═══════════════════════════════════════════════════════════════════
+        # CHALLENGE METRICS
+        # ═══════════════════════════════════════════════════════════════════
+        challenges_active = Challenge.objects.filter(status='active').count()
+        challenges_pending = Challenge.objects.filter(status='pending').count()
+        challenges_completed = Challenge.objects.filter(status='completed').count()
+        
+        # Challenge sparkline
+        challenge_spark_qs = (
+            Challenge.objects.filter(created_at__gte=now - timedelta(days=7))
+            .annotate(d=TruncDate('created_at'))
+            .values('d')
+            .annotate(count=Count('id'))
+            .order_by('d')
+        )
+        challenge_spark = [entry['count'] for entry in challenge_spark_qs] if challenge_spark_qs else []
+        challenge_spark = (challenge_spark + [0] * 7)[:7]
+        
+        challenge_growth_pct = 5.2  # Mock calculation - enhance as needed
+
+        # ═══════════════════════════════════════════════════════════════════
+        # WITHDRAWAL METRICS
+        # ═══════════════════════════════════════════════════════════════════
+        pending_withdrawals_qs = Withdrawal.objects.filter(status='pending')
+        pending_withdrawals_count = pending_withdrawals_qs.count()
+        pending_withdrawals_amount = pending_withdrawals_qs.aggregate(
+            total=Sum('amount')
+        )['total'] or Decimal('0.00')
+        
+        # Pending withdrawals list (top 5 for dashboard)
+        pending_list = []
+        for w in pending_withdrawals_qs.order_by('-created_at')[:5]:
+            pending_list.append({
+                'id': w.id,
+                'username': w.user.username,
+                'amount': float(w.amount),
+                'phone': w.account_details,  # Adjust field name as needed
+                'created_at': w.created_at.strftime('%b %d, %H:%M') if w.created_at else 'N/A',
+            })
+
+        # ═══════════════════════════════════════════════════════════════════
+        # CHART DATA
+        # ═══════════════════════════════════════════════════════════════════
+        
+        # Revenue chart (deposits vs withdrawals per day)
+        revenue_by_day = defaultdict(lambda: {'deposits': 0, 'withdrawals': 0})
+        
+        deposits_daily = (
+            WalletTransaction.objects.filter(type='deposit', created_at__gte=start)
+            .annotate(d=TruncDate('created_at'))
+            .values('d')
+            .annotate(total=Sum('amount'))
+        )
+        for entry in deposits_daily:
+            day_str = entry['d'].strftime('%b %d')
+            revenue_by_day[day_str]['deposits'] = float(entry['total'])
+        
+        withdrawals_daily = (
+            WalletTransaction.objects.filter(type='withdrawal', created_at__gte=start)
+            .annotate(d=TruncDate('created_at'))
+            .values('d')
+            .annotate(total=Sum('amount'))
+        )
+        for entry in withdrawals_daily:
+            day_str = entry['d'].strftime('%b %d')
+            revenue_by_day[day_str]['withdrawals'] = float(entry['total'])
+        
+        revenue_chart = [
+            {'date': k, 'deposits': v['deposits'], 'withdrawals': v['withdrawals']}
+            for k, v in sorted(revenue_by_day.items())
+        ]
+        
+        # User signup chart
+        user_chart_qs = (
+            User.objects.filter(created_at__gte=start)
+            .annotate(d=TruncDate('created_at'))
+            .values('d')
+            .annotate(users=Count('id'))
+            .order_by('d')
+        )
+        user_chart = [
+            {'date': entry['d'].strftime('%b %d'), 'users': entry['users']}
+            for entry in user_chart_qs
+        ]
+        
+        # Steps chart - aggregate from HealthRecord
+        step_chart = []
+        for i in range(days_param):
+            day = (now - timedelta(days=days_param - i - 1)).date()
+            # Aggregate steps from HealthRecord (field name is 'steps')
+            total_steps = HealthRecord.objects.filter(date=day).aggregate(
+                total=Sum('steps')
+            )['total'] or 0
+            step_chart.append({
+                'date': day.strftime('%b %d'),
+                'steps': total_steps,
+            })
+
+        # ═══════════════════════════════════════════════════════════════════
+        # GAMIFICATION METRICS (legacy support)
+        # ═══════════════════════════════════════════════════════════════════
         week_ago = now - timedelta(days=7)
         month_ago = now - timedelta(days=30)
-
-        # User metrics
-        total_users = User.objects.count()
+        
         active_users_week = HealthRecord.objects.filter(
             date__gte=week_ago.date()
         ).values('user').distinct().count()
         
-        new_users_week = User.objects.filter(
-            created_at__gte=week_ago
-        ).count()
-
-        # Financial metrics
+        new_users_week = User.objects.filter(created_at__gte=week_ago).count()
+        
         week_deposits = WalletTransaction.objects.filter(
-            type='deposit',
-            created_at__gte=week_ago
+            type='deposit', created_at__gte=week_ago
         ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
         
         week_withdrawals = WalletTransaction.objects.filter(
-            type='withdrawal',
-            created_at__gte=week_ago
+            type='withdrawal', created_at__gte=week_ago
         ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
-
-        pending_withdrawals = Withdrawal.objects.filter(
-            status='pending'
-        ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
-
-        # Challenge metrics
-        live_challenges = Challenge.objects.filter(status='active').count()
-        completed_challenges = Challenge.objects.filter(
-            status='completed',
-            end_date__gte=month_ago.date()
-        ).count()
-
-        # XP metrics
+        
         total_xp_distributed = XPEvent.objects.filter(
             created_at__gte=week_ago
         ).aggregate(Sum('amount'))['amount__sum'] or 0
+        
+        completed_challenges_month = Challenge.objects.filter(
+            status='completed', end_date__gte=month_ago.date()
+        ).count()
 
+        # ═══════════════════════════════════════════════════════════════════
+        # RESPONSE
+        # ═══════════════════════════════════════════════════════════════════
         return Response({
+            # Enhanced metrics for Vault UI
+            'total_users': total_users,
+            'user_growth_pct': round(user_growth_pct, 1),
+            'user_spark': user_spark,
+            'revenue_kes': round(revenue_kes),
+            'revenue_growth_pct': round(revenue_growth_pct, 1),
+            'revenue_spark': revenue_spark,
+            'live_challenges': challenges_active,
+            'challenge_growth_pct': round(challenge_growth_pct, 1),
+            'challenge_spark': challenge_spark,
+            'pending_withdrawals_count': pending_withdrawals_count,
+            'pending_withdrawals_amount': float(pending_withdrawals_amount),
+            
+            # Challenge breakdown
+            'challenges_active': challenges_active,
+            'challenges_pending': challenges_pending,
+            'challenges_completed': challenges_completed,
+            
+            # Charts
+            'revenue_chart': revenue_chart,
+            'user_chart': user_chart,
+            'step_chart': step_chart,
+            
+            # Activity feeds
+            'recent_users': recent_users,
+            'pending_withdrawals_list': pending_list,
+            
+            # Legacy support (backward compatibility)
             'users': {
                 'total': total_users,
                 'active_week': active_users_week,
@@ -707,11 +897,11 @@ class AdminDashboardViewSet(viewsets.ViewSet):
             'finance': {
                 'week_deposits': str(week_deposits),
                 'week_withdrawals': str(week_withdrawals),
-                'pending_withdrawals': str(pending_withdrawals),
+                'pending_withdrawals': str(pending_withdrawals_amount),
             },
             'challenges': {
-                'live': live_challenges,
-                'completed_month': completed_challenges,
+                'live': challenges_active,
+                'completed_month': completed_challenges_month,
             },
             'gamification': {
                 'xp_distributed_week': total_xp_distributed,

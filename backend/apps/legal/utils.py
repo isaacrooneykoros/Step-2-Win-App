@@ -4,7 +4,7 @@ Converts uploaded DOCX and PDF files to clean HTML for display in the mobile app
 DOCX → HTML: uses mammoth (preserves headings, bold, lists, tables)
 PDF  → HTML: extracts text (formatting limited — recommend DOCX for best results)
 """
-import mammoth
+import importlib
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,11 +31,14 @@ def docx_to_html(file_obj) -> str:
         th                        => th
     """
     try:
+        mammoth = importlib.import_module('mammoth')
         result = mammoth.convert_to_html(file_obj, style_map=style_map)
         html   = result.value
         if result.messages:
             logger.info(f'mammoth warnings: {result.messages}')
         return html
+    except ModuleNotFoundError:
+        raise ValueError('mammoth not installed. Run: pip install mammoth')
     except Exception as e:
         logger.error(f'DOCX conversion failed: {e}')
         raise ValueError(f'Could not parse DOCX file: {e}')
@@ -48,8 +51,8 @@ def pdf_to_html(file_obj) -> str:
     For best results, upload DOCX instead of PDF.
     """
     try:
-        import PyPDF2
-        reader = PyPDF2.PdfReader(file_obj)
+        pypdf2 = importlib.import_module('PyPDF2')
+        reader = pypdf2.PdfReader(file_obj)
         pages  = []
         for page in reader.pages:
             text = page.extract_text() or ''
@@ -59,7 +62,7 @@ def pdf_to_html(file_obj) -> str:
                           if line.strip()]
             pages.append('\n'.join(paragraphs))
         return '\n<hr/>\n'.join(pages)
-    except ImportError:
+    except ModuleNotFoundError:
         raise ValueError('PyPDF2 not installed. Run: pip install PyPDF2')
     except Exception as e:
         logger.error(f'PDF extraction failed: {e}')
@@ -68,10 +71,14 @@ def pdf_to_html(file_obj) -> str:
 
 def detect_file_type(filename: str) -> str:
     name = filename.lower()
-    if name.endswith('.docx'):  return 'docx'
-    if name.endswith('.doc'):   return 'doc'
-    if name.endswith('.pdf'):   return 'pdf'
-    if name.endswith('.html'):  return 'html'
+    if name.endswith('.docx'):
+        return 'docx'
+    if name.endswith('.doc'):
+        return 'doc'
+    if name.endswith('.pdf'):
+        return 'pdf'
+    if name.endswith('.html'):
+        return 'html'
     return 'unknown'
 
 

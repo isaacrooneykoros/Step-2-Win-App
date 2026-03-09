@@ -1,4 +1,34 @@
 export interface DashboardOverview {
+  total_users?: number;
+  user_growth_pct?: number;
+  user_spark?: number[];
+  revenue_kes?: number;
+  revenue_growth_pct?: number;
+  revenue_spark?: number[];
+  live_challenges?: number;
+  challenge_growth_pct?: number;
+  challenge_spark?: number[];
+  pending_withdrawals_count?: number;
+  pending_withdrawals_amount?: number;
+  revenue_chart?: Array<{ date: string; deposits: number; withdrawals: number }>;
+  user_chart?: Array<{ date: string; users: number }>;
+  step_chart?: Array<{ date: string; steps: number }>;
+  challenges_active?: number;
+  challenges_pending?: number;
+  challenges_completed?: number;
+  pending_withdrawals_list?: Array<{
+    id: number;
+    username: string;
+    amount: number;
+    phone: string;
+    created_at: string;
+  }>;
+  recent_users?: Array<{
+    id: number;
+    username: string;
+    email: string;
+    joined: string;
+  }>;
   users: {
     total: number;
     active_week: number;
