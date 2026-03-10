@@ -62,14 +62,34 @@ def register(request):
 def login(request):
     """
     Authenticate user and return tokens
+    Supports login with username, email, or phone number
     """
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     
-    username = serializer.validated_data['username']
+    username_or_email_or_phone = serializer.validated_data['username']
     password = serializer.validated_data['password']
     
-    user = authenticate(username=username, password=password)
+    # Try to authenticate with username first
+    user = authenticate(username=username_or_email_or_phone, password=password)
+    
+    # If authentication failed, try to find user by email or phone number
+    if not user:
+        try:
+            # Try to find by email
+            if '@' in username_or_email_or_phone:
+                user_obj = User.objects.get(email=username_or_email_or_phone)
+            # Try to find by phone number
+            elif username_or_email_or_phone.replace('+', '').isdigit():
+                user_obj = User.objects.get(phone_number=username_or_email_or_phone)
+            else:
+                user_obj = None
+            
+            # If found, authenticate with the username
+            if user_obj:
+                user = authenticate(username=user_obj.username, password=password)
+        except User.DoesNotExist:
+            pass
     
     if not user:
         return Response(

@@ -20,6 +20,32 @@ function buildSignedHeaders(userId: string, body: object): Record<string, string
   };
 }
 
+function extractSyncErrorMessage(error: unknown): string {
+  if (typeof error !== 'object' || error === null) {
+    return 'Sync failed. Try again.';
+  }
+
+  const maybeAxios = error as {
+    response?: { data?: { error?: string; detail?: string; message?: string } };
+    message?: string;
+  };
+
+  const serverMessage =
+    maybeAxios.response?.data?.error ||
+    maybeAxios.response?.data?.detail ||
+    maybeAxios.response?.data?.message;
+
+  if (typeof serverMessage === 'string' && serverMessage.trim()) {
+    return serverMessage;
+  }
+
+  if (typeof maybeAxios.message === 'string' && maybeAxios.message.trim()) {
+    return maybeAxios.message;
+  }
+
+  return 'Sync failed. Try again.';
+}
+
 export function useHealthSync() {
   const [isSyncing, setIsSyncing] = useState(false);
   const queryClient = useQueryClient();
@@ -53,7 +79,7 @@ export function useHealthSync() {
     } catch (error) {
       console.error('Sync error:', error);
       if (!options?.silent) {
-        showToast({ message: 'Sync failed. Try again.', type: 'error' });
+        showToast({ message: extractSyncErrorMessage(error), type: 'error' });
       }
     } finally {
       setIsSyncing(false);

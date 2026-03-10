@@ -174,10 +174,21 @@ export interface FraudFlag {
   flag_type: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   date: string;
-  details: Record<string, any>;
+  details: Record<string, unknown>;
   reviewed: boolean;
   actioned: boolean;
   created_at: string;
+  last_action?:
+    | 'dismiss'
+    | 'warn'
+    | 'restrict'
+    | 'suspend'
+    | 'ban'
+    | 'unrestrict'
+    | 'unsuspend'
+    | 'unban';
+  current_trust_score?: number;
+  current_trust_status?: 'GOOD' | 'WARN' | 'REVIEW' | 'RESTRICT' | 'SUSPEND' | 'BAN';
 }
 
 export interface FraudOverview {
@@ -189,6 +200,7 @@ export interface FraudOverview {
   banned_users: number;
   flags_today: number;
   recent_flags: FraudFlag[];
+  reviewed_flags: FraudFlag[];
 }
 
 export interface WithdrawalQueueItem {

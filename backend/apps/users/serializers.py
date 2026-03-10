@@ -20,7 +20,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username', 'email', 'password', 'confirm_password']
+        fields = ['username', 'email', 'phone_number', 'password', 'confirm_password']
 
     def validate(self, data):
         if data['password'] != data['confirm_password']:
@@ -61,7 +61,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'username', 'email', 'wallet_balance', 'locked_balance',
+            'id', 'username', 'email', 'phone_number', 'wallet_balance', 'locked_balance',
             'available_balance', 'device_bound', 'total_steps',
             'challenges_won', 'challenges_joined', 'total_earned',
             'current_streak', 'best_streak', 'best_day_steps',
@@ -149,9 +149,12 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 class LoginSerializer(serializers.Serializer):
     """
-    Serializer for login
+    Serializer for login - supports username, email, or phone number
     """
-    username = serializers.CharField(required=True)
+    username = serializers.CharField(
+        required=True,
+        help_text='Username, email, or phone number'
+    )
     password = serializers.CharField(
         required=True,
         style={'input_type': 'password'}

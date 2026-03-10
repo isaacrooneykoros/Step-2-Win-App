@@ -14,6 +14,7 @@ export default function RegisterScreen() {
   const [formData, setFormData] = useState({
     username: '',
     email: '',
+    phone_number: '',
     password: '',
     confirm_password: '',
   });
@@ -123,6 +124,17 @@ export default function RegisterScreen() {
             error={errors.email?.[0]}
             required
             autoComplete="email"
+          />
+
+          <Input
+            label="Phone Number (for withdrawals)"
+            name="phone_number"
+            type="tel"
+            value={formData.phone_number}
+            onChange={handleChange}
+            placeholder="254712345678"
+            error={errors.phone_number?.[0]}
+            autoComplete="tel"
           />
 
           <div>

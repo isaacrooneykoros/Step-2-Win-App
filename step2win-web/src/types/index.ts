@@ -4,6 +4,7 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  phone_number?: string | null;
   daily_goal: number;
   wallet_balance: string;
   locked_balance: string;
@@ -365,6 +366,7 @@ export interface LoginCredentials {
 export interface RegisterData {
   username: string;
   email: string;
+  phone_number?: string;
   password: string;
   confirm_password: string;
 }
