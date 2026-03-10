@@ -113,11 +113,11 @@ export default function LoginScreen() {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <Input
-            label="Username"
+            label="Username, Email, or Phone"
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter your username"
+            placeholder="Username, email, or 254712345678"
             required
             autoComplete="username"
           />

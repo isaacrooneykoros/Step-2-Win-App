@@ -22,6 +22,7 @@ from django.contrib.auth import get_user_model  # noqa: E402
 from rest_framework.test import APIClient  # noqa: E402
 from rest_framework_simplejwt.tokens import RefreshToken  # noqa: E402
 from django.conf import settings  # noqa: E402
+from apps.steps.models import TrustScore  # noqa: E402
 
 User = get_user_model()
 
@@ -54,10 +55,14 @@ def test_valid_signed_sync():
     print("="*60)
     
     # Setup test user
-    user, created = User.objects.get_or_create(
+    user, created = User.objects.update_or_create(
         username='test_signed_sync_user',
-        defaults={'email': 'test@signed.test', 'first_name': 'Test'}
+        defaults={'email': 'test@signed.test', 'first_name': 'Test', 'is_active': True}
     )
+    # Reset trust score to avoid BAN status
+    trust, _ = TrustScore.objects.get_or_create(user=user)
+    trust.score = 100
+    trust.save()
     print(f"✓ User: {user.username} (ID: {user.id})")
     
     # Prepare sync data
@@ -112,10 +117,14 @@ def test_invalid_signature():
     print("TEST 2: Invalid Signature (Should Be Rejected)")
     print("="*60)
     
-    user, _ = User.objects.get_or_create(
+    user, _ = User.objects.update_or_create(
         username='test_invalid_sig_user',
-        defaults={'email': 'test@invalid.test', 'first_name': 'Test'}
+        defaults={'email': 'test@invalid.test', 'first_name': 'Test', 'is_active': True}
     )
+    # Reset trust score to avoid BAN status
+    trust, _ = TrustScore.objects.get_or_create(user=user)
+    trust.score = 100
+    trust.save()
     print(f"✓ User: {user.username} (ID: {user.id})")
     
     sync_body = json.dumps({"steps": 5000, "date": "2026-03-07"})
@@ -157,10 +166,14 @@ def test_idempotency():
     print("TEST 3: Idempotency Protection (Duplicate Request)")
     print("="*60)
     
-    user, _ = User.objects.get_or_create(
+    user, _ = User.objects.update_or_create(
         username='test_idempotency_user',
-        defaults={'email': 'test@idempotency.test', 'first_name': 'Test'}
+        defaults={'email': 'test@idempotency.test', 'first_name': 'Test', 'is_active': True}
     )
+    # Reset trust score to avoid BAN status
+    trust, _ = TrustScore.objects.get_or_create(user=user)
+    trust.score = 100
+    trust.save()
     print(f"✓ User: {user.username} (ID: {user.id})")
     
     sync_body = json.dumps({
@@ -225,10 +238,14 @@ def test_stale_timestamp():
     print("TEST 4: Stale Timestamp (Should Be Rejected)")
     print("="*60)
     
-    user, _ = User.objects.get_or_create(
+    user, _ = User.objects.update_or_create(
         username='test_stale_ts_user',
-        defaults={'email': 'test@stale.test', 'first_name': 'Test'}
+        defaults={'email': 'test@stale.test', 'first_name': 'Test', 'is_active': True}
     )
+    # Reset trust score to avoid BAN status
+    trust, _ = TrustScore.objects.get_or_create(user=user)
+    trust.score = 100
+    trust.save()
     print(f"✓ User: {user.username} (ID: {user.id})")
     
     sync_body = json.dumps({"steps": 6000, "date": "2026-03-07"})

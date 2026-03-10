@@ -34,6 +34,7 @@ function App() {
           <Route path="badges" element={<BadgesPage />} />
           <Route path="moderation" element={<ModerationPage />} />
           <Route path="fraud" element={<AdminFraudPage />} />
+          <Route path="anti-cheat" element={<AdminFraudPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="activity" element={<ActivityLogsPage />} />

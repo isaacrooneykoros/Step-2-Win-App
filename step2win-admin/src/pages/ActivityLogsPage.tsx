@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { adminApi } from '../services/adminApi';
-import { History, Search, Filter, Calendar, User, Activity } from 'lucide-react';
+import { History, Search, Filter, Calendar, User, Activity, AlertCircle, X } from 'lucide-react';
+import { PageHeader } from '../components/PageHeader';
+import { StatCard } from '../components/StatCard';
+import { StatusBadge } from '../components/StatusBadge';
 
 interface AuditLog {
   id: number;
@@ -87,26 +90,6 @@ export function ActivityLogsPage() {
     setOffset(0);
   };
 
-  const getActionColor = (action: string) => {
-    const colors: Record<string, { bg: string; color: string }> = {
-      create: { bg: '#065f46', color: '#6ee7b7' },
-      update: { bg: '#0e7490', color: '#67e8f9' },
-      delete: { bg: '#7f1d1d', color: '#fca5a5' },
-      login: { bg: '#1e40af', color: '#93c5fd' },
-      logout: { bg: '#4c1d95', color: '#c4b5fd' },
-      ban: { bg: '#991b1b', color: '#fecaca' },
-      unban: { bg: '#065f46', color: '#86efac' },
-      approve: { bg: '#166534', color: '#86efac' },
-      reject: { bg: '#991b1b', color: '#fca5a5' },
-      cancel: { bg: '#7c2d12', color: '#fdba74' },
-      promote: { bg: '#6b21a8', color: '#e9d5ff' },
-      demote: { bg: '#7c2d12', color: '#fed7aa' },
-      reset_password: { bg: '#7c2d12', color: '#fcd34d' },
-      settings_change: { bg: '#0e7490', color: '#a5f3fc' },
-    };
-    return colors[action] || { bg: '#2d3748', color: '#94a3b8' };
-  };
-
   const getResourceIcon = (resourceType: string) => {
     switch (resourceType) {
       case 'user': return <User size={14} />;
@@ -126,39 +109,103 @@ export function ActivityLogsPage() {
     });
   };
 
+  // Calculate stats for StatCards
   const currentPage = Math.floor(offset / limit) + 1;
   const totalPages = Math.ceil(total / limit);
+  
+  const uniqueAdmins = new Set(logs.map(log => log.admin_username)).size;
+  const actionCounts = logs.reduce((acc, log) => {
+    acc[log.action] = (acc[log.action] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  const mostCommonAction = Object.entries(actionCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A';
+
+  const getActionBadgeVariant = (action: string): 'active' | 'completed' | 'cancelled' | 'pending' | 'warning' | 'info' | 'banned' | 'failed' => {
+    const variantMap: Record<string, 'active' | 'completed' | 'cancelled' | 'pending' | 'warning' | 'info' | 'banned' | 'failed'> = {
+      create: 'completed',
+      update: 'active',
+      delete: 'cancelled',
+      login: 'active',
+      logout: 'info',
+      ban: 'banned',
+      unban: 'completed',
+      approve: 'completed',
+      reject: 'cancelled',
+      cancel: 'cancelled',
+      promote: 'active',
+      demote: 'warning',
+      reset_password: 'warning',
+      settings_change: 'active',
+    };
+    return variantMap[action] || 'info';
+  };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 600, color: '#fff', marginBottom: '4px' }}>
-            <History size={24} style={{ display: 'inline', marginRight: '8px', verticalAlign: 'middle' }} />
-            Activity Logs
-          </h1>
-          <p style={{ color: '#64748b', fontSize: '14px' }}>
-            {total} total activities • Page {currentPage} of {totalPages || 1}
-          </p>
-        </div>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        title="Activity Logs"
+        subtitle={`${total} total activities`}
+      />
 
       {/* Error Message */}
       {error && (
-        <div style={{ padding: '12px', background: '#7f1d1d', borderRadius: '6px', color: '#fca5a5' }}>
+        <div style={{ padding: '12px 16px', background: '#7f1d1d', borderRadius: '6px', color: '#fca5a5', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <AlertCircle size={18} />
           {error}
         </div>
       )}
 
-      {/* Filters */}
-      <div className="stat-card">
-        <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Filter size={18} />
-          Filters
-        </h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-          {/* Search by Admin */}
+      {/* Stats Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
+        <StatCard
+          title="Total Activities"
+          value={total.toLocaleString()}
+          icon={Activity}
+          color="teal"
+          trend={logs.length}
+          trendLabel="on this page"
+        />
+        <StatCard
+          title="Active Admins"
+          value={uniqueAdmins.toString()}
+          icon={User}
+          color="blue"
+          trend={uniqueAdmins}
+          trendLabel="admins acting"
+        />
+        <StatCard
+          title="Most Common Action"
+          value={mostCommonAction.replace(/_/g, ' ')}
+          icon={Filter}
+          color="purple"
+          trend={actionCounts[mostCommonAction] || 0}
+          trendLabel="occurrences"
+        />
+        <StatCard
+          title="Recent Timespan"
+          value={logs.length > 0 ? logs.length + ' entries' : 'No data'}
+          icon={Calendar}
+          color="amber"
+          trend={logs.length > 0 ? Math.round((logs.length / limit) * 10) : 0}
+          trendLabel="% of page"
+        />
+      </div>
+
+      {/* Filters Section */}
+      <div style={{
+        background: '#0C1117',
+        border: '1px solid #21263A',
+        borderRadius: '8px',
+        padding: '20px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <Filter size={18} style={{ color: '#00f5e9' }} />
+          <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#fff' }}>Filters</h3>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
+          {/* Admin Username */}
           <div>
             <label style={{ display: 'block', marginBottom: '8px', color: '#64748b', fontSize: '14px' }}>
               Admin Username
@@ -174,16 +221,17 @@ export function ActivityLogsPage() {
                 style={{
                   width: '100%',
                   padding: '8px 12px 8px 36px',
-                  background: '#1a2332',
-                  border: '1px solid #2d3748',
+                  background: '#13161F',
+                  border: '1px solid #21263A',
                   borderRadius: '6px',
                   color: '#fff',
+                  fontSize: '14px',
                 }}
               />
             </div>
           </div>
 
-          {/* Action Filter */}
+          {/* Action */}
           <div>
             <label style={{ display: 'block', marginBottom: '8px', color: '#64748b', fontSize: '14px' }}>
               Action
@@ -194,11 +242,11 @@ export function ActivityLogsPage() {
               style={{
                 width: '100%',
                 padding: '8px 12px',
-                background: '#1a2332',
-                border: '1px solid #2d3748',
+                background: '#13161F',
+                border: '1px solid #21263A',
                 borderRadius: '6px',
                 color: '#fff',
-                cursor: 'pointer',
+                fontSize: '14px',
               }}
             >
               <option value="">All Actions</option>
@@ -219,7 +267,7 @@ export function ActivityLogsPage() {
             </select>
           </div>
 
-          {/* Resource Filter */}
+          {/* Resource Type */}
           <div>
             <label style={{ display: 'block', marginBottom: '8px', color: '#64748b', fontSize: '14px' }}>
               Resource Type
@@ -230,11 +278,11 @@ export function ActivityLogsPage() {
               style={{
                 width: '100%',
                 padding: '8px 12px',
-                background: '#1a2332',
-                border: '1px solid #2d3748',
+                background: '#13161F',
+                border: '1px solid #21263A',
                 borderRadius: '6px',
                 color: '#fff',
-                cursor: 'pointer',
+                fontSize: '14px',
               }}
             >
               <option value="">All Resources</option>
@@ -262,8 +310,8 @@ export function ActivityLogsPage() {
                 style={{
                   width: '100%',
                   padding: '8px 12px 8px 36px',
-                  background: '#1a2332',
-                  border: '1px solid #2d3748',
+                  background: '#13161F',
+                  border: '1px solid #21263A',
                   borderRadius: '6px',
                   color: '#fff',
                 }}
@@ -285,8 +333,8 @@ export function ActivityLogsPage() {
                 style={{
                   width: '100%',
                   padding: '8px 12px 8px 36px',
-                  background: '#1a2332',
-                  border: '1px solid #2d3748',
+                  background: '#13161F',
+                  border: '1px solid #21263A',
                   borderRadius: '6px',
                   color: '#fff',
                 }}
@@ -294,17 +342,19 @@ export function ActivityLogsPage() {
             </div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
+
+        <div style={{ display: 'flex', gap: '12px' }}>
           <button
             onClick={handleSearch}
             style={{
               padding: '8px 16px',
-              background: '#00f5e9',
+              background: 'linear-gradient(135deg, #00f5e9 0%, #0e7490 100%)',
               color: '#091120',
               border: 'none',
               borderRadius: '6px',
               cursor: 'pointer',
               fontWeight: 600,
+              fontSize: '14px',
             }}
           >
             Apply Filters
@@ -313,11 +363,12 @@ export function ActivityLogsPage() {
             onClick={handleClearFilters}
             style={{
               padding: '8px 16px',
-              background: '#2d3748',
+              background: '#21263A',
               color: '#fff',
-              border: 'none',
+              border: '1px solid #2d3748',
               borderRadius: '6px',
               cursor: 'pointer',
+              fontSize: '14px',
             }}
           >
             Clear All
@@ -326,7 +377,12 @@ export function ActivityLogsPage() {
       </div>
 
       {/* Activity Logs Table */}
-      <div className="stat-card" style={{ padding: 0, overflow: 'auto' }}>
+      <div style={{
+        background: '#0C1117',
+        border: '1px solid #21263A',
+        borderRadius: '8px',
+        overflow: 'hidden',
+      }}>
         {loading ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
             Loading logs...
@@ -336,57 +392,50 @@ export function ActivityLogsPage() {
             No activity logs found
           </div>
         ) : (
-          <table className="table" style={{ width: '100%' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ background: '#1a2332' }}>
-                <th>Timestamp</th>
-                <th>Admin</th>
-                <th>Action</th>
-                <th>Resource</th>
-                <th>Description</th>
-                <th>IP Address</th>
-                <th style={{ textAlign: 'center' }}>Details</th>
+              <tr style={{ background: '#13161F', borderBottom: '1px solid #21263A' }}>
+                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Timestamp</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Admin</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Action</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Resource</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Description</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>IP Address</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {logs.map((log) => (
-                <tr key={log.id} style={{ borderBottom: '1px solid #2d3748' }}>
-                  <td style={{ color: '#64748b', fontSize: '13px', whiteSpace: 'nowrap' }}>
+                <tr key={log.id} style={{ borderBottom: '1px solid #21263A', transition: 'background 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.background = '#13161F'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                  <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '13px', whiteSpace: 'nowrap' }}>
                     {formatDate(log.created_at)}
                   </td>
-                  <td style={{ fontWeight: 600, color: '#fff' }}>{log.admin_username}</td>
-                  <td>
-                    <span
-                      style={{
-                        padding: '4px 8px',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        background: getActionColor(log.action).bg,
-                        color: getActionColor(log.action).color,
-                        textTransform: 'capitalize',
-                      }}
-                    >
-                      {log.action.replace('_', ' ')}
-                    </span>
+                  <td style={{ padding: '12px 16px', color: '#fff', fontWeight: 500, fontSize: '13px' }}>
+                    {log.admin_username}
                   </td>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#94a3b8' }}>
+                  <td style={{ padding: '12px 16px' }}>
+                    <StatusBadge 
+                      variant={getActionBadgeVariant(log.action)}
+                      label={log.action.replace(/_/g, ' ')}
+                    />
+                  </td>
+                  <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '13px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {getResourceIcon(log.resource_type)}
                       <span style={{ textTransform: 'capitalize' }}>{log.resource_type}</span>
                       {log.resource_id && <span style={{ color: '#64748b' }}>#{log.resource_id}</span>}
                     </div>
                   </td>
-                  <td style={{ color: '#94a3b8', maxWidth: '300px' }}>
+                  <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '13px', maxWidth: '300px' }}>
                     {log.description}
                     {log.resource_name && (
                       <span style={{ color: '#64748b', fontStyle: 'italic' }}> ({log.resource_name})</span>
                     )}
                   </td>
-                  <td style={{ color: '#64748b', fontSize: '13px' }}>
+                  <td style={{ padding: '12px 16px', color: '#64748b', fontSize: '12px', fontFamily: 'monospace' }}>
                     {log.ip_address || '-'}
                   </td>
-                  <td style={{ textAlign: 'center' }}>
+                  <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                     {log.changes && (
                       <button
                         onClick={() => setSelectedLog(log)}
@@ -398,9 +447,13 @@ export function ActivityLogsPage() {
                           borderRadius: '4px',
                           cursor: 'pointer',
                           fontSize: '12px',
+                          fontWeight: 500,
+                          transition: 'background 0.2s',
                         }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#0891b2'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = '#0e7490'}
                       >
-                        View Changes
+                        Details
                       </button>
                     )}
                   </td>
@@ -419,17 +472,19 @@ export function ActivityLogsPage() {
             disabled={offset === 0}
             style={{
               padding: '8px 16px',
-              background: offset === 0 ? '#2d3748' : '#0e7490',
+              background: offset === 0 ? '#2d3748' : 'linear-gradient(135deg, #00f5e9 0%, #0e7490 100%)',
               color: '#fff',
               border: 'none',
               borderRadius: '6px',
               cursor: offset === 0 ? 'not-allowed' : 'pointer',
               opacity: offset === 0 ? 0.5 : 1,
+              fontSize: '14px',
+              fontWeight: 500,
             }}
           >
             Previous
           </button>
-          <span style={{ color: '#64748b' }}>
+          <span style={{ color: '#64748b', fontSize: '14px', fontWeight: 500 }}>
             Page {currentPage} of {totalPages}
           </span>
           <button
@@ -437,12 +492,14 @@ export function ActivityLogsPage() {
             disabled={offset + limit >= total}
             style={{
               padding: '8px 16px',
-              background: offset + limit >= total ? '#2d3748' : '#0e7490',
+              background: offset + limit >= total ? '#2d3748' : 'linear-gradient(135deg, #00f5e9 0%, #0e7490 100%)',
               color: '#fff',
               border: 'none',
               borderRadius: '6px',
               cursor: offset + limit >= total ? 'not-allowed' : 'pointer',
               opacity: offset + limit >= total ? 0.5 : 1,
+              fontSize: '14px',
+              fontWeight: 500,
             }}
           >
             Next
@@ -450,7 +507,7 @@ export function ActivityLogsPage() {
         </div>
       )}
 
-      {/* Changes Details Modal */}
+      {/* Activity Details Modal */}
       {selectedLog && (
         <div
           style={{
@@ -468,71 +525,145 @@ export function ActivityLogsPage() {
           onClick={() => setSelectedLog(null)}
         >
           <div
-            className="auth-card"
-            style={{ width: '600px', maxWidth: '90%', maxHeight: '80vh', overflow: 'auto' }}
+            style={{
+              background: '#0C1117',
+              border: '1px solid #21263A',
+              borderRadius: '8px',
+              width: '600px',
+              maxWidth: '90%',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)',
+            }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 style={{ fontSize: '20px', marginBottom: '20px', color: '#fff' }}>Activity Details</h2>
-            <div style={{ marginBottom: '20px' }}>
-              <p style={{ color: '#64748b', marginBottom: '4px' }}>Admin</p>
-              <p style={{ color: '#fff', fontWeight: 600 }}>{selectedLog.admin_username}</p>
+            {/* Modal Header */}
+            <div style={{
+              background: 'linear-gradient(135deg, #00f5e9 0%, #0e7490 100%)',
+              padding: '20px',
+              borderBottom: '1px solid #21263A',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <History size={20} style={{ color: '#091120' }} />
+                <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#091120' }}>Activity Details</h2>
+              </div>
+              <button
+                onClick={() => setSelectedLog(null)}
+                style={{
+                  background: 'rgba(0, 0, 0, 0.2)',
+                  border: 'none',
+                  color: '#091120',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  borderRadius: '4px',
+                }}
+              >
+                <X size={20} />
+              </button>
             </div>
-            <div style={{ marginBottom: '20px' }}>
-              <p style={{ color: '#64748b', marginBottom: '4px' }}>Action</p>
-              <p style={{ color: '#fff' }}>{selectedLog.description}</p>
-            </div>
-            <div style={{ marginBottom: '20px' }}>
-              <p style={{ color: '#64748b', marginBottom: '4px' }}>Timestamp</p>
-              <p style={{ color: '#fff' }}>{formatDate(selectedLog.created_at)}</p>
-            </div>
-            {selectedLog.changes && (
-              <div>
-                <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '12px', color: '#fff' }}>
-                  Changes Made
-                </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {Object.entries(selectedLog.changes).map(([field, change]) => (
-                    <div
-                      key={field}
-                      style={{
-                        padding: '12px',
-                        background: '#1a2332',
-                        borderRadius: '6px',
-                      }}
-                    >
-                      <p style={{ color: '#00f5e9', fontWeight: 600, marginBottom: '8px', textTransform: 'capitalize' }}>
-                        {field.replace(/_/g, ' ')}
-                      </p>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                        <div>
-                          <p style={{ color: '#64748b', fontSize: '12px', marginBottom: '4px' }}>Old Value</p>
-                          <p style={{ color: '#fca5a5', fontFamily: 'monospace', fontSize: '14px' }}>
-                            {change.old || '(empty)'}
-                          </p>
-                        </div>
-                        <div>
-                          <p style={{ color: '#64748b', fontSize: '12px', marginBottom: '4px' }}>New Value</p>
-                          <p style={{ color: '#6ee7b7', fontFamily: 'monospace', fontSize: '14px' }}>
-                            {change.new || '(empty)'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+
+            {/* Modal Content */}
+            <div style={{ padding: '24px', color: '#fff' }}>
+              <div style={{ marginBottom: '24px' }}>
+                <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Admin</p>
+                <p style={{ color: '#fff', fontWeight: 600, fontSize: '16px' }}>{selectedLog.admin_username}</p>
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Action</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <StatusBadge 
+                    variant={getActionBadgeVariant(selectedLog.action)}
+                    label={selectedLog.action.replace(/_/g, ' ')}
+                  />
                 </div>
               </div>
-            )}
-            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
+
+              <div style={{ marginBottom: '24px' }}>
+                <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Description</p>
+                <p style={{ color: '#94a3b8', fontSize: '14px' }}>{selectedLog.description}</p>
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Timestamp</p>
+                <p style={{ color: '#fff', fontFamily: 'monospace', fontSize: '13px' }}>{formatDate(selectedLog.created_at)}</p>
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>IP Address</p>
+                <p style={{ color: '#fff', fontFamily: 'monospace', fontSize: '13px' }}>{selectedLog.ip_address || '-'}</p>
+              </div>
+
+              {selectedLog.resource_name && (
+                <div style={{ marginBottom: '24px' }}>
+                  <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Resource</p>
+                  <p style={{ color: '#fff', fontWeight: 500, fontSize: '14px' }}>{selectedLog.resource_name}</p>
+                </div>
+              )}
+
+              {selectedLog.changes && (
+                <div style={{ marginTop: '24px' }}>
+                  <p style={{ color: '#64748b', marginBottom: '16px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Changes</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    {Object.entries(selectedLog.changes).map(([field, change]) => (
+                      <div
+                        key={field}
+                        style={{
+                          padding: '16px',
+                          background: '#13161F',
+                          borderRadius: '6px',
+                          border: '1px solid #21263A',
+                        }}
+                      >
+                        <p style={{ color: '#00f5e9', fontWeight: 600, marginBottom: '12px', textTransform: 'capitalize' }}>
+                          {field.replace(/_/g, ' ')}
+                        </p>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                          <div>
+                            <p style={{ color: '#64748b', fontSize: '12px', marginBottom: '8px' }}>Old Value</p>
+                            <p style={{ color: '#fca5a5', fontFamily: 'monospace', fontSize: '13px', wordBreak: 'break-all' }}>
+                              {change.old || '(empty)'}
+                            </p>
+                          </div>
+                          <div>
+                            <p style={{ color: '#64748b', fontSize: '12px', marginBottom: '8px' }}>New Value</p>
+                            <p style={{ color: '#6ee7b7', fontFamily: 'monospace', fontSize: '13px', wordBreak: 'break-all' }}>
+                              {change.new || '(empty)'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '16px 24px',
+              borderTop: '1px solid #21263A',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '12px',
+            }}>
               <button
                 onClick={() => setSelectedLog(null)}
                 style={{
                   padding: '10px 20px',
-                  background: '#2d3748',
+                  background: '#21263A',
                   color: '#fff',
-                  border: 'none',
+                  border: '1px solid #2d3748',
                   borderRadius: '6px',
                   cursor: 'pointer',
+                  fontWeight: 500,
+                  transition: 'background 0.2s',
                 }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#2d3748'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#21263A'}
               >
                 Close
               </button>

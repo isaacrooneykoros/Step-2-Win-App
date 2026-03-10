@@ -37,7 +37,7 @@ function clearAuthSession() {
   localStorage.removeItem('admin_user');
 }
 
-function safeParseJson(value: string): any | null {
+function safeParseJson(value: string): unknown | null {
   try {
     return JSON.parse(value);
   } catch {
@@ -51,12 +51,17 @@ function extractErrorMessage(rawText: string): string {
   }
 
   const parsed = safeParseJson(rawText);
-  if (!parsed) {
+  if (!parsed || typeof parsed !== 'object') {
     return rawText;
   }
+  const parsedRecord = parsed as Record<string, unknown>;
+  const details =
+    parsedRecord.details && typeof parsedRecord.details === 'object'
+      ? (parsedRecord.details as Record<string, unknown>)
+      : undefined;
 
-  const detail = parsed?.details?.detail || parsed?.detail;
-  const msg = parsed?.message;
+  const detail = details?.detail ?? parsedRecord.detail;
+  const msg = parsedRecord.message;
 
   if (typeof detail === 'string' && detail.trim()) {
     if (detail.toLowerCase().includes('token')) {
@@ -67,8 +72,8 @@ function extractErrorMessage(rawText: string): string {
 
   if (typeof msg === 'string' && msg.trim()) {
     const nested = safeParseJson(msg);
-    if (nested?.detail) {
-      const nestedDetail = String(nested.detail);
+    if (nested && typeof nested === 'object' && 'detail' in nested) {
+      const nestedDetail = String((nested as Record<string, unknown>).detail);
       if (nestedDetail.toLowerCase().includes('token')) {
         return 'Session expired. Please log in again.';
       }
@@ -77,7 +82,7 @@ function extractErrorMessage(rawText: string): string {
     return msg;
   }
 
-  return parsed.error || 'Request failed';
+  return typeof parsedRecord.error === 'string' ? parsedRecord.error : 'Request failed';
 }
 
 async function refreshAdminAccessToken(): Promise<string | null> {
@@ -338,7 +343,18 @@ export const adminApi = {
 
   // Fraud Management
   getFraudOverview: async () => request<FraudOverview>('/api/admin/fraud/'),
-  actionFraudFlag: async (flagId: number, action: 'dismiss' | 'warn' | 'restrict' | 'suspend' | 'ban') =>
+  actionFraudFlag: async (
+    flagId: number,
+    action:
+      | 'dismiss'
+      | 'warn'
+      | 'restrict'
+      | 'suspend'
+      | 'ban'
+      | 'unrestrict'
+      | 'unsuspend'
+      | 'unban'
+  ) =>
     request<{ status: string; flag_id: number; action: string }>(`/api/admin/fraud/${flagId}/action/`, {
       method: 'POST',
       body: JSON.stringify({ action }),

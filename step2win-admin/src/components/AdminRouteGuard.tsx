@@ -27,7 +27,7 @@ export function AdminRouteGuard() {
           return;
         }
         setIsAuthorized(true);
-      } catch (error) {
+      } catch {
         if (!isMounted) {
           return;
         }

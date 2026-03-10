@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -21,6 +21,7 @@ import {
   Activity,
   ChevronRight,
   Smartphone,
+  User as UserIcon,
 } from 'lucide-react';
 import { authService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
@@ -28,6 +29,7 @@ import { useStepsSyncStore } from '../store/stepsSyncStore';
 import { useToast } from '../components/ui/Toast';
 import { BaseModal } from '../components/ui/BaseModal';
 import { useHealthSync } from '../hooks/useHealthSync';
+import type { User } from '../types';
 
 function nextRankSteps(played: number): string {
   if (played < 3) return `${3 - played} more`;
@@ -46,16 +48,28 @@ export default function ProfileScreen() {
   const lastStepsUpdateAt = useStepsSyncStore((state) => state.lastStepsUpdateAt);
   const { syncHealth, isSyncing } = useHealthSync();
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
     current_password: '',
     new_password: '',
     confirm_password: '',
   });
+  const [profileForm, setProfileForm] = useState({
+    phone_number: '',
+  });
 
-  const { data: profile } = useQuery({
+  const { data: profile } = useQuery<User>({
     queryKey: ['profile'],
     queryFn: authService.getProfile,
   });
+
+  useEffect(() => {
+    if (profile) {
+      setProfileForm({
+        phone_number: profile.phone_number || '',
+      });
+    }
+  }, [profile]);
 
   const { data: deviceStatus } = useQuery({
     queryKey: ['device-status'],
@@ -74,6 +88,17 @@ export default function ProfileScreen() {
     },
   });
 
+  const updateProfileMutation = useMutation({
+    mutationFn: (data: any) => authService.updateProfile(data),
+    onSuccess: () => {
+      setShowProfileModal(false);
+      showToast({ message: 'Profile updated successfully!', type: 'success' });
+    },
+    onError: (error: any) => {
+      showToast({ message: error.response?.data?.error || 'Failed to update profile', type: 'error' });
+    },
+  });
+
   const handlePasswordChange = () => {
     if (passwordForm.new_password !== passwordForm.confirm_password) {
       showToast({ message: 'Passwords do not match', type: 'error' });
@@ -89,12 +114,16 @@ export default function ProfileScreen() {
     });
   };
 
+  const handleProfileUpdate = () => {
+    updateProfileMutation.mutate(profileForm);
+  };
+
   const handleLogout = async () => {
     await logout();
     navigate('/login');
   };
 
-  const currentUser = profile || user;
+  const currentUser: User | null = (profile || user) as User | null;
 
   const formatLastUpdate = (timestamp: string | null) => {
     if (!timestamp) return 'No live updates yet';
@@ -120,6 +149,45 @@ export default function ProfileScreen() {
   const winRate = currentUser?.win_rate || 0;
   const played = currentUser?.challenges_joined || 0;
   const won = currentUser?.challenges_won || 0;
+  const trustScore = profile?.trust_score;
+  const trustStatus = profile?.trust_status;
+
+  const trustBadge = (() => {
+    switch (trustStatus) {
+      case 'GOOD':
+        return { label: '✓ Good Standing', className: 'bg-tint-green text-accent-green' };
+      case 'WARN':
+      case 'REVIEW':
+        return { label: '⚠ Under Review', className: 'bg-tint-yellow text-accent-yellow' };
+      case 'RESTRICT':
+        return { label: '⛔ Restricted', className: 'bg-red-50 text-red-500' };
+      case 'SUSPEND':
+        return { label: '⏸ Suspended', className: 'bg-red-50 text-red-500' };
+      case 'BAN':
+        return { label: '🚫 Banned', className: 'bg-red-50 text-red-500' };
+      default:
+        if ((trustScore ?? 100) > 80) {
+          return { label: '✓ Good Standing', className: 'bg-tint-green text-accent-green' };
+        }
+        if ((trustScore ?? 100) > 60) {
+          return { label: '⚠ Under Review', className: 'bg-tint-yellow text-accent-yellow' };
+        }
+        return { label: '⛔ Restricted', className: 'bg-red-50 text-red-500' };
+    }
+  })();
+
+  const trustHelpText = (() => {
+    switch (trustStatus) {
+      case 'SUSPEND':
+        return 'Your challenge participation is paused. Contact support if you believe this is an error.';
+      case 'BAN':
+        return 'Your account has been banned from step participation. Contact support for review.';
+      case 'RESTRICT':
+        return 'Your approved steps may be reduced while this restriction is active.';
+      default:
+        return 'Score recovers automatically with normal daily activity. Contact support if you believe this is an error.';
+    }
+  })();
 
   return (
     <div className="screen-enter pb-nav bg-bg-page">
@@ -140,6 +208,9 @@ export default function ProfileScreen() {
         </div>
         <h2 className="text-text-primary text-xl font-bold">{currentUser?.username}</h2>
         <p className="text-text-muted text-sm mt-1">{currentUser?.email}</p>
+        {currentUser?.phone_number && (
+          <p className="text-text-muted text-sm mt-0.5">📱 {currentUser.phone_number}</p>
+        )}
         <div className="mt-2 inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-bg-input">
           <span className={`w-2 h-2 rounded-full ${isStepsSocketConnected ? 'bg-accent-green' : 'bg-accent-red'}`} />
           <span className={`text-[11px] font-semibold ${isStepsSocketConnected ? 'text-accent-green' : 'text-accent-red'}`}>
@@ -383,7 +454,7 @@ export default function ProfileScreen() {
       </div>
 
       {/* ── TRUST CARD ────────────────────────── */}
-      {profile?.trust_score !== undefined && (
+      {trustScore !== undefined && (
         <div className="px-4 pb-4">
           <div className="card rounded-3xl p-4">
             <div className="flex items-center gap-3 mb-3">
@@ -394,32 +465,26 @@ export default function ProfileScreen() {
                 <p className="text-text-primary text-sm font-bold">Account Standing</p>
                 <p className="text-text-muted text-xs">Updated after each sync</p>
               </div>
-              <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                profile.trust_score > 80 ? 'bg-tint-green text-accent-green' :
-                profile.trust_score > 60 ? 'bg-tint-yellow text-accent-yellow' :
-                                          'bg-red-50 text-red-500'
-              }`}>
-                {profile.trust_score > 80 ? '✓ Good Standing' :
-                 profile.trust_score > 60 ? '⚠ Under Review' : '⛔ Restricted'}
+              <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${trustBadge.className}`}>
+                {trustBadge.label}
               </span>
             </div>
 
             <div className="progress-track h-2 mb-1.5 bg-gray-200 rounded-full">
               <div className="h-full rounded-full transition-all duration-700"
                 style={{
-                  width: `${profile.trust_score}%`,
-                  background: profile.trust_score > 80 ? '#34D399' :
-                              profile.trust_score > 60 ? '#FBBF24' : '#F87171',
+                  width: `${trustScore}%`,
+                  background: trustScore > 80 ? '#34D399' :
+                              trustScore > 60 ? '#FBBF24' : '#F87171',
                 }} />
             </div>
             <div className="flex justify-between">
               <span className="text-text-muted text-xs">Trust Score</span>
-              <span className="text-text-primary text-xs font-bold">{profile.trust_score}/100</span>
+              <span className="text-text-primary text-xs font-bold">{trustScore}/100</span>
             </div>
-            {profile.trust_score <= 80 && (
+            {trustScore <= 80 && (
               <p className="mt-3 text-xs text-text-muted bg-bg-input rounded-lg p-2.5">
-                Score recovers automatically with normal daily activity.
-                Contact support if you believe this is an error.
+                {trustHelpText}
               </p>
             )}
           </div>
@@ -430,6 +495,7 @@ export default function ProfileScreen() {
       <div className="px-4 pb-4">
         <div className="card rounded-3xl overflow-hidden">
           {[
+            { icon: UserIcon, label: 'Edit Profile', iconColor: 'text-accent-blue', bgColor: 'bg-tint-blue', onClick: () => setShowProfileModal(true) },
             { icon: Key, label: 'Change Password', iconColor: 'text-accent-blue', bgColor: 'bg-tint-blue', onClick: () => setShowPasswordModal(true) },
             { icon: Smartphone, label: 'Active Devices', iconColor: 'text-accent-purple', bgColor: 'bg-tint-purple', onClick: () => navigate('/profile/sessions') },
             { icon: LifeBuoy, label: 'Support Center', iconColor: 'text-accent-green', bgColor: 'bg-tint-green', onClick: () => navigate('/support') },
@@ -512,6 +578,42 @@ export default function ProfileScreen() {
             className="flex-1 btn-primary py-3 rounded-2xl disabled:opacity-40"
           >
             {changePasswordMutation.isPending ? 'Updating...' : 'Update'}
+          </button>
+        </div>
+      </BaseModal>
+
+      {/* ── EDIT PROFILE MODAL ────────────────────────── */}
+      <BaseModal open={showProfileModal} onClose={() => setShowProfileModal(false)}>
+        <h2 className="text-2xl font-black text-text-primary mb-2">Edit Profile</h2>
+        <p className="text-sm text-text-muted mb-6">Update your account information</p>
+
+        <div className="space-y-4 mb-6">
+          <div>
+            <label className="block text-sm font-semibold text-text-secondary mb-2">Phone Number</label>
+            <input
+              type="tel"
+              value={profileForm.phone_number}
+              onChange={(e) => setProfileForm({ ...profileForm, phone_number: e.target.value })}
+              placeholder="254712345678"
+              className="input-field w-full"
+            />
+            <p className="text-xs text-text-muted mt-2">Used for M-Pesa withdrawals (e.g., 254712345678)</p>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowProfileModal(false)}
+            className="flex-1 btn-secondary py-3 rounded-2xl"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleProfileUpdate}
+            disabled={updateProfileMutation.isPending}
+            className="flex-1 btn-primary py-3 rounded-2xl disabled:opacity-40"
+          >
+            {updateProfileMutation.isPending ? 'Updating...' : 'Update'}
           </button>
         </div>
       </BaseModal>

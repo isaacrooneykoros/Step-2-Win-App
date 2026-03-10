@@ -1601,6 +1601,48 @@ def fraud_overview(request):
     from apps.steps.models import FraudFlag, TrustScore
 
     today = timezone.now().date()
+    open_flags = FraudFlag.objects.filter(reviewed=False).select_related('user')
+    reviewed_flags = (
+        FraudFlag.objects.filter(reviewed=True, actioned=True)
+        .select_related('user', 'user__trust_score')
+        .order_by('-created_at')[:50]
+    )
+
+    recent_flags_payload = []
+    for flag in open_flags.order_by('-created_at')[:50]:
+        recent_flags_payload.append({
+            'id': flag.id,
+            'user_username': flag.user.username,
+            'user_email': flag.user.email,
+            'flag_type': flag.flag_type,
+            'severity': flag.severity,
+            'date': flag.date,
+            'details': flag.details,
+            'reviewed': flag.reviewed,
+            'actioned': flag.actioned,
+            'created_at': flag.created_at,
+        })
+
+    reviewed_flags_payload = []
+    for flag in reviewed_flags:
+        trust = getattr(flag.user, 'trust_score', None)
+        details = flag.details if isinstance(flag.details, dict) else {}
+        reviewed_flags_payload.append({
+            'id': flag.id,
+            'user_username': flag.user.username,
+            'user_email': flag.user.email,
+            'flag_type': flag.flag_type,
+            'severity': flag.severity,
+            'date': flag.date,
+            'details': details,
+            'reviewed': flag.reviewed,
+            'actioned': flag.actioned,
+            'created_at': flag.created_at,
+            'last_action': details.get('admin_action'),
+            'current_trust_score': trust.score if trust else 100,
+            'current_trust_status': trust.status if trust else 'GOOD',
+        })
+
     return Response({
         'open_flags': FraudFlag.objects.filter(reviewed=False).count(),
         'critical_unread': FraudFlag.objects.filter(reviewed=False, severity='critical').count(),
@@ -1609,20 +1651,8 @@ def fraud_overview(request):
         'suspended_users': TrustScore.objects.filter(score__lte=20, score__gt=0).count(),
         'banned_users': TrustScore.objects.filter(score=0).count(),
         'flags_today': FraudFlag.objects.filter(created_at__date=today).count(),
-        'recent_flags': list(
-            FraudFlag.objects.filter(reviewed=False)
-            .select_related('user')
-            .values(
-                'id',
-                'user__username',
-                'user__email',
-                'flag_type',
-                'severity',
-                'date',
-                'details',
-            )
-            .order_by('-created_at')[:50]
-        ),
+        'recent_flags': recent_flags_payload,
+        'reviewed_flags': reviewed_flags_payload,
     })
 
 
@@ -1632,10 +1662,23 @@ def action_flag(request, flag_id):
     from apps.steps.models import FraudFlag, TrustScore
 
     action = request.data.get('action')
+    valid_actions = {
+        'dismiss', 'warn', 'restrict', 'suspend', 'ban',
+        'unrestrict', 'unsuspend', 'unban'
+    }
+    if action not in valid_actions:
+        return Response({'error': 'Invalid action'}, status=400)
+
     flag = get_object_or_404(FraudFlag, id=flag_id)
     flag.reviewed = True
     flag.actioned = action != 'dismiss'
-    flag.save(update_fields=['reviewed', 'actioned'])
+    details = flag.details if isinstance(flag.details, dict) else {}
+    details.update({
+        'admin_action': action,
+        'reviewed_at': timezone.now().isoformat(),
+    })
+    flag.details = details
+    flag.save(update_fields=['reviewed', 'actioned', 'details'])
 
     trust, _ = TrustScore.objects.get_or_create(user=flag.user)
 
@@ -1651,6 +1694,15 @@ def action_flag(request, flag_id):
         trust.save(update_fields=['score', 'updated_at'])
     elif action == 'ban':
         trust.score = 0
+        trust.save(update_fields=['score', 'updated_at'])
+    elif action == 'unrestrict':
+        trust.score = max(trust.score, 65)
+        trust.save(update_fields=['score', 'updated_at'])
+    elif action == 'unsuspend':
+        trust.score = max(trust.score, 45)
+        trust.save(update_fields=['score', 'updated_at'])
+    elif action == 'unban':
+        trust.score = max(trust.score, 35)
         trust.save(update_fields=['score', 'updated_at'])
 
     return Response({'status': f'Flag {action}ed'})
