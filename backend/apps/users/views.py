@@ -213,12 +213,18 @@ def logout(request):
 class ProfileView(generics.RetrieveUpdateAPIView):
     """
     Get or update user profile
+    Supports both PUT (partial update) and PATCH (partial update)
     """
     serializer_class = UserProfileSerializer
     permission_classes = [IsAuthenticated]
+    queryset = User.objects.all()
 
     def get_object(self):
         return self.request.user
+    
+    def put(self, request, *args, **kwargs):
+        """Handle PUT requests as partial updates"""
+        return self.partial_update(request, *args, **kwargs)
 
 
 @api_view(['POST'])

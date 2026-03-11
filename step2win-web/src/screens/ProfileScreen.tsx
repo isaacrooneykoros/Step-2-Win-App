@@ -21,6 +21,8 @@ import {
   Activity,
   ChevronRight,
   Smartphone,
+  Mail,
+  Target,
   User as UserIcon,
 } from 'lucide-react';
 import { authService } from '../services/api';
@@ -55,7 +57,9 @@ export default function ProfileScreen() {
     confirm_password: '',
   });
   const [profileForm, setProfileForm] = useState({
+    email: '',
     phone_number: '',
+    daily_goal: 10000,
   });
 
   const { data: profile } = useQuery<User>({
@@ -66,7 +70,9 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (profile) {
       setProfileForm({
+        email: profile.email || '',
         phone_number: profile.phone_number || '',
+        daily_goal: profile.daily_goal || 10000,
       });
     }
   }, [profile]);
@@ -115,6 +121,26 @@ export default function ProfileScreen() {
   };
 
   const handleProfileUpdate = () => {
+    // Validate email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!profileForm.email || !emailRegex.test(profileForm.email)) {
+      showToast({ message: 'Please enter a valid email address', type: 'error' });
+      return;
+    }
+
+    // Validate phone number (allow only digits and +, length 10-20)
+    const phoneRegex = /^[\d+\-() ]{7,20}$/;
+    if (profileForm.phone_number && !phoneRegex.test(profileForm.phone_number)) {
+      showToast({ message: 'Please enter a valid phone number', type: 'error' });
+      return;
+    }
+
+    // Validate daily goal
+    if (profileForm.daily_goal < 1000 || profileForm.daily_goal > 100000) {
+      showToast({ message: 'Daily goal must be between 1,000 and 100,000 steps', type: 'error' });
+      return;
+    }
+
     updateProfileMutation.mutate(profileForm);
   };
 
@@ -587,33 +613,87 @@ export default function ProfileScreen() {
         <h2 className="text-2xl font-black text-text-primary mb-2">Edit Profile</h2>
         <p className="text-sm text-text-muted mb-6">Update your account information</p>
 
-        <div className="space-y-4 mb-6">
+        <div className="space-y-5 mb-6">
+          {/* Email Field */}
           <div>
-            <label className="block text-sm font-semibold text-text-secondary mb-2">Phone Number</label>
+            <label className="flex items-center gap-2 text-sm font-semibold text-text-secondary mb-3">
+              <Mail size={16} className="text-accent-blue" />
+              Email Address
+            </label>
+            <input
+              type="email"
+              value={profileForm.email}
+              onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+              placeholder="your@email.com"
+              className="input-field w-full px-4 py-3 rounded-2xl"
+            />
+            <p className="text-xs text-text-muted mt-2">Your primary email for account recovery and notifications</p>
+          </div>
+
+          {/* Phone Number Field */}
+          <div>
+            <label className="flex items-center gap-2 text-sm font-semibold text-text-secondary mb-3">
+              <Smartphone size={16} className="text-accent-green" />
+              Phone Number
+            </label>
             <input
               type="tel"
               value={profileForm.phone_number}
               onChange={(e) => setProfileForm({ ...profileForm, phone_number: e.target.value })}
               placeholder="254712345678"
-              className="input-field w-full"
+              className="input-field w-full px-4 py-3 rounded-2xl"
             />
-            <p className="text-xs text-text-muted mt-2">Used for M-Pesa withdrawals (e.g., 254712345678)</p>
+            <p className="text-xs text-text-muted mt-2">Used for M-Pesa withdrawals (format: 254712345678)</p>
+          </div>
+
+          {/* Daily Goal Field */}
+          <div>
+            <label className="flex items-center gap-2 text-sm font-semibold text-text-secondary mb-3">
+              <Target size={16} className="text-accent-orange" />
+              Daily Step Goal
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="1000"
+                max="100000"
+                step="1000"
+                value={profileForm.daily_goal}
+                onChange={(e) => setProfileForm({ ...profileForm, daily_goal: parseInt(e.target.value) || 10000 })}
+                className="input-field flex-1 px-4 py-3 rounded-2xl"
+              />
+              <span className="text-text-muted font-medium">steps</span>
+            </div>
+            <div className="mt-3 p-3 rounded-xl bg-bg-input">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-text-muted">Progress to next level:</span>
+                <span className="text-xs font-bold text-accent-blue">{Math.round((profileForm.daily_goal / 50000) * 100)}%</span>
+              </div>
+              <div className="w-full h-1.5 bg-bg-page rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-accent-blue to-accent-purple transition-all duration-300"
+                  style={{ width: `${Math.min((profileForm.daily_goal / 50000) * 100, 100)}%` }}
+                />
+              </div>
+              <p className="text-xs text-text-muted mt-2">Between 1,000 and 100,000 steps daily</p>
+            </div>
           </div>
         </div>
 
         <div className="flex gap-3">
           <button
             onClick={() => setShowProfileModal(false)}
-            className="flex-1 btn-secondary py-3 rounded-2xl"
+            className="flex-1 btn-secondary py-3 rounded-2xl font-semibold"
           >
             Cancel
           </button>
           <button
             onClick={handleProfileUpdate}
             disabled={updateProfileMutation.isPending}
-            className="flex-1 btn-primary py-3 rounded-2xl disabled:opacity-40"
+            className="flex-1 btn-primary py-3 rounded-2xl font-semibold disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {updateProfileMutation.isPending ? 'Updating...' : 'Update'}
+            {updateProfileMutation.isPending && <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+            {updateProfileMutation.isPending ? 'Updating...' : 'Save Changes'}
           </button>
         </div>
       </BaseModal>
