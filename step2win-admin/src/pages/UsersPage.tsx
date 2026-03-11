@@ -33,6 +33,33 @@ interface User {
   last_login: string | null
 }
 
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+function isValidPhone(phone: string | null): boolean {
+  if (!phone) return false
+  return /^[\d+\-() ]{7,20}$/.test(phone)
+}
+
+function getProfileIssues(user: User): string[] {
+  const issues: string[] = []
+
+  if (!user.email) {
+    issues.push('Missing email')
+  } else if (!isValidEmail(user.email)) {
+    issues.push('Invalid email format')
+  }
+
+  if (!user.phone_number) {
+    issues.push('Missing phone number')
+  } else if (!isValidPhone(user.phone_number)) {
+    issues.push('Invalid phone format')
+  }
+
+  return issues
+}
+
 interface UsersData {
   results: User[]
   total: number
@@ -178,6 +205,25 @@ export function UsersPage() {
       ),
     },
     {
+      key: 'verification', label: 'Details Check',
+      render: (u: User) => {
+        const issues = getProfileIssues(u)
+        const isValid = issues.length === 0
+
+        return (
+          <span
+            className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold"
+            style={{
+              background: isValid ? 'rgba(34,211,160,0.14)' : 'rgba(245,166,35,0.16)',
+              color: isValid ? '#22D3A0' : '#F5A623',
+              border: `1px solid ${isValid ? 'rgba(34,211,160,0.24)' : 'rgba(245,166,35,0.26)'}`,
+            }}>
+            {isValid ? 'Verified' : `${issues.length} issue${issues.length > 1 ? 's' : ''}`}
+          </span>
+        )
+      },
+    },
+    {
       key: 'actions', label: 'Actions',
       render: (u: User) => (
         <div className="flex items-center gap-1">
@@ -273,6 +319,43 @@ export function UsersPage() {
         subtitle={selected?.email}>
         {selected && (
           <div>
+            {(() => {
+              const issues = getProfileIssues(selected)
+              const isValid = issues.length === 0
+
+              return (
+                <div
+                  className="mb-5 p-4 rounded-xl"
+                  style={{
+                    background: isValid ? 'rgba(34,211,160,0.08)' : 'rgba(245,166,35,0.12)',
+                    border: `1px solid ${isValid ? 'rgba(34,211,160,0.22)' : 'rgba(245,166,35,0.25)'}`,
+                  }}>
+                  <p
+                    className="text-sm font-semibold"
+                    style={{ color: isValid ? '#22D3A0' : '#F5A623' }}>
+                    {isValid ? 'User details look correct' : 'User details need review'}
+                  </p>
+                  <p className="text-xs text-ink-muted mt-1">
+                    {isValid
+                      ? 'Email and phone number are present and properly formatted.'
+                      : 'Check and correct the fields below to avoid payout and notification issues.'}
+                  </p>
+                  {!isValid && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {issues.map((issue) => (
+                        <span
+                          key={issue}
+                          className="px-2 py-1 rounded-lg text-[11px] font-semibold"
+                          style={{ background: 'rgba(245,166,35,0.16)', color: '#F5A623' }}>
+                          {issue}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
             {/* Avatar + name */}
             <div className="flex items-center gap-4 mb-6 pb-6"
               style={{ borderBottom: '1px solid #21263A' }}>
