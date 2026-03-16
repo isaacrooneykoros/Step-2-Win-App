@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from decimal import Decimal
 import uuid
+from auditlog.registry import auditlog
 
 
 def generate_reference_number():
@@ -127,3 +128,6 @@ class Withdrawal(models.Model):
     
     def __str__(self):
         return f"{self.user.username} - ${self.amount} - {self.status}"
+
+
+auditlog.register(WalletTransaction)

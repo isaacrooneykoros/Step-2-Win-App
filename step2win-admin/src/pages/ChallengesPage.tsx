@@ -48,16 +48,6 @@ interface ActionBtnProps {
   onClick: () => void
 }
 
-function toTypedPromise<T>(request: {
-  then: (callback: (data: unknown) => unknown) => unknown
-  catch: (callback: (error: Error) => unknown) => unknown
-}): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    request.then((data: unknown) => resolve(data as T))
-    request.catch((error: Error) => reject(error))
-  })
-}
-
 export function ChallengesPage() {
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
@@ -70,19 +60,27 @@ export function ChallengesPage() {
 
   const { data, isLoading } = useQuery<ChallengesData>({
     queryKey: ['admin', 'challenges', { search, page, status, type }],
-    queryFn: (): Promise<ChallengesData> => toTypedPromise<ChallengesData>(api.get('/api/admin/challenges/', {
-      params: { search, page, status, type },
-    })),
+    queryFn: async (): Promise<ChallengesData> => {
+      const response = await api.get<ChallengesData>('/api/admin/challenges/', {
+        params: { search, page, status, type },
+      })
+      return response.data
+    },
   })
 
   const { data: stats } = useQuery<ChallengeStats>({
     queryKey: ['admin', 'challenge-stats'],
-    queryFn: (): Promise<ChallengeStats> => toTypedPromise<ChallengeStats>(api.get('/api/admin/challenges/stats/')),
+    queryFn: async (): Promise<ChallengeStats> => {
+      const response = await api.get<ChallengeStats>('/api/admin/challenges/stats/')
+      return response.data
+    },
   })
 
   const cancelMut = useMutation({
-    mutationFn: (challenge: Challenge) =>
-      api.post(`/api/admin/challenges/${challenge.id}/cancel/`).then(payload => payload as unknown),
+    mutationFn: async (challenge: Challenge) => {
+      const response = await api.post(`/api/admin/challenges/${challenge.id}/cancel/`)
+      return response.data
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'challenges'] })
       setConfirmCancel(null)

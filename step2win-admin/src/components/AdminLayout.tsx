@@ -53,7 +53,7 @@ export function AdminLayout() {
 
   const handleLogout = () => {
     adminApi.adminLogout()
-    navigate('/auth/login')
+    navigate('/login')
   }
 
   return (

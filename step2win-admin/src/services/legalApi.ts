@@ -1,3 +1,5 @@
+import { useAuthStore } from '../store/authStore';
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
 export type LegalDocument = {
@@ -29,7 +31,7 @@ export type LegalPublishResponse = {
 }
 
 function getAuthToken(): string | null {
-  return localStorage.getItem('admin_jwt');
+  return useAuthStore.getState().accessToken;
 }
 
 async function request<T>(

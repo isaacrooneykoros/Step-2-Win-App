@@ -17,7 +17,7 @@ function resolveApiBaseUrl(): string {
 
 const api = axios.create({
   baseURL: resolveApiBaseUrl(),
-  timeout: 10000,
+  timeout: 15000,  // 15 seconds — prevents hanging requests
   headers: {
     'Content-Type': 'application/json',
   },
@@ -32,8 +32,7 @@ api.interceptors.request.use(
         config.headers.Authorization = `Bearer ${value}`;
       }
     } catch (e) {
-      // Fall back to localStorage
-      const value = localStorage.getItem('access_token');
+      const value = sessionStorage.getItem('access_token');
       if (value) {
         config.headers.Authorization = `Bearer ${value}`;
       }
@@ -91,7 +90,7 @@ api.interceptors.response.use(
           const { value } = await Preferences.get({ key: 'refresh_token' });
           refreshToken = value;
         } catch (e) {
-          refreshToken = localStorage.getItem('refresh_token');
+          refreshToken = sessionStorage.getItem('refresh_token');
         }
 
         if (!refreshToken) {
@@ -114,9 +113,9 @@ api.interceptors.response.use(
             await Preferences.set({ key: 'refresh_token', value: newRefresh });
           }
         } catch (e) {
-          localStorage.setItem('access_token', newAccess);
+          sessionStorage.setItem('access_token', newAccess);
           if (newRefresh) {
-            localStorage.setItem('refresh_token', newRefresh);
+            sessionStorage.setItem('refresh_token', newRefresh);
           }
         }
 
@@ -141,9 +140,9 @@ api.interceptors.response.use(
           await Preferences.remove({ key: 'refresh_token' });
           await Preferences.remove({ key: 'session_id' });
         } catch (e) {
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('refresh_token');
-          localStorage.removeItem('session_id');
+          sessionStorage.removeItem('access_token');
+          sessionStorage.removeItem('refresh_token');
+          sessionStorage.removeItem('session_id');
         }
 
         // Check if session was revoked

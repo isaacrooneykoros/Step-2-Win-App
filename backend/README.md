@@ -213,6 +213,78 @@ python manage.py collectstatic
 gunicorn step2win.wsgi:application --bind 0.0.0.0:8000 --workers 4
 ```
 
+### Deploying To Render
+
+Recommended Render setup:
+
+- Web service: Django + Gunicorn
+- PostgreSQL: Render managed Postgres
+- Redis: Render managed Redis
+- Worker service: Celery worker
+- Worker service: Celery beat
+
+Backend helper scripts included in this repo:
+
+```bash
+bash render-build.sh
+bash render-start.sh
+bash render-worker.sh
+bash render-beat.sh
+```
+
+Suggested Render commands:
+
+- Build Command:
+
+```bash
+bash render-build.sh
+```
+
+- Start Command:
+
+```bash
+bash render-start.sh
+```
+
+- Celery Worker Command:
+
+```bash
+bash render-worker.sh
+```
+
+- Celery Beat Command:
+
+```bash
+bash render-beat.sh
+```
+
+Minimum production environment variables:
+
+- `DJANGO_ENV=production`
+- `DEBUG=False`
+- `SECRET_KEY=<strong random value>`
+- `APP_SIGNING_SECRET=<strong random value>`
+- `ALLOWED_HOSTS=<your-render-domain>`
+- `CSRF_TRUSTED_ORIGINS=https://<your-render-domain>`
+- `CORS_ALLOWED_ORIGINS=https://<your-frontend-domain>`
+- `DATABASE_URL=<render postgres internal database url>`
+- `REDIS_URL=<render redis internal url>`
+- `USE_SQLITE=False`
+- `USE_REDIS=True`
+
+After first deploy, run:
+
+```bash
+python manage.py migrate
+python manage.py check --deploy
+python manage.py createsuperuser
+```
+
+Verify the deployment at:
+
+- `/api/health/`
+- `/<DJANGO_ADMIN_URL>`
+
 ### Environment Variables
 
 Required for production:

@@ -1,6 +1,7 @@
 import logging
 import uuid
 from decimal import Decimal
+from datetime import timedelta
 from django.conf import settings
 from django.db import transaction as db_transaction
 from django.db.models import Sum
@@ -9,12 +10,15 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.http import JsonResponse
 from django_ratelimit.decorators import ratelimit
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import serializers
+from drf_spectacular.utils import extend_schema, inline_serializer
 
 from . import pochipay
 from .models import PaymentTransaction, CallbackLog, WithdrawalRequest
+from apps.core.throttles import DepositRateThrottle, WithdrawalRateThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +29,31 @@ MAX_DEPOSIT = Decimal(str(settings.MAX_DEPOSIT_KES))
 
 # ── Deposit ───────────────────────────────────────────────────────────────────
 
+@extend_schema(
+    request=inline_serializer(
+        name='InitiateDepositRequest',
+        fields={
+            'amount': serializers.DecimalField(max_digits=10, decimal_places=2),
+            'phone_number': serializers.CharField(),
+        },
+    ),
+    responses={
+        200: inline_serializer(
+            name='InitiateDepositResponse',
+            fields={
+                'message': serializers.CharField(),
+                'order_id': serializers.CharField(),
+                'amount_kes': serializers.CharField(),
+                'status': serializers.CharField(),
+            },
+        ),
+        400: inline_serializer(name='InitiateDepositBadRequest', fields={'error': serializers.CharField()}),
+        502: inline_serializer(name='InitiateDepositUpstreamError', fields={'error': serializers.CharField()}),
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([DepositRateThrottle])
 def initiate_deposit(request):
     """
     Step 1 of deposit flow.
@@ -60,6 +87,19 @@ def initiate_deposit(request):
     except ValueError as e:
         return Response({'error': str(e)}, status=400)
 
+    # ── Idempotency — reject duplicate in-flight deposits ───────────────────────
+    recent_pending = PaymentTransaction.objects.filter(
+        user=user,
+        type='deposit',
+        status__in=['initiated', 'pending'],
+        created_at__gte=timezone.now() - timedelta(minutes=5),
+    ).first()
+    if recent_pending:
+        return Response({
+            'error': 'You already have a pending deposit. '
+                     'Please wait for it to complete before initiating another.',
+            'order_id': recent_pending.order_id,
+        }, status=400)
     # ── Create transaction record first (before calling PochPay) ──────────
     order_id           = f"DEP-{uuid.uuid4().hex[:20].upper()}"
     tracking_reference = pochipay.generate_tracking_reference('DEP')
@@ -124,6 +164,21 @@ def deposit_callback(request):
         thirdPartyReference, failReason, isSuccessful
     """
     import json
+    import hmac
+    import hashlib
+
+    # ── Webhook secret verification ───────────────────────────────────────
+    webhook_secret = getattr(settings, 'POCHIPAY_WEBHOOK_SECRET', None)
+    if webhook_secret:
+        provided_sig = request.headers.get('X-Pochipay-Signature', '')
+        expected_sig = hmac.new(
+            webhook_secret.encode(),
+            request.body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(provided_sig, expected_sig):
+            logger.warning('Deposit callback: invalid webhook signature — rejected')
+            return JsonResponse({'error': 'Invalid signature'}, status=403)
 
     try:
         payload = json.loads(request.body)
@@ -222,6 +277,21 @@ def payout_callback(request):
         successful, requestId, trackingReference, thirdPartyReference, failReason
     """
     import json
+    import hmac
+    import hashlib
+
+    # ── Webhook secret verification ───────────────────────────────────────
+    webhook_secret = getattr(settings, 'POCHIPAY_WEBHOOK_SECRET', None)
+    if webhook_secret:
+        provided_sig = request.headers.get('X-Pochipay-Signature', '')
+        expected_sig = hmac.new(
+            webhook_secret.encode(),
+            request.body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(provided_sig, expected_sig):
+            logger.warning('Payout callback: invalid webhook signature — rejected')
+            return JsonResponse({'error': 'Invalid signature'}, status=403)
 
     try:
         payload = json.loads(request.body)
@@ -316,6 +386,28 @@ def payout_callback(request):
 
 # ── Wallet Status ─────────────────────────────────────────────────────────────
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='WalletStatusResponse',
+            fields={
+                'balance_kes': serializers.CharField(),
+                'transactions': inline_serializer(
+                    name='WalletStatusTransaction',
+                    many=True,
+                    fields={
+                        'id': serializers.CharField(),
+                        'type': serializers.CharField(),
+                        'status': serializers.CharField(),
+                        'amount_kes': serializers.CharField(),
+                        'mpesa_ref': serializers.CharField(allow_blank=True, allow_null=True),
+                        'created_at': serializers.CharField(),
+                    },
+                ),
+            },
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def wallet_status(request):
@@ -342,6 +434,20 @@ def wallet_status(request):
     })
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='DepositStatusResponse',
+            fields={
+                'order_id': serializers.CharField(),
+                'status': serializers.CharField(),
+                'amount_kes': serializers.CharField(),
+                'mpesa_ref': serializers.CharField(allow_blank=True, allow_null=True),
+            },
+        ),
+        404: inline_serializer(name='DepositStatusNotFound', fields={'error': serializers.CharField()}),
+    },
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def deposit_status(request, order_id):
@@ -401,6 +507,15 @@ MAX_WITHDRAWAL = Decimal(str(settings.MAX_WITHDRAWAL_KES))
 MAX_DAILY      = Decimal(str(settings.MAX_DAILY_WITHDRAWAL))
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='GetBanksResponse',
+            fields={'banks': serializers.ListField()},
+        ),
+        502: inline_serializer(name='GetBanksError', fields={'error': serializers.CharField()}),
+    },
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_banks(request):
@@ -413,6 +528,36 @@ def get_banks(request):
         return Response({'error': 'Could not load bank list. Try again.'}, status=502)
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='RequestWithdrawalRequest',
+        fields={
+            'method': serializers.ChoiceField(choices=['mpesa', 'bank', 'paybill']),
+            'amount': serializers.DecimalField(max_digits=10, decimal_places=2),
+            'phone_number': serializers.CharField(required=False),
+            'bank_code': serializers.CharField(required=False),
+            'account_number': serializers.CharField(required=False),
+            'short_code': serializers.CharField(required=False),
+            'is_paybill': serializers.BooleanField(required=False),
+        },
+    ),
+    responses={
+        201: inline_serializer(
+            name='RequestWithdrawalResponse',
+            fields={
+                'message': serializers.CharField(),
+                'withdrawal_id': serializers.CharField(),
+                'amount_kes': serializers.CharField(),
+                'method': serializers.CharField(),
+                'status': serializers.CharField(),
+                'destination': serializers.CharField(),
+            },
+        ),
+        400: inline_serializer(name='RequestWithdrawalBadRequest', fields={'error': serializers.CharField()}),
+        500: inline_serializer(name='RequestWithdrawalServerError', fields={'error': serializers.CharField()}),
+        502: inline_serializer(name='RequestWithdrawalUpstreamError', fields={'error': serializers.CharField()}),
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @ratelimit(key='user', rate='5/h', method='POST', block=True)
@@ -554,6 +699,25 @@ def request_withdrawal(request):
     }, status=201)
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='WithdrawalHistoryItem',
+            many=True,
+            fields={
+                'id': serializers.CharField(),
+                'status': serializers.CharField(),
+                'amount_kes': serializers.CharField(),
+                'method': serializers.CharField(),
+                'destination': serializers.CharField(),
+                'mpesa_ref': serializers.CharField(allow_blank=True, allow_null=True),
+                'fail_reason': serializers.CharField(allow_blank=True, allow_null=True),
+                'created_at': serializers.CharField(),
+                'updated_at': serializers.CharField(),
+            },
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def withdrawal_history(request):
@@ -578,6 +742,14 @@ def withdrawal_history(request):
     ])
 
 
+@extend_schema(
+    request=None,
+    responses={
+        200: inline_serializer(name='CancelWithdrawalResponse', fields={'message': serializers.CharField()}),
+        400: inline_serializer(name='CancelWithdrawalBadRequest', fields={'error': serializers.CharField()}),
+        404: inline_serializer(name='CancelWithdrawalNotFound', fields={'error': serializers.CharField()}),
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def cancel_withdrawal(request, withdrawal_id):
@@ -624,6 +796,22 @@ def withdrawal_callback(request):
         successful, requestId, trackingReference, thirdPartyReference, failReason
     """
     import json
+    import hmac
+    import hashlib
+
+    # ── Webhook secret verification ───────────────────────────────────────
+    webhook_secret = getattr(settings, 'POCHIPAY_WEBHOOK_SECRET', None)
+    if webhook_secret:
+        provided_sig = request.headers.get('X-Pochipay-Signature', '')
+        expected_sig = hmac.new(
+            webhook_secret.encode(),
+            request.body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(provided_sig, expected_sig):
+            logger.warning('Withdrawal callback: invalid webhook signature — rejected')
+            return JsonResponse({'error': 'Invalid signature'}, status=403)
+
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:

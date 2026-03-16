@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AdminLayout } from './components/AdminLayout';
 import { DashboardPage } from './pages/DashboardPage';
@@ -12,21 +13,32 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ActivityLogsPage } from './pages/ActivityLogsPage';
 import { SupportPage } from './pages/SupportPage';
-import { AdminRouteGuard } from './components/AdminRouteGuard';
-import { AdminLoginPage } from './pages/AdminLoginPage';
-import { AdminRegisterPage } from './pages/AdminRegisterPage';
 import LegalDocumentsPage from './pages/LegalDocumentsPage';
+import { ProtectedRoute } from './components/auth/ProtectedRoute';
+import LoginPage from './pages/auth/LoginPage';
+import RegisterPage from './pages/auth/RegisterPage';
+import { useAuthStore } from './store/authStore';
 
 import { AdminFraudPage } from './pages/AdminFraudPage';
 
 function App() {
+  const loadSession = useAuthStore((state) => state.loadSession);
+
+  useEffect(() => {
+    void loadSession();
+  }, [loadSession]);
+
   return (
     <Routes>
-      <Route path="/auth/login" element={<AdminLoginPage />} />
-      <Route path="/auth/register" element={<AdminRegisterPage />} />
-      <Route path="/" element={<AdminLayout />}>
-        <Route element={<AdminRouteGuard />}>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/auth/login" element={<Navigate to="/login" replace />} />
+      <Route path="/auth/register" element={<Navigate to="/register" replace />} />
+
+      <Route element={<ProtectedRoute />}>
+        <Route path="/" element={<AdminLayout />}>
           <Route index element={<DashboardPage />} />
+          <Route path="dashboard" element={<DashboardPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="challenges" element={<ChallengesPage />} />
           <Route path="transactions" element={<TransactionsPage />} />

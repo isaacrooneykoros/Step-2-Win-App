@@ -3,6 +3,8 @@ from rest_framework.decorators import api_view, permission_classes, parser_class
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.response import Response
+from rest_framework import serializers
+from drf_spectacular.utils import extend_schema, inline_serializer
 
 from .models import LegalDocument, LegalDocumentVersion, UserDocumentAck
 from .serializers import (
@@ -17,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # ── PUBLIC ENDPOINTS (mobile app) ────────────────────────────────────────────
 
+@extend_schema(responses={200: LegalDocumentPublicSerializer(many=True)})
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def list_documents_public(request):
@@ -32,6 +35,15 @@ def list_documents_public(request):
     return Response(serializer.data)
 
 
+@extend_schema(
+    responses={
+        200: LegalDocumentPublicSerializer,
+        404: inline_serializer(
+            name='LegalDocPublicNotFound',
+            fields={'error': serializers.CharField()},
+        ),
+    }
+)
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def get_document_public(request, slug):
@@ -52,6 +64,22 @@ def get_document_public(request, slug):
     return Response(serializer.data)
 
 
+@extend_schema(
+    request=None,
+    responses={
+        200: inline_serializer(
+            name='AcknowledgeDocumentResponse',
+            fields={
+                'acknowledged': serializers.BooleanField(),
+                'version': serializers.IntegerField(),
+            },
+        ),
+        404: inline_serializer(
+            name='AcknowledgeDocumentNotFound',
+            fields={'error': serializers.CharField()},
+        ),
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def acknowledge_document(request, slug):
@@ -77,6 +105,7 @@ def acknowledge_document(request, slug):
 
 # ── ADMIN ENDPOINTS ───────────────────────────────────────────────────────────
 
+@extend_schema(responses={200: LegalDocumentAdminSerializer(many=True)})
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def list_documents_admin(request):
@@ -88,6 +117,20 @@ def list_documents_admin(request):
     return Response(serializer.data)
 
 
+@extend_schema(
+    request=LegalDocumentAdminSerializer,
+    responses={
+        200: LegalDocumentAdminSerializer,
+        400: inline_serializer(
+            name='LegalDocumentAdminBadRequest',
+            fields={'error': serializers.CharField(required=False)},
+        ),
+        404: inline_serializer(
+            name='LegalDocumentAdminNotFound',
+            fields={'error': serializers.CharField()},
+        ),
+    },
+)
 @api_view(['GET', 'PUT', 'PATCH'])
 @permission_classes([IsAdminUser])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
@@ -137,6 +180,10 @@ def document_detail_admin(request, pk):
     return Response(serializer.errors, status=400)
 
 
+@extend_schema(
+    request=LegalDocumentAdminSerializer,
+    responses={201: LegalDocumentAdminSerializer, 400: serializers.DictField()},
+)
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def create_document_admin(request):
@@ -154,6 +201,35 @@ def create_document_admin(request):
     return Response(serializer.errors, status=400)
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='PublishDocumentRequest',
+        fields={
+            'notify_users': serializers.BooleanField(required=False),
+            'change_summary': serializers.CharField(required=False),
+        },
+    ),
+    responses={
+        200: inline_serializer(
+            name='PublishDocumentResponse',
+            fields={
+                'published': serializers.BooleanField(),
+                'version': serializers.IntegerField(),
+                'version_label': serializers.CharField(),
+                'notify_users': serializers.BooleanField(),
+                'published_at': serializers.DateTimeField(),
+            },
+        ),
+        400: inline_serializer(
+            name='PublishDocumentBadRequest',
+            fields={'error': serializers.CharField()},
+        ),
+        404: inline_serializer(
+            name='PublishDocumentNotFound',
+            fields={'error': serializers.CharField()},
+        ),
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def publish_document(request, pk):
@@ -221,6 +297,22 @@ def publish_document(request, pk):
     })
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='DocumentHistoryResponse',
+            fields={
+                'document': serializers.CharField(),
+                'current_version': serializers.CharField(),
+                'history': LegalDocumentVersionSerializer(many=True),
+            },
+        ),
+        404: inline_serializer(
+            name='DocumentHistoryNotFound',
+            fields={'error': serializers.CharField()},
+        ),
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def document_history(request, pk):
@@ -242,6 +334,23 @@ def document_history(request, pk):
     })
 
 
+@extend_schema(
+    request=None,
+    responses={
+        200: inline_serializer(
+            name='RestoreVersionResponse',
+            fields={
+                'restored': serializers.BooleanField(),
+                'from_version': serializers.CharField(),
+                'message': serializers.CharField(),
+            },
+        ),
+        404: inline_serializer(
+            name='RestoreVersionNotFound',
+            fields={'error': serializers.CharField()},
+        ),
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def restore_version(request, pk, version_id):

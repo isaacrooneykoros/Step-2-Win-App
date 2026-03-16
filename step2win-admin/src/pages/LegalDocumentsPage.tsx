@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { legalAdminService } from '../services/legalApi';
 import { formatDistanceToNow } from 'date-fns';
+import { sanitizeHtml } from '../utils/sanitize';
 
 type LegalDocument = {
   id: number
@@ -606,7 +607,7 @@ export default function LegalDocumentsPage() {
                   /* Preview mode — render HTML */
                   <div className="bg-slate-900 rounded-xl p-6 min-h-100
                                   prose prose-invert prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{ __html: editorContent }} />
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(editorContent) }} />
                 ) : (
                   <>
                     {/* File upload section */}

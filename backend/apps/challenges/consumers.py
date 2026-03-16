@@ -5,10 +5,12 @@ from urllib.parse import parse_qs
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken
 
 from .models import Challenge, Participant
+from apps.core.sanitizers import sanitize_chat_message
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -67,8 +69,16 @@ class ChallengeChatConsumer(AsyncWebsocketConsumer):
         msg_type = data.get('type', 'message')
 
         if msg_type == 'message':
-            content = (data.get('content') or '').strip()
-            if not content or len(content) > 1000:
+            raw_content = (data.get('content') or '').strip()
+
+            # Sanitize with bleach before saving or broadcasting
+            try:
+                content = sanitize_chat_message(raw_content)
+            except ValidationError as e:
+                await self.send(text_data=json.dumps({
+                    'type':  'error',
+                    'error': e.message if hasattr(e, 'message') else str(e),
+                }))
                 return
 
             saved = await self._save_message(content)

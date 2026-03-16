@@ -122,14 +122,16 @@ def nightly_fraud_scan():
             date__lte=yesterday,
         ).aggregate(t=Sum('steps'))['t'] or 0
         if total > 420_000:
-            FraudFlag.objects.create(
+            FraudFlag.objects.get_or_create(
                 user=user,
                 date=yesterday,
                 flag_type='weekly_cap',
-                severity='high',
-                details={
-                    'week_total': total,
-                    'note': f'Weekly {total:,} > 420,000 maximum',
+                defaults={
+                    'severity': 'high',
+                    'details': {
+                        'week_total': total,
+                        'note': f'Weekly {total:,} > 420,000 maximum',
+                    },
                 },
             )
 

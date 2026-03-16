@@ -1,6 +1,7 @@
 import uuid
 from django.db import models
 from django.conf import settings
+from auditlog.registry import auditlog
 
 
 class PaymentTransaction(models.Model):
@@ -177,3 +178,11 @@ class WithdrawalRequest(models.Model):
             acc  = f' ({self.account_number})' if self.account_number else ''
             return f"{kind}: {self.short_code}{acc}"
         return 'Unknown'
+
+
+auditlog.register(PaymentTransaction, include_fields=[
+    'status', 'amount_kes', 'type', 'mpesa_reference', 'fail_reason',
+])
+auditlog.register(WithdrawalRequest, include_fields=[
+    'status', 'amount_kes', 'method', 'phone_number',
+])

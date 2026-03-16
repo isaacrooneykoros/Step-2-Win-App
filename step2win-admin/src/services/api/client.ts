@@ -1,86 +1,107 @@
 /**
- * Axios-compatible API client wrapper
- * Maps the new component API calls to the existing adminApi
+ * Axios instance for Step2Win Admin API.
+ * - Attaches Bearer token
+ * - Refreshes once on 401
+ * - Redirects to /login when refresh fails
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+import axios, { AxiosError } from 'axios';
+import type { InternalAxiosRequestConfig } from 'axios';
+import { useAuthStore } from '../../store/authStore';
 
-function getAuthToken(): string | null {
-  return localStorage.getItem('admin_jwt');
+const REFRESH_KEY = 's2w_admin_refresh';
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL,
+  timeout: 15_000,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  const token = useAuthStore.getState().accessToken;
+  if (token && config.headers) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (value: string | null) => void;
+  reject: (error: AxiosError) => void;
+}> = [];
+
+function processQueue(error: AxiosError | null, token: string | null) {
+  failedQueue.forEach((promise) => {
+    if (error) {
+      promise.reject(error);
+      return;
+    }
+    promise.resolve(token);
+  });
+  failedQueue = [];
 }
 
-async function request(method: string, url: string, data?: Record<string, unknown>, params?: Record<string, unknown>) {
-  let fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
-  
-  // Add query params
-  if (params) {
-    const searchParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        searchParams.append(key, String(value));
-      }
-    });
-    const queryString = searchParams.toString();
-    fullUrl += (fullUrl.includes('?') ? '&' : '?') + queryString;
-  }
+api.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const original = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
+    if (!original || error.response?.status !== 401 || original._retry) {
+      return Promise.reject(error);
+    }
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
+    if (isRefreshing) {
+      return new Promise<string | null>((resolve, reject) => {
+        failedQueue.push({ resolve, reject });
+      }).then((token) => {
+        if (!token) {
+          return Promise.reject(error);
+        }
+        if (original.headers) {
+          original.headers.Authorization = `Bearer ${token}`;
+        }
+        return api(original);
+      });
+    }
 
-  const token = getAuthToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
+    original._retry = true;
+    isRefreshing = true;
 
-  const response = await fetch(fullUrl, {
-    method,
-    headers,
-    body: data ? JSON.stringify(data) : undefined,
-  });
+    const refresh = localStorage.getItem(REFRESH_KEY);
+    if (!refresh) {
+      useAuthStore.getState().clearAuth();
+      window.location.href = '/login';
+      return Promise.reject(error);
+    }
 
-  if (response.status === 401) {
-    // Token expired
-    localStorage.removeItem('admin_jwt');
-    localStorage.removeItem('admin_refresh');
-    localStorage.removeItem('admin_user');
-    window.location.href = '/auth/login';
-    throw new Error('Unauthorized');
-  }
-
-  if (!response.ok) {
-    const text = await response.text();
     try {
-      const error = JSON.parse(text);
-      throw new Error(error.detail || error.message || `HTTP ${response.status}`);
-    } catch {
-      throw new Error(`HTTP ${response.status}: ${text}`);
+      const response = await axios.post<{ access: string; refresh?: string }>(
+        `${import.meta.env.VITE_API_BASE_URL}/api/auth/refresh/`,
+        { refresh }
+      );
+
+      const newAccess = response.data.access;
+      const newRefresh = response.data.refresh;
+
+      useAuthStore.getState().setToken(newAccess);
+      if (newRefresh) {
+        localStorage.setItem(REFRESH_KEY, newRefresh);
+      }
+
+      if (original.headers) {
+        original.headers.Authorization = `Bearer ${newAccess}`;
+      }
+      processQueue(null, newAccess);
+      return api(original);
+    } catch (refreshError) {
+      processQueue(refreshError as AxiosError, null);
+      useAuthStore.getState().clearAuth();
+      window.location.href = '/login';
+      return Promise.reject(refreshError);
+    } finally {
+      isRefreshing = false;
     }
   }
-
-  return response.json();
-}
-
-const api = {
-  get: (url: string, config?: { params?: Record<string, unknown> }) => ({
-    then: (callback: (data: unknown) => unknown) => request('GET', url, undefined, config?.params).then(callback),
-    catch: (callback: (error: Error) => unknown) => request('GET', url, undefined, config?.params).catch(callback),
-  }),
-
-  post: (url: string, data?: Record<string, unknown>, config?: { params?: Record<string, unknown> }) => ({
-    then: (callback: (data: unknown) => unknown) => request('POST', url, data, config?.params).then(callback),
-    catch: (callback: (error: Error) => unknown) => request('POST', url, data, config?.params).catch(callback),
-  }),
-
-  patch: (url: string, data?: Record<string, unknown>, config?: { params?: Record<string, unknown> }) => ({
-    then: (callback: (data: unknown) => unknown) => request('PATCH', url, data, config?.params).then(callback),
-    catch: (callback: (error: Error) => unknown) => request('PATCH', url, data, config?.params).catch(callback),
-  }),
-
-  delete: (url: string, config?: { params?: Record<string, unknown> }) => ({
-    then: (callback: (data: unknown) => unknown) => request('DELETE', url, undefined, config?.params).then(callback),
-    catch: (callback: (error: Error) => unknown) => request('DELETE', url, undefined, config?.params).catch(callback),
-  }),
-};
+);
 
 export default api;

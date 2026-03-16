@@ -82,16 +82,6 @@ interface ActionBtnProps {
   onClick: () => void
 }
 
-function toTypedPromise<T>(request: {
-  then: (callback: (data: unknown) => unknown) => unknown
-  catch: (callback: (error: Error) => unknown) => unknown
-}): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    request.then((data: unknown) => resolve(data as T))
-    request.catch((error: Error) => reject(error))
-  })
-}
-
 export function UsersPage() {
   const qc = useQueryClient()
 
@@ -112,28 +102,43 @@ export function UsersPage() {
   // ── Data ─────────────────────────────────────────────────────────────
   const { data, isLoading } = useQuery<UsersData>({
     queryKey: ['admin', 'users', { search, page, status, role, sortKey, sortDir }],
-    queryFn: (): Promise<UsersData> => toTypedPromise<UsersData>(api.get('/api/admin/users/', {
-      params: { search, page, status, role, sort: sortKey, dir: sortDir }
-    })),
+    queryFn: async (): Promise<UsersData> => {
+      const response = await api.get<UsersData>('/api/admin/users/', {
+        params: { search, page, status, role, sort: sortKey, dir: sortDir }
+      })
+      return response.data
+    },
   })
 
   const { data: stats } = useQuery<UserStats>({
     queryKey: ['admin', 'user-stats'],
-    queryFn: (): Promise<UserStats> => toTypedPromise<UserStats>(api.get('/api/admin/users/stats/')),
+    queryFn: async (): Promise<UserStats> => {
+      const response = await api.get<UserStats>('/api/admin/users/stats/')
+      return response.data
+    },
   })
 
   const banMut = useMutation({
-    mutationFn: (user: User) => api.post(`/api/admin/users/${user.id}/ban/`).then((r: unknown) => r && typeof r === 'object' && 'then' in r ? (r as Promise<unknown>).then((data: unknown) => data) : r),
+    mutationFn: async (user: User) => {
+      const response = await api.post(`/api/admin/users/${user.id}/ban/`)
+      return response.data
+    },
     onSuccess:  () => { qc.invalidateQueries({ queryKey: ['admin', 'users'] }); setConfirmBan(null) },
   })
 
   const unbanMut = useMutation({
-    mutationFn: (id: number) => api.post(`/api/admin/users/${id}/unban/`).then((r: unknown) => r && typeof r === 'object' && 'then' in r ? (r as Promise<unknown>).then((data: unknown) => data) : r),
+    mutationFn: async (id: number) => {
+      const response = await api.post(`/api/admin/users/${id}/unban/`)
+      return response.data
+    },
     onSuccess:  () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
   })
 
   const deleteMut = useMutation({
-    mutationFn: (user: User) => api.delete(`/api/admin/users/${user.id}/`).then((r: unknown) => r && typeof r === 'object' && 'then' in r ? (r as Promise<unknown>).then((data: unknown) => data) : r),
+    mutationFn: async (user: User) => {
+      const response = await api.delete(`/api/admin/users/${user.id}/`)
+      return response.data
+    },
     onSuccess:  () => { qc.invalidateQueries({ queryKey: ['admin', 'users'] }); setConfirmDel(null) },
   })
 

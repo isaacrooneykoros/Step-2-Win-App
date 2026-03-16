@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from datetime import date, timedelta
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import Challenge, Participant, ChallengeMessage
+from apps.core.sanitizers import sanitize_text
 
 
 class ParticipantSerializer(serializers.ModelSerializer):
@@ -50,16 +52,30 @@ class ChallengeSerializer(serializers.ModelSerializer):
     
     def validate_entry_fee(self, value):
         if value < 1:
-            raise serializers.ValidationError('Minimum entry fee is $1.00')
+            raise serializers.ValidationError('Minimum entry fee is KES 1')
         if value > 10000:
-            raise serializers.ValidationError('Maximum entry fee is $10,000.00')
+            raise serializers.ValidationError('Maximum entry fee is KES 10,000')
         return value
-    
+
     def validate_max_participants(self, value):
         if value < 2:
             raise serializers.ValidationError('Minimum 2 participants required')
         if value > 1000:
             raise serializers.ValidationError('Maximum 1000 participants allowed')
+        return value
+
+    def validate_name(self, value):
+        try:
+            return sanitize_text(value, max_length=100)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message)
+
+    def validate_description(self, value):
+        if value:
+            try:
+                return sanitize_text(value, max_length=500)
+            except DjangoValidationError as e:
+                raise serializers.ValidationError(e.message)
         return value
     
     def validate(self, data):
@@ -136,7 +152,7 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
     
     def validate_entry_fee(self, value):
         if value < 1:
-            raise serializers.ValidationError('Minimum entry fee is $1.00')
+            raise serializers.ValidationError('Minimum entry fee is KES 1')
         return value
 
     def validate_theme_emoji(self, value):

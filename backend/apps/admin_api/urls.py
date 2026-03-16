@@ -4,7 +4,6 @@ from apps.admin_api.views import (
     AdminUserViewSet,
     AdminChallengeViewSet,
     AdminTransactionViewSet,
-    AdminWithdrawalViewSet,
     AdminBadgeViewSet,
     AdminDashboardViewSet,
     admin_login,
@@ -36,7 +35,6 @@ router = DefaultRouter()
 router.register(r'users', AdminUserViewSet, basename='admin-user')
 router.register(r'challenges', AdminChallengeViewSet, basename='admin-challenge')
 router.register(r'transactions', AdminTransactionViewSet, basename='admin-transaction')
-router.register(r'withdrawals', AdminWithdrawalViewSet, basename='admin-withdrawal')
 router.register(r'badges', AdminBadgeViewSet, basename='admin-badge')
 router.register(r'dashboard', AdminDashboardViewSet, basename='admin-dashboard')
 

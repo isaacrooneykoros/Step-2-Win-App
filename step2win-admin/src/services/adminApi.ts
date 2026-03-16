@@ -14,27 +14,31 @@ import type {
   WithdrawalStats,
   FraudOverview,
 } from '../types/admin';
+import { useAuthStore, type AdminUser as StoreAdminUser } from '../store/authStore';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
 function getAuthToken(): string | null {
-  return localStorage.getItem('admin_jwt');
+  return useAuthStore.getState().accessToken;
 }
 
 function getRefreshToken(): string | null {
-  return localStorage.getItem('admin_refresh');
+  return localStorage.getItem('s2w_admin_refresh') || localStorage.getItem('admin_refresh');
 }
 
 function setAuthSession(payload: AdminAuthResponse) {
-  localStorage.setItem('admin_jwt', payload.access);
-  localStorage.setItem('admin_refresh', payload.refresh);
-  localStorage.setItem('admin_user', JSON.stringify(payload.user));
+  const normalizedUser: StoreAdminUser = {
+    id: payload.user.id,
+    username: payload.user.username,
+    email: payload.user.email,
+    is_staff: payload.user.is_staff,
+    is_superuser: (payload.user as { is_superuser?: boolean }).is_superuser ?? false,
+  };
+  useAuthStore.getState().setAuth(payload.access, payload.refresh, normalizedUser);
 }
 
 function clearAuthSession() {
-  localStorage.removeItem('admin_jwt');
-  localStorage.removeItem('admin_refresh');
-  localStorage.removeItem('admin_user');
+  useAuthStore.getState().clearAuth();
 }
 
 function safeParseJson(value: string): unknown | null {
@@ -109,9 +113,9 @@ async function refreshAdminAccessToken(): Promise<string | null> {
       return null;
     }
 
-    localStorage.setItem('admin_jwt', payload.access);
+    useAuthStore.getState().setToken(payload.access);
     if (payload.refresh) {
-      localStorage.setItem('admin_refresh', payload.refresh);
+      localStorage.setItem('s2w_admin_refresh', payload.refresh);
     }
 
     return payload.access as string;
@@ -140,8 +144,8 @@ async function request<T>(path: string, options?: RequestInit, hasRetried = fals
     }
 
     clearAuthSession();
-    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth/login')) {
-      window.location.href = '/auth/login';
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+      window.location.href = '/login';
     }
     throw new Error('Session expired. Please log in again.');
   }
@@ -193,16 +197,8 @@ export const adminApi = {
     clearAuthSession();
   },
   getCurrentAdmin: (): AdminAuthUser | null => {
-    const raw = localStorage.getItem('admin_user');
-    if (!raw) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(raw) as AdminAuthUser;
-    } catch {
-      return null;
-    }
+    const user = useAuthStore.getState().user;
+    return (user as unknown as AdminAuthUser) ?? null;
   },
   clearAuthSession,
 

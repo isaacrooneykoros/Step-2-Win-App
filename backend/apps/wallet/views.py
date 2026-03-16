@@ -2,6 +2,8 @@ from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import serializers
+from drf_spectacular.utils import extend_schema, inline_serializer
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -19,6 +21,7 @@ from .serializers import (
 from apps.users.views import WalletThrottle
 
 
+@extend_schema(responses={200: WalletSummarySerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def wallet_summary(request):
@@ -80,6 +83,20 @@ class TransactionListView(generics.ListAPIView):
         return queryset
 
 
+@extend_schema(
+    request=DepositSerializer,
+    responses={
+        201: inline_serializer(
+            name='DepositResponse',
+            fields={
+                'status': serializers.CharField(),
+                'balance': serializers.CharField(),
+                'transaction_id': serializers.IntegerField(),
+                'amount': serializers.CharField(),
+            },
+        )
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @throttle_classes([WalletThrottle])
@@ -123,6 +140,20 @@ def deposit(request):
     }, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(
+    request=WithdrawalSerializer,
+    responses={
+        201: inline_serializer(
+            name='WithdrawalInitiateResponse',
+            fields={
+                'status': serializers.CharField(),
+                'reference_number': serializers.CharField(),
+                'amount': serializers.CharField(),
+                'message': serializers.CharField(),
+            },
+        )
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @throttle_classes([WalletThrottle])
@@ -299,6 +330,7 @@ class WithdrawalListView(generics.ListAPIView):
         return Withdrawal.objects.filter(user=self.request.user)
 
 
+@extend_schema(responses={200: WithdrawalSerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def withdrawal_detail(request, reference_number):
@@ -319,6 +351,18 @@ def withdrawal_detail(request, reference_number):
         )
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='TransactionStatsResponse',
+            fields={
+                'total_transactions': serializers.IntegerField(),
+                'by_type': serializers.DictField(),
+                'latest_transaction': TransactionSerializer(allow_null=True),
+            },
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def transaction_stats(request):

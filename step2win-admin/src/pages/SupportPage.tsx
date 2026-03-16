@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { adminApi } from '../services/adminApi';
 import type { SupportAdminUser, SupportTicket, SupportTicketMessage } from '../types/admin';
 import { Headset, Search, Filter, MessageSquare, Clock, User } from 'lucide-react';
+import { useAuthStore } from '../store/authStore';
 
 export function SupportPage() {
+  const accessToken = useAuthStore((state) => state.accessToken);
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -82,7 +84,7 @@ export function SupportPage() {
     if (!selectedTicket?.id) return;
     const ticketId = selectedTicket.id;
 
-    const token = localStorage.getItem('admin_jwt');
+    const token = accessToken;
     if (!token) return;
 
     const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
@@ -123,7 +125,7 @@ export function SupportPage() {
       socket.close();
       wsRef.current = null;
     };
-  }, [selectedTicket?.id]);
+  }, [selectedTicket?.id, accessToken]);
 
   useEffect(() => {
     if (selectedTicket) {

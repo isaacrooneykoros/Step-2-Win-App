@@ -4,6 +4,7 @@ from django.conf import settings
 from decimal import Decimal
 import uuid
 from django.utils import timezone
+from auditlog.registry import auditlog
 
 
 class User(AbstractUser):
@@ -98,6 +99,12 @@ class User(AbstractUser):
     def available_balance(self):
         """Calculate available balance (wallet - locked)"""
         return self.wallet_balance - self.locked_balance
+
+
+auditlog.register(User, include_fields=[
+    'username', 'email', 'is_active', 'is_staff',
+    'wallet_balance', 'locked_balance',
+])
 
 
 class UserXP(models.Model):
