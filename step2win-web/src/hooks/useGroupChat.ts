@@ -7,40 +7,123 @@
  *  3. Sends via WebSocket if open, falls back to POST /chat/ if closed
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Preferences } from '@capacitor/preferences';
+import { Capacitor } from '@capacitor/core';
 import { ChatMessage } from '../types';
 import { challengesService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 
-const WS_BASE =
-  import.meta.env.VITE_WS_URL ||
-  (import.meta.env.VITE_API_BASE_URL
-    ?.replace('https://', 'wss://')
-    .replace('http://', 'ws://')) ||
-  'ws://localhost:8000';
+function resolveApiBaseUrl(): string {
+  const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  const fallback = 'http://127.0.0.1:8000';
+  const base = envBase || fallback;
+
+  const platform = Capacitor.getPlatform();
+  if (platform === 'android' && (base.includes('127.0.0.1') || base.includes('localhost'))) {
+    return base.replace('127.0.0.1', '10.0.2.2').replace('localhost', '10.0.2.2');
+  }
+
+  return base;
+}
+
+function resolveWsBase(): string {
+  const explicit = import.meta.env.VITE_WS_URL as string | undefined;
+  const raw = explicit || resolveApiBaseUrl();
+  try {
+    const parsed = new URL(raw);
+    const protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${parsed.host}`;
+  } catch {
+    return raw.replace('https://', 'wss://').replace('http://', 'ws://').replace(/\/$/, '');
+  }
+}
+
+const API_BASE = resolveApiBaseUrl();
+const WS_BASE = resolveWsBase();
 
 export function useGroupChat(challengeId: number) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connected, setConnected] = useState(false);
+  const [realtimeUnavailable, setRealtimeUnavailable] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const shouldReconnectRef = useRef(true);
+  const reconnectAttemptsRef = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
   const typingTimer = useRef<ReturnType<typeof setTimeout>>();
   const pollTimer = useRef<ReturnType<typeof setInterval>>();
   const isTypingRef = useRef(false);
 
+  const refreshAccessToken = useCallback(async (): Promise<string | null> => {
+    let refreshToken: string | null = null;
+    try {
+      const { value } = await Preferences.get({ key: 'refresh_token' });
+      refreshToken = value;
+    } catch {
+      refreshToken = sessionStorage.getItem('refresh_token');
+    }
+
+    if (!refreshToken) {
+      return null;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/refresh/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh: refreshToken }),
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const payload = (await response.json()) as { access?: string; refresh?: string };
+      if (!payload.access) {
+        return null;
+      }
+
+      try {
+        await Preferences.set({ key: 'access_token', value: payload.access });
+        if (payload.refresh) {
+          await Preferences.set({ key: 'refresh_token', value: payload.refresh });
+        }
+      } catch {
+        sessionStorage.setItem('access_token', payload.access);
+        if (payload.refresh) {
+          sessionStorage.setItem('refresh_token', payload.refresh);
+        }
+      }
+
+      return payload.access;
+    } catch {
+      return null;
+    }
+  }, []);
+
   // ── WebSocket connection ──────────────────────────────────────────────
   const connect = useCallback(async () => {
-    const token = await useAuthStore.getState().getAccessToken();
-    if (!token) return;
+    let token = await useAuthStore.getState().getAccessToken();
+    if (!token) {
+      token = await refreshAccessToken();
+    }
+    if (!token) {
+      setConnected(false);
+      setRealtimeUnavailable(true);
+      shouldReconnectRef.current = false;
+      return;
+    }
 
-    const url = `${WS_BASE}/ws/challenges/${challengeId}/chat/?token=${token}`;
+    const url = `${WS_BASE}/ws/challenges/${challengeId}/chat/?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
     ws.onopen = () => {
       setConnected(true);
+      setRealtimeUnavailable(false);
+      reconnectAttemptsRef.current = 0;
       // Clear polling fallback if WS connected
       if (pollTimer.current) clearInterval(pollTimer.current);
     };
@@ -76,19 +159,39 @@ export function useGroupChat(challengeId: number) {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       setConnected(false);
       wsRef.current = null;
-      // Reconnect after 3s
-      reconnectTimer.current = setTimeout(connect, 3000);
-      // Start polling fallback while disconnected
-      startPollingFallback();
+
+      // Permanent failures: do not reconnect forever.
+      // 4001 unauthenticated, 4403 forbidden/not participant/public challenge, 4404 not found.
+      if ([4001, 4403, 4404, 1008].includes(event.code)) {
+        shouldReconnectRef.current = false;
+        setRealtimeUnavailable(true);
+        startPollingFallback();
+        return;
+      }
+
+      reconnectAttemptsRef.current += 1;
+      if (reconnectAttemptsRef.current >= 3) {
+        shouldReconnectRef.current = false;
+        setRealtimeUnavailable(true);
+        startPollingFallback();
+        return;
+      }
+
+      if (shouldReconnectRef.current) {
+        // Reconnect after 3s
+        reconnectTimer.current = setTimeout(connect, 3000);
+        // Start polling fallback while disconnected
+        startPollingFallback();
+      }
     };
 
     ws.onerror = () => {
       ws.close();
     };
-  }, [challengeId]);
+  }, [challengeId, refreshAccessToken]);
 
   // ── REST polling fallback ─────────────────────────────────────────────
   const startPollingFallback = useCallback(() => {
@@ -104,8 +207,12 @@ export function useGroupChat(challengeId: number) {
   }, [challengeId]);
 
   useEffect(() => {
+    shouldReconnectRef.current = true;
+    reconnectAttemptsRef.current = 0;
+    setRealtimeUnavailable(false);
     connect();
     return () => {
+      shouldReconnectRef.current = false;
       wsRef.current?.close();
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (pollTimer.current) clearInterval(pollTimer.current);
@@ -159,6 +266,7 @@ export function useGroupChat(challengeId: number) {
   return {
     messages,
     connected,
+    realtimeUnavailable,
     typingUsers,
     sending,
     sendMessage,

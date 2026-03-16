@@ -2,6 +2,8 @@ from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
+from rest_framework import serializers
+from drf_spectacular.utils import extend_schema, inline_serializer
 from django.db import transaction, models
 from django.db.models import Count, Q, F
 from datetime import date, timedelta
@@ -134,6 +136,18 @@ def create_challenge(request):
         return Response(result_serializer.data, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(
+    request=JoinChallengeSerializer,
+    responses={
+        200: inline_serializer(
+            name='JoinChallengeResponse',
+            fields={
+                'status': serializers.CharField(),
+                'challenge': ChallengeDetailSerializer(),
+            },
+        )
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def join_challenge(request):
@@ -270,6 +284,7 @@ class ChallengeDetailView(generics.RetrieveAPIView):
         return context
 
 
+@extend_schema(responses={200: ParticipantSerializer(many=True)})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def leaderboard(request, pk):
@@ -303,6 +318,31 @@ def leaderboard(request, pk):
     return Response(leaderboard_data)
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='ChallengeStatsResponse',
+            fields={
+                'challenge_id': serializers.IntegerField(),
+                'challenge_name': serializers.CharField(),
+                'status': serializers.CharField(),
+                'total_participants': serializers.IntegerField(),
+                'qualified_count': serializers.IntegerField(),
+                'qualification_rate': serializers.CharField(),
+                'total_pool': serializers.CharField(),
+                'platform_fee': serializers.CharField(),
+                'net_pool': serializers.CharField(),
+                'entry_fee': serializers.CharField(),
+                'average_steps': serializers.IntegerField(),
+                'top_performer': serializers.DictField(),
+                'milestone': serializers.IntegerField(),
+                'days_remaining': serializers.IntegerField(),
+                'start_date': serializers.DateField(),
+                'end_date': serializers.DateField(),
+            },
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def challenge_stats(request, pk):
@@ -349,6 +389,14 @@ def challenge_stats(request, pk):
     })
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='LeaveChallengeResponse',
+            fields={'status': serializers.CharField()},
+        )
+    }
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def leave_challenge(request, pk):
@@ -715,6 +763,18 @@ def challenge_social_stats(request, pk):
     })
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='PublicLobbyResponse',
+            fields={
+                'challenges': LobbyCardSerializer(many=True),
+                'total_count': serializers.IntegerField(),
+                'filters': serializers.DictField(child=serializers.IntegerField()),
+            },
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def public_lobby(request):
@@ -788,7 +848,7 @@ def public_lobby(request):
         'total_count': len(challenges),
         'filters': {
             'active': base_qs.filter(status='active').count(),
-            'joinable': base_qs.filter(status='pending').count(),
+            'joinable': base_qs.filter(status='active').count(),
             'ending_soon': base_qs.filter(
                 status='active',
                 end_date__lte=timezone.now().date() + timedelta(days=2)

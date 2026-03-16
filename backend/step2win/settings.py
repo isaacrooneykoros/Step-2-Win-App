@@ -2,19 +2,38 @@ import os
 from pathlib import Path
 from datetime import timedelta
 from celery.schedules import crontab
+import dj_database_url
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',')
-USE_REDIS = os.getenv('USE_REDIS', 'False') == 'True'
-ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'False') == 'True'
-APP_SIGNING_SECRET = os.getenv('APP_SIGNING_SECRET', 'change-me-in-production')
+ENVIRONMENT = os.getenv('DJANGO_ENV', 'development').strip().lower()
+DEBUG = os.getenv('DEBUG', 'False').strip().lower() == 'true'
+SECRET_KEY = os.getenv('SECRET_KEY', '')
+if not SECRET_KEY:
+    raise ImproperlyConfigured('SECRET_KEY environment variable is required.')
+
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',')
+    if host.strip()
+]
+if not ALLOWED_HOSTS:
+    raise ImproperlyConfigured('ALLOWED_HOSTS cannot be empty.')
+
+if not DEBUG:
+    if SECRET_KEY.startswith('django-insecure-') or len(SECRET_KEY) < 50:
+        raise ImproperlyConfigured('Production SECRET_KEY must be random and at least 50 characters long.')
+    if any(host in {'localhost', '127.0.0.1', 'testserver'} for host in ALLOWED_HOSTS):
+        raise ImproperlyConfigured('Production ALLOWED_HOSTS cannot contain localhost/testserver values.')
+USE_REDIS = os.getenv('USE_REDIS', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
+ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'True') == 'True'
+APP_SIGNING_SECRET = os.environ.get('APP_SIGNING_SECRET', '')
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -37,6 +56,8 @@ INSTALLED_APPS = [
     'apps.admin_api',
     'apps.payments',
     'apps.legal',
+    'axes',
+    'auditlog',
 ]
 
 if ENABLE_DEFENDER:
@@ -44,20 +65,27 @@ if ENABLE_DEFENDER:
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'step2win.middleware.SecurityHeadersMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'axes.middleware.AxesMiddleware',
     'apps.steps.middleware.HMACSignatureMiddleware',
     'step2win.middleware.UserIsolationAuditMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+AUTHENTICATION_BACKENDS = [
+    'axes.backends.AxesStandaloneBackend',  # Must be first
+    'django.contrib.auth.backends.ModelBackend',
+]
+
 if ENABLE_DEFENDER:
-    MIDDLEWARE.insert(6, 'defender.middleware.FailedLoginMiddleware')
+    MIDDLEWARE.insert(8, 'defender.middleware.FailedLoginMiddleware')
 
 ROOT_URLCONF = 'step2win.urls'
 
@@ -87,8 +115,17 @@ CHANNEL_LAYERS = {
 }
 
 USE_SQLITE = os.getenv('USE_SQLITE', 'False') == 'True'
+DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
 
-if USE_SQLITE:
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=not DEBUG,
+        )
+    }
+elif USE_SQLITE:
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
@@ -120,10 +157,18 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
-MEDIA_URL = 'media/'
+MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -140,9 +185,21 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.UserRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/hour',
-        'user': '1000/hour',
-        'wallet': '10/minute',
+        # Global defaults
+        'anon':           '60/hour',
+        'user':           '500/hour',
+        # Auth endpoints
+        'login':          '5/minute',
+        'register':       '3/minute',
+        'password_reset': '3/hour',
+        # Financial endpoints
+        'deposit':        '5/minute',
+        'withdrawal':     '3/minute',
+        # Activity endpoints
+        'step_sync':      '10/minute',
+        'chat':           '30/minute',
+        # Legacy
+        'wallet':         '10/minute',
     },
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
@@ -151,21 +208,18 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    # Access token: short-lived for security
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
-    # Refresh token: 30 days for mobile UX
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
-    # Rotate refresh tokens on every use - old token instantly invalid
-    'ROTATE_REFRESH_TOKENS': True,
-    # Blacklist old refresh tokens when rotated
+    'ACCESS_TOKEN_LIFETIME':    timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME':   timedelta(days=7),    # Reduced from 30 to 7 days
+    'ROTATE_REFRESH_TOKENS':    True,
     'BLACKLIST_AFTER_ROTATION': True,
-    # Update last_login on every token refresh
-    'UPDATE_LAST_LOGIN': True,
-    'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY,
-    'AUTH_HEADER_TYPES': ('Bearer',),
-    'USER_ID_FIELD': 'id',
-    'USER_ID_CLAIM': 'user_id',
+    'UPDATE_LAST_LOGIN':        True,
+    'ALGORITHM':                'HS256',
+    'SIGNING_KEY':              SECRET_KEY,
+    'AUTH_HEADER_TYPES':        ('Bearer',),
+    'USER_ID_FIELD':            'id',
+    'USER_ID_CLAIM':            'user_id',
+    'AUTH_TOKEN_CLASSES':       ('rest_framework_simplejwt.tokens.AccessToken',),
+    'TOKEN_TYPE_CLAIM':         'token_type',
 }
 
 SPECTACULAR_SETTINGS = {
@@ -173,6 +227,7 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'Corporate-grade fitness challenge platform',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    'OPERATION_ID_METHOD_POSITION': 'POST',
 }
 
 CORS_ALLOWED_ORIGINS = os.getenv(
@@ -180,9 +235,16 @@ CORS_ALLOWED_ORIGINS = os.getenv(
     'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174'
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT']
+CORS_ALLOW_HEADERS = [
+    'accept', 'accept-encoding', 'authorization',
+    'content-type', 'dnt', 'origin', 'user-agent',
+    'x-csrftoken', 'x-requested-with',
+]
 
-# Use Django database as Celery broker and backend (100% free, no Redis needed)
-CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'sqla+sqlite:///' + str(BASE_DIR / 'celery_broker.sqlite'))
+# Prefer Redis in hosted environments when REDIS_URL is present.
+DEFAULT_CELERY_BROKER_URL = os.getenv('REDIS_URL', 'sqla+sqlite:///' + str(BASE_DIR / 'celery_broker.sqlite3')) if USE_REDIS else 'sqla+sqlite:///' + str(BASE_DIR / 'celery_broker.sqlite3')
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', DEFAULT_CELERY_BROKER_URL)
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'django-db')
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
@@ -190,6 +252,10 @@ CELERY_BEAT_SCHEDULE = {
     'nightly-fraud-scan': {
         'task': 'apps.steps.tasks.nightly_fraud_scan',
         'schedule': crontab(hour=2, minute=0),
+    },
+    'finalize-completed-challenges': {
+        'task': 'apps.steps.tasks.finalize_completed_challenges',
+        'schedule': crontab(hour=0, minute=5),
     },
     'update-participant-consistency': {
         'task': 'apps.steps.tasks.update_participant_consistency_stats',
@@ -232,35 +298,55 @@ else:
         }
     }
 
-# Security settings (production)
-if not DEBUG:
-    SECURE_SSL_REDIRECT = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-    SECURE_HSTS_SECONDS = 31536000
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
-    X_FRAME_OPTIONS = 'DENY'
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    SECURE_BROWSER_XSS_FILTER = True
-
-# Additional security headers (all environments)
-SECURE_BROWSER_XSS_FILTER = True
+# ── Security headers (all environments) ─────────────────────────────────────
+SECURE_BROWSER_XSS_FILTER  = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
-X_FRAME_OPTIONS = 'DENY'
-SECURE_REFERRER_POLICY = 'same-origin'
+X_FRAME_OPTIONS              = 'DENY'
+SECURE_REFERRER_POLICY       = 'strict-origin-when-cross-origin'
 
-# Brute force protection
+# ── Production-only security ──────────────────────────────────────────────────
+if not DEBUG:
+    SECURE_SSL_REDIRECT              = os.getenv('SECURE_SSL_REDIRECT', 'True').strip().lower() == 'true'
+    SECURE_PROXY_SSL_HEADER          = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_HSTS_SECONDS              = int(os.getenv('SECURE_HSTS_SECONDS', '31536000'))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS   = os.getenv('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'True').strip().lower() == 'true'
+    SECURE_HSTS_PRELOAD              = os.getenv('SECURE_HSTS_PRELOAD', 'True').strip().lower() == 'true'
+    SESSION_COOKIE_SECURE            = True
+    SESSION_COOKIE_HTTPONLY          = True
+    SESSION_COOKIE_SAMESITE          = 'Lax'
+    CSRF_COOKIE_SECURE               = True
+    CSRF_COOKIE_HTTPONLY             = True
+    CSRF_COOKIE_SAMESITE             = 'Lax'
+    SECURE_REDIRECT_EXEMPT           = [r'^api/payments/mpesa/.*/$']
+
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',')
+    if origin.strip()
+]
+
+# ── Django admin URL — obscured to resist automated scanning ─────────────────
+ADMIN_URL = os.getenv('DJANGO_ADMIN_URL', 'admin-s2w-secure/')
+
+# ── django-axes brute force protection ───────────────────────────────────────
+AXES_FAILURE_LIMIT                        = 5
+AXES_COOLOFF_TIME                         = 1    # 1 hour
+AXES_LOCK_OUT_AT_FAILURE                  = True
+AXES_LOCKOUT_PARAMETERS                   = [['username', 'ip_address']]
+AXES_RESET_ON_SUCCESS                     = True
+AXES_ENABLE_ADMIN                         = True
+AXES_VERBOSE                              = False
+
+# ── django-defender (backup IP-only lockout) ──────────────────────────────────
 MAX_LOGIN_ATTEMPTS = 5
 LOGIN_LOCKOUT_MINUTES = 15
 
-# Django Defender settings
 if ENABLE_DEFENDER:
-    DEFENDER_COOLOFF_TIME = 300  # 5 min lockout
+    DEFENDER_COOLOFF_TIME        = 3600  # 1 hour
     DEFENDER_LOGIN_FAILURE_LIMIT = 5
-    DEFENDER_LOCKOUT_TEMPLATE = None
-    DEFENDER_USE_CELERY = True
-    DEFENDER_REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+    DEFENDER_LOCKOUT_TEMPLATE    = None
+    DEFENDER_USE_CELERY          = True
+    DEFENDER_REDIS_URL           = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 
 AUTH_USER_MODEL = 'users.User'
 
@@ -268,6 +354,7 @@ AUTH_USER_MODEL = 'users.User'
 POCHIPAY_BASE_URL = 'https://app.pochipay.com/api/v1'
 POCHIPAY_EMAIL = os.getenv('POCHIPAY_EMAIL', '')
 POCHIPAY_PASSWORD = os.getenv('POCHIPAY_PASSWORD', '')
+POCHIPAY_WEBHOOK_SECRET = os.getenv('POCHIPAY_WEBHOOK_SECRET', '')
 
 # Callback URLs - must be public, unauthenticated POST endpoints
 POCHIPAY_DEPOSIT_CALLBACK_URL = os.getenv(
@@ -299,11 +386,67 @@ MAX_WITHDRAWALS_PER_HOUR = 1
 MIN_SECONDS_BETWEEN_WITHDRAWALS = 300  # 5 minutes
 MAX_DAILY_WITHDRAWAL_AMOUNT_KES = 100_000
 
-# Sentry integration (optional - install sentry-sdk if needed)
-# import sentry_sdk
-# if os.getenv('SENTRY_DSN'):
-#     sentry_sdk.init(
-#         dsn=os.getenv('SENTRY_DSN'),
-#         traces_sample_rate=0.1,
-#         environment='production' if not DEBUG else 'development'
-#     )
+# ── Sentry error monitoring ───────────────────────────────────────────────────
+import sentry_sdk
+if os.getenv('SENTRY_DSN'):
+    sentry_sdk.init(
+        dsn=os.getenv('SENTRY_DSN'),
+        traces_sample_rate=0.1,
+        environment='production' if not DEBUG else 'development',
+    )
+
+# ── Structured logging ────────────────────────────────────────────────────────
+os.makedirs(os.path.join(BASE_DIR, 'logs'), exist_ok=True)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'security': {
+            'format': '{levelname} {asctime} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class':     'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'security_file': {
+            'class':       'logging.handlers.RotatingFileHandler',
+            'filename':    os.path.join(BASE_DIR, 'logs', 'security.log'),
+            'maxBytes':    10 * 1024 * 1024,
+            'backupCount': 5,
+            'formatter':   'security',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers':  ['console'],
+            'level':     'INFO',
+            'propagate': True,
+        },
+        'step2win.security': {
+            'handlers':  ['console', 'security_file'],
+            'level':     'WARNING',
+            'propagate': False,
+        },
+        'apps.payments': {
+            'handlers':  ['console'],
+            'level':     'INFO',
+            'propagate': True,
+        },
+        'apps.steps': {
+            'handlers':  ['console'],
+            'level':     'INFO',
+            'propagate': True,
+        },
+    },
+}
+
+# ── Audit logging ─────────────────────────────────────────────────────────────
+AUDITLOG_INCLUDE_ALL_MODELS = False  # Only log models we explicitly register

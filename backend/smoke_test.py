@@ -25,9 +25,14 @@ def test_api_endpoints():
     # Test 1: API Root
     try:
         resp = requests.get(f"{base_url}/api/health/", timeout=5)
+        if resp.status_code != 200:
+            print(f"❌ Health Check failed: {resp.status_code}")
+            print(f"   Response: {resp.text[:200]}")
+            return False
         print(f"✅ Health Check: {resp.status_code}")
     except Exception as e:
         print(f"❌ Health Check: {e}")
+        return False
     
     # Test 2: Register a test user
     import random
@@ -113,7 +118,7 @@ def test_api_endpoints():
     try:
         resp = requests.get(f"{base_url}/api/admin/users/", headers=headers, timeout=5)
         if resp.status_code == 403:
-            print(f"✅ Admin API Permission: Correctly forbidden for non-admin")
+            print("✅ Admin API Permission: Correctly forbidden for non-admin")
         else:
             print(f"⚠️  Admin API Permission: Unexpected status {resp.status_code}")
     except Exception as e:

@@ -15,18 +15,6 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 # Load task modules from all registered Django apps.
 app.autodiscover_tasks()
 
-# Configure periodic tasks
-app.conf.beat_schedule = {
-    'finalize-completed-challenges': {
-        'task': 'apps.steps.tasks.finalize_completed_challenges',
-        'schedule': crontab(hour=0, minute=5),  # Run daily at 00:05
-    },
-    'nightly-fraud-scan': {
-        'task': 'apps.steps.tasks.nightly_fraud_scan',
-        'schedule': crontab(hour=2, minute=0),
-    },
-}
-
 @app.task(bind=True)
 def debug_task(self):
     print(f'Request: {self.request!r}')

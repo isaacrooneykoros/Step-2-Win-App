@@ -1,12 +1,13 @@
 @import 'tailwindcss';
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @config '../tailwind.config.js';
 
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: 'DM Sans', -apple-system, sans-serif;
   background-color: #0E1016;
   color: #F0F2F8;
   -webkit-font-smoothing: antialiased;
@@ -14,6 +15,9 @@ body {
   margin: 0;
   min-width: 320px;
 }
+
+.font-syne { font-family: 'Syne', sans-serif; }
+.font-dm { font-family: 'DM Sans', sans-serif; }
 
 #root {
   min-height: 100vh;

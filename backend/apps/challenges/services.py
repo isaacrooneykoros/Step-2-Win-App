@@ -4,53 +4,6 @@ from django.db import models, transaction
 from django.utils import timezone
 
 
-def _calculate_payouts(challenge, participants, qualified, net_pool: Decimal):
-    """Return {participant_id: payout_amount} based on challenge win_condition."""
-    if not qualified:
-        return {}
-
-    payouts = {p.id: Decimal('0.00') for p in participants}
-    ranked_qualified = sorted(qualified, key=lambda p: (-p.steps, p.joined_at))
-    win_condition = getattr(challenge, 'win_condition', 'proportional')
-
-    if win_condition == 'winner_takes_all':
-        payouts[ranked_qualified[0].id] = net_pool
-        return payouts
-
-    if win_condition == 'qualification_only':
-        split = (net_pool / Decimal(len(ranked_qualified))).quantize(Decimal('0.01'))
-        for participant in ranked_qualified:
-            payouts[participant.id] = split
-
-        total_paid = sum(payouts[p.id] for p in ranked_qualified)
-        remainder = net_pool - total_paid
-        if remainder > 0:
-            payouts[ranked_qualified[0].id] += remainder
-        return payouts
-
-    total_steps = sum(max(p.steps, 0) for p in ranked_qualified)
-    if total_steps <= 0:
-        split = (net_pool / Decimal(len(ranked_qualified))).quantize(Decimal('0.01'))
-        for participant in ranked_qualified:
-            payouts[participant.id] = split
-        total_paid = sum(payouts[p.id] for p in ranked_qualified)
-        remainder = net_pool - total_paid
-        if remainder > 0:
-            payouts[ranked_qualified[0].id] += remainder
-        return payouts
-
-    for participant in ranked_qualified:
-        ratio = Decimal(str(participant.steps)) / Decimal(str(total_steps))
-        payouts[participant.id] = (net_pool * ratio).quantize(Decimal('0.01'))
-
-    total_paid = sum(payouts[p.id] for p in ranked_qualified)
-    remainder = net_pool - total_paid
-    if remainder > 0:
-        payouts[ranked_qualified[0].id] += remainder
-
-    return payouts
-
-
 def finalize_challenge(challenge):
     """
     Finalize one active challenge using the tie resolution engine:
@@ -95,7 +48,7 @@ def finalize_challenge(challenge):
                 # Nobody qualified — full refund
                 user.wallet_balance  += challenge.entry_fee
                 user.locked_balance  -= challenge.entry_fee
-                user.save(update_fields=['wallet_balance', 'locked_balance'])
+                user.save(update_fields=['wallet_balance', 'locked_balance', 'updated_at'])
 
                 WalletTransaction.objects.create(
                     user            = user,
@@ -115,10 +68,14 @@ def finalize_challenge(challenge):
                 user.wallet_balance  += r.payout_kes
                 user.locked_balance  -= challenge.entry_fee
                 user.total_earned    += r.payout_kes
-                user.save(update_fields=['wallet_balance', 'locked_balance', 'total_earned'])
+                user.save(update_fields=['wallet_balance', 'locked_balance', 'total_earned', 'updated_at'])
 
                 # Update challenges_won if this is a winner
                 if r.payout_method in ('tiebreaker', 'dead_heat') and r.final_rank == 1:
+                    User.objects.filter(id=user.id).update(
+                        challenges_won=models.F('challenges_won') + 1
+                    )
+                elif r.payout_kes > 0 and r.payout_method == 'proportional':
                     User.objects.filter(id=user.id).update(
                         challenges_won=models.F('challenges_won') + 1
                     )
@@ -141,7 +98,7 @@ def finalize_challenge(challenge):
             else:
                 # Did not qualify — release locked balance
                 user.locked_balance -= challenge.entry_fee
-                user.save(update_fields=['locked_balance'])
+                user.save(update_fields=['locked_balance', 'updated_at'])
 
             # ── Save tiebreaker data back to Participant ───────────
             r.participant.payout    = r.payout_kes

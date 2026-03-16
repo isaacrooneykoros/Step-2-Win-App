@@ -1,7 +1,9 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import User
 from apps.admin_api.models import SupportTicket, SupportTicketMessage
+from apps.core.sanitizers import sanitize_username, sanitize_text
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -30,14 +32,19 @@ class RegisterSerializer(serializers.ModelSerializer):
         return data
 
     def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
+        normalized = str(value).lower().strip()
+        if User.objects.filter(email=normalized).exists():
             raise serializers.ValidationError('Email already registered')
-        return value
+        return normalized
 
     def validate_username(self, value):
-        if User.objects.filter(username=value).exists():
+        try:
+            cleaned = sanitize_username(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message)
+        if User.objects.filter(username=cleaned).exists():
             raise serializers.ValidationError('Username already taken')
-        return value
+        return cleaned
 
     def create(self, validated_data):
         validated_data.pop('confirm_password')
@@ -174,6 +181,18 @@ class SupportTicketCreateSerializer(serializers.Serializer):
     category = serializers.ChoiceField(choices=SupportTicket.CATEGORY_CHOICES, default='general')
     priority = serializers.ChoiceField(choices=SupportTicket.PRIORITY_CHOICES, default='medium')
     message = serializers.CharField()
+
+    def validate_subject(self, value):
+        try:
+            return sanitize_text(value, max_length=255)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message)
+
+    def validate_message(self, value):
+        try:
+            return sanitize_text(value, max_length=5000)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message)
 
 
 class UserSupportTicketSerializer(serializers.ModelSerializer):

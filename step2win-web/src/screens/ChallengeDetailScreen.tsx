@@ -437,7 +437,7 @@ export default function ChallengeDetailScreen() {
       </div>
 
       {/* ── PARTICIPANT FEATURES ────────────────────────── */}
-      {userParticipant && (
+      {userParticipant && challenge.is_private && (
         <>
           {/* Social Badges */}
           <div className="px-4 pb-4">

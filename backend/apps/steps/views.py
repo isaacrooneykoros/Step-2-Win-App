@@ -10,6 +10,8 @@ from django_ratelimit.decorators import ratelimit
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import serializers
+from drf_spectacular.utils import extend_schema, inline_serializer
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
@@ -44,6 +46,30 @@ def _check_idempotency(key: str, user_id: int) -> bool:
         return True
 
 
+@extend_schema(
+    request=HealthSyncSerializer,
+    responses={
+        200: inline_serializer(
+            name='HealthSyncResponse',
+            fields={
+                'id': serializers.IntegerField(),
+                'date': serializers.DateField(),
+                'source': serializers.CharField(),
+                'synced_at': serializers.DateTimeField(),
+                'steps': serializers.IntegerField(),
+                'distance_km': serializers.FloatField(allow_null=True),
+                'calories_active': serializers.IntegerField(allow_null=True),
+                'active_minutes': serializers.IntegerField(allow_null=True),
+                'is_suspicious': serializers.BooleanField(),
+                'approved_steps': serializers.IntegerField(),
+                'submitted_steps': serializers.IntegerField(),
+                'trust_score': serializers.IntegerField(),
+                'trust_status': serializers.CharField(),
+                'flags_raised': serializers.IntegerField(),
+            },
+        )
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @ratelimit(key='user', rate='10/h', method='POST', block=True)
@@ -256,6 +282,7 @@ def sync_health(request):
     return Response(payload)
 
 
+@extend_schema(responses={200: HealthRecordSerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def today_health(request):
@@ -276,6 +303,28 @@ def today_health(request):
     })
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='HealthSummaryResponse',
+            fields={
+                'today_steps': serializers.IntegerField(),
+                'today_goal': serializers.IntegerField(),
+                'remaining_today': serializers.IntegerField(),
+                'percent_complete': serializers.IntegerField(),
+                'today_distance': serializers.FloatField(allow_null=True),
+                'today_calories': serializers.IntegerField(allow_null=True),
+                'today_active_mins': serializers.IntegerField(allow_null=True),
+                'week_total_steps': serializers.IntegerField(),
+                'week_avg_steps': serializers.IntegerField(),
+                'week_distance': serializers.FloatField(),
+                'week_calories': serializers.IntegerField(),
+                'week_active_mins': serializers.IntegerField(),
+                'best_day_steps': serializers.IntegerField(),
+            },
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def health_summary(request):
@@ -323,6 +372,7 @@ def health_summary(request):
     })
 
 
+@extend_schema(responses={200: HealthRecordSerializer(many=True)})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def health_history(request):
@@ -345,6 +395,18 @@ def health_history(request):
     return Response(HealthRecordSerializer(qs, many=True).data)
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='WeeklyStepsItem',
+            fields={
+                'date': serializers.DateField(),
+                'steps': serializers.IntegerField(),
+            },
+            many=True,
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def weekly_steps(request):

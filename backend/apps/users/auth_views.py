@@ -11,12 +11,14 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework import serializers
 from django.contrib.auth import authenticate, get_user_model
 from django.core.cache import cache
 from django.conf import settings
 from django.utils import timezone
 from apps.users.models import DeviceSession
 from apps.users.serializers import UserProfileSerializer
+from drf_spectacular.utils import extend_schema, inline_serializer
 import logging
 
 logger = logging.getLogger(__name__)
@@ -115,6 +117,22 @@ class CustomLogoutView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        request=inline_serializer(
+            name='CustomLogoutRequest',
+            fields={'refresh': serializers.CharField()},
+        ),
+        responses={
+            200: inline_serializer(
+                name='CustomLogoutResponse',
+                fields={'message': serializers.CharField()},
+            ),
+            400: inline_serializer(
+                name='CustomLogoutError',
+                fields={'error': serializers.CharField()},
+            ),
+        },
+    )
     def post(self, request):
         refresh_token = request.data.get('refresh')
         if not refresh_token:
@@ -199,6 +217,23 @@ class ActiveSessionsView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                name='ActiveSessionResponse',
+                many=True,
+                fields={
+                    'id': serializers.CharField(),
+                    'device_name': serializers.CharField(),
+                    'device_type': serializers.CharField(),
+                    'ip_address': serializers.CharField(allow_blank=True, allow_null=True),
+                    'last_active_at': serializers.CharField(),
+                    'created_at': serializers.CharField(),
+                    'is_current': serializers.BooleanField(),
+                },
+            )
+        }
+    )
     def get(self, request):
         sessions = DeviceSession.objects.filter(
             user=request.user, is_active=True
@@ -227,6 +262,19 @@ class RevokeSessionView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        request=None,
+        responses={
+            200: inline_serializer(
+                name='RevokeSessionResponse',
+                fields={'message': serializers.CharField()},
+            ),
+            404: inline_serializer(
+                name='RevokeSessionNotFound',
+                fields={'error': serializers.CharField()},
+            ),
+        },
+    )
     def post(self, request, session_id):
         try:
             session = DeviceSession.objects.get(
@@ -269,6 +317,23 @@ class RevokeAllSessionsView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        request=inline_serializer(
+            name='RevokeAllSessionsRequest',
+            fields={
+                'current_refresh': serializers.CharField(required=False),
+            },
+        ),
+        responses={
+            200: inline_serializer(
+                name='RevokeAllSessionsResponse',
+                fields={
+                    'message': serializers.CharField(),
+                    'revoked_count': serializers.IntegerField(),
+                },
+            )
+        },
+    )
     def post(self, request):
         current_refresh = request.data.get('current_refresh')
         current_jti = None
@@ -319,6 +384,25 @@ class CustomChangePasswordView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        request=inline_serializer(
+            name='CustomChangePasswordRequest',
+            fields={
+                'old_password': serializers.CharField(),
+                'new_password': serializers.CharField(),
+            },
+        ),
+        responses={
+            200: inline_serializer(
+                name='CustomChangePasswordResponse',
+                fields={'message': serializers.CharField()},
+            ),
+            400: inline_serializer(
+                name='CustomChangePasswordError',
+                fields={'error': serializers.CharField()},
+            ),
+        },
+    )
     def post(self, request):
         old_password = request.data.get('old_password')
         new_password = request.data.get('new_password')

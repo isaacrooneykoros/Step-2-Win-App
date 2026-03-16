@@ -36,7 +36,7 @@ def create_test_user():
 
 def test_xp_profile(token):
     """Test XP profile endpoint"""
-    print(f"\n💫 Testing XP Profile")
+    print("\n💫 Testing XP Profile")
     headers = {"Authorization": f"Bearer {token}"}
     resp = requests.get(f"{BASE_API}/api/gamification/xp/my_xp/", headers=headers)
     
@@ -45,7 +45,7 @@ def test_xp_profile(token):
         return None
     
     data = resp.json()
-    print(f"✅ XP Profile loaded")
+    print("✅ XP Profile loaded")
     print(f"   Level: {data.get('level', 0)}")
     print(f"   Total XP: {data.get('total_xp', 0)}")
     print(f"   Weekly XP: {data.get('xp_this_week', 0)}")
@@ -54,7 +54,7 @@ def test_xp_profile(token):
 
 def test_badges(token):
     """Test badges endpoints"""
-    print(f"\n🏆 Testing Badges")
+    print("\n🏆 Testing Badges")
     headers = {"Authorization": f"Bearer {token}"}
     
     # Get my badges
@@ -79,7 +79,7 @@ def test_badges(token):
 
 def test_challenges(token):
     """Test challenges endpoint"""
-    print(f"\n🏁 Testing Challenges")
+    print("\n🏁 Testing Challenges")
     headers = {"Authorization": f"Bearer {token}"}
     resp = requests.get(f"{BASE_API}/api/challenges/", headers=headers)
     

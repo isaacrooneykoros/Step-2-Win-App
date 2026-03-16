@@ -4,6 +4,7 @@ import logging
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
+from rest_framework import serializers
 from django.utils import timezone
 from django.db import transaction as db_transaction
 from django.db.models import Sum
@@ -26,6 +27,7 @@ from apps.steps.models import HealthRecord
 from apps.payments.models import WithdrawalRequest
 from apps.payments import pochipay
 from apps.payments.views import _notify_user
+from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiTypes
 
 from apps.admin_api.serializers import (
     AdminUserSerializer,
@@ -50,6 +52,13 @@ def _admin_profile(user):
     }
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='AdminLoginRequest',
+        fields={'username': serializers.CharField(), 'password': serializers.CharField()},
+    ),
+    responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 401: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def admin_login(request):
@@ -65,7 +74,7 @@ def admin_login(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    user = authenticate(username=username, password=password)
+    user = authenticate(request=request, username=username, password=password)
     if not user:
         return Response(
             {'error': 'Invalid credentials'},
@@ -101,6 +110,19 @@ def admin_login(request):
     })
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='AdminRegisterRequest',
+        fields={
+            'username': serializers.CharField(),
+            'email': serializers.EmailField(),
+            'password': serializers.CharField(),
+            'confirm_password': serializers.CharField(),
+            'admin_code': serializers.CharField(),
+        },
+    ),
+    responses={201: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def admin_register(request):
@@ -111,7 +133,12 @@ def admin_register(request):
     confirm_password = request.data.get('confirm_password', '')
     admin_code = request.data.get('admin_code', '').strip()
 
-    required_code = os.getenv('ADMIN_REGISTRATION_CODE', 'STEP2WIN_ADMIN_2026')
+    required_code = os.getenv('ADMIN_REGISTRATION_CODE')
+    if not required_code:
+        return Response(
+            {'error': 'Admin registration is disabled. Set ADMIN_REGISTRATION_CODE env var.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     if not username or not email or not password or not confirm_password:
         return Response(
@@ -940,6 +967,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         return Response(chart_data)
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def get_system_settings(request):
@@ -952,6 +980,7 @@ def get_system_settings(request):
     return Response(serializer.data)
 
 
+@extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT})
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def update_system_settings(request):
@@ -995,6 +1024,7 @@ def update_system_settings(request):
     return Response(SystemSettingsSerializer(settings).data)
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def get_audit_logs(request):
@@ -1041,6 +1071,7 @@ def get_audit_logs(request):
     })
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def get_support_tickets(request):
@@ -1090,6 +1121,7 @@ def get_support_tickets(request):
     })
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def get_support_ticket_detail(request, ticket_id):
@@ -1109,6 +1141,7 @@ def get_support_ticket_detail(request, ticket_id):
     })
 
 
+@extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT})
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def reply_support_ticket(request, ticket_id):
@@ -1186,6 +1219,7 @@ def reply_support_ticket(request, ticket_id):
     })
 
 
+@extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT})
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def update_support_ticket(request, ticket_id):
@@ -1289,6 +1323,7 @@ def update_support_ticket(request, ticket_id):
     })
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def get_support_admins(request):
@@ -1297,6 +1332,7 @@ def get_support_admins(request):
     return Response({'results': list(admins)})
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def get_revenue_report(request):
@@ -1381,6 +1417,7 @@ def get_revenue_report(request):
     })
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def get_user_retention(request):
@@ -1446,6 +1483,7 @@ def get_user_retention(request):
     })
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def get_challenge_analytics(request):
@@ -1525,6 +1563,7 @@ def get_challenge_analytics(request):
     })
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def get_transaction_trends(request):
@@ -1595,6 +1634,7 @@ def get_transaction_trends(request):
     })
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def fraud_overview(request):
@@ -1656,6 +1696,7 @@ def fraud_overview(request):
     })
 
 
+@extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT})
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def action_flag(request, flag_id):
@@ -1710,6 +1751,7 @@ def action_flag(request, flag_id):
 
 # ── Payment Management (PochPay) ──────────────────────────────────────────────
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def payments_overview(request):
@@ -1749,6 +1791,7 @@ def payments_overview(request):
     })
 
 
+@extend_schema(request=None, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT})
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def retry_payout(request, txn_id):
@@ -1772,6 +1815,7 @@ def retry_payout(request, txn_id):
     return Response({'status': 'Retry initiated', 'result': result})
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def withdrawal_queue(request):
@@ -1803,6 +1847,7 @@ def withdrawal_queue(request):
     ])
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def withdrawal_stats(request):
@@ -1838,6 +1883,7 @@ def withdrawal_stats(request):
     })
 
 
+@extend_schema(request=None, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 502: OpenApiTypes.OBJECT})
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def approve_withdrawal(request, withdrawal_id):
@@ -1927,6 +1973,7 @@ def approve_withdrawal(request, withdrawal_id):
         return Response({'error': 'Disbursement failed. Balance refunded to user.'}, status=502)
 
 
+@extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT})
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def reject_withdrawal(request, withdrawal_id):
@@ -1966,6 +2013,7 @@ def reject_withdrawal(request, withdrawal_id):
     return Response({'message': f'Withdrawal rejected. KES {withdrawal.amount_kes} refunded.'})
 
 
+@extend_schema(request=None, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 502: OpenApiTypes.OBJECT})
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def retry_failed_withdrawal(request, withdrawal_id):

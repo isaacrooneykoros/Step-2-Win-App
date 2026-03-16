@@ -28,18 +28,18 @@ export const useAuthStore = create<AuthStore>((set) => ({
    */
   setAuth: async (user, access, refresh, sessionId) => {
     try {
-      // Try Capacitor first
       await Preferences.set({ key: 'access_token', value: access });
       await Preferences.set({ key: 'refresh_token', value: refresh });
       if (sessionId) {
         await Preferences.set({ key: 'session_id', value: sessionId });
       }
     } catch (e) {
-      // Fall back to localStorage
-      localStorage.setItem('access_token', access);
-      localStorage.setItem('refresh_token', refresh);
+      // Capacitor Preferences unavailable (e.g. web dev without native runtime)
+      // Use sessionStorage as fallback — scoped to tab, not persisted like localStorage
+      sessionStorage.setItem('access_token', access);
+      sessionStorage.setItem('refresh_token', refresh);
       if (sessionId) {
-        localStorage.setItem('session_id', sessionId);
+        sessionStorage.setItem('session_id', sessionId);
       }
     }
     set({ user, isAuthenticated: true, isLoading: false, sessionId: sessionId || null });
@@ -61,10 +61,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
       await Preferences.remove({ key: 'refresh_token' });
       await Preferences.remove({ key: 'session_id' });
     } catch (e) {
-      // Fall back to localStorage
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      localStorage.removeItem('session_id');
+      sessionStorage.removeItem('access_token');
+      sessionStorage.removeItem('refresh_token');
+      sessionStorage.removeItem('session_id');
     }
     set({ user: null, isAuthenticated: false, sessionId: null });
   },
@@ -74,7 +73,6 @@ export const useAuthStore = create<AuthStore>((set) => ({
    */
   init: async () => {
     try {
-      // Try Capacitor Preferences first (for native apps)
       try {
         const { value } = await Preferences.get({ key: 'access_token' });
         const { value: sessionId } = await Preferences.get({ key: 'session_id' });
@@ -83,9 +81,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
           return true;
         }
       } catch (e) {
-        // Fall back to localStorage if Capacitor fails (web dev)
-        const value = localStorage.getItem('access_token');
-        const sessionId = localStorage.getItem('session_id');
+        // Fall back to sessionStorage (never localStorage)
+        const value = sessionStorage.getItem('access_token');
+        const sessionId = sessionStorage.getItem('session_id');
         if (value) {
           set({ isAuthenticated: true, isLoading: false, sessionId: sessionId || null });
           return true;
@@ -107,7 +105,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const { value } = await Preferences.get({ key: 'access_token' });
       return value;
     } catch (e) {
-      return localStorage.getItem('access_token');
+      return sessionStorage.getItem('access_token');
     }
   },
 
@@ -119,7 +117,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const { value } = await Preferences.get({ key: 'refresh_token' });
       return value;
     } catch (e) {
-      return localStorage.getItem('refresh_token');
+      return sessionStorage.getItem('refresh_token');
     }
   },
 
@@ -131,7 +129,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const { value } = await Preferences.get({ key: 'session_id' });
       return value;
     } catch (e) {
-      return localStorage.getItem('session_id');
+      return sessionStorage.getItem('session_id');
     }
   },
 }));

@@ -1,0 +1,90 @@
+name: Release Gate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            step2win-web/package-lock.json
+            step2win-admin/package-lock.json
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: step2win-web
+
+      - name: Install admin dependencies
+        run: npm ci
+        working-directory: step2win-admin
+
+      - name: Run release gate
+        run: python release_gate.py
+
+  android-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: step2win-web/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: step2win-web
+
+      - name: Build web app
+        run: npm run build
+        working-directory: step2win-web
+
+      - name: Sync Capacitor Android
+        run: npm exec cap sync android
+        working-directory: step2win-web
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+        working-directory: step2win-web/android
+
+      - name: Build Android debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon
+        working-directory: step2win-web/android

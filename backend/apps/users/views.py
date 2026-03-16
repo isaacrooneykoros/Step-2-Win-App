@@ -1,9 +1,11 @@
 from rest_framework import generics, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.throttling import UserRateThrottle
+from drf_spectacular.utils import extend_schema, inline_serializer
 from django.contrib.auth import authenticate
 from django.db import transaction
 from django.utils.text import slugify
@@ -14,8 +16,8 @@ from urllib.parse import urlencode
 from urllib.error import URLError, HTTPError
 from .models import User
 from .serializers import (
-    RegisterSerializer, 
-    UserProfileSerializer, 
+    RegisterSerializer,
+    UserProfileSerializer,
     ChangePasswordSerializer,
     LoginSerializer,
     GoogleAuthSerializer,
@@ -24,6 +26,7 @@ from .serializers import (
     UserSupportTicketMessageSerializer,
 )
 from apps.admin_api.models import SupportTicket, SupportTicketMessage
+from apps.core.throttles import LoginRateThrottle, RegisterRateThrottle
 
 
 class WalletThrottle(UserRateThrottle):
@@ -31,8 +34,22 @@ class WalletThrottle(UserRateThrottle):
     scope = 'wallet'
 
 
+@extend_schema(
+    request=RegisterSerializer,
+    responses={
+        201: inline_serializer(
+            name='RegisterResponse',
+            fields={
+                'access': serializers.CharField(),
+                'refresh': serializers.CharField(),
+                'user': UserProfileSerializer(),
+            },
+        )
+    },
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([RegisterRateThrottle])
 def register(request):
     """
     Register a new user
@@ -59,6 +76,7 @@ def register(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([LoginRateThrottle])
 def login(request):
     """
     Authenticate user and return tokens
@@ -71,7 +89,7 @@ def login(request):
     password = serializer.validated_data['password']
     
     # Try to authenticate with username first
-    user = authenticate(username=username_or_email_or_phone, password=password)
+    user = authenticate(request=request, username=username_or_email_or_phone, password=password)
     
     # If authentication failed, try to find user by email or phone number
     if not user:
@@ -87,7 +105,7 @@ def login(request):
             
             # If found, authenticate with the username
             if user_obj:
-                user = authenticate(username=user_obj.username, password=password)
+                user = authenticate(request=request, username=user_obj.username, password=password)
         except User.DoesNotExist:
             pass
     
@@ -227,6 +245,25 @@ class ProfileView(generics.RetrieveUpdateAPIView):
         return self.partial_update(request, *args, **kwargs)
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='BindDeviceRequest',
+        fields={
+            'device_id': serializers.CharField(),
+            'platform': serializers.ChoiceField(choices=['android', 'ios']),
+        },
+    ),
+    responses={
+        200: inline_serializer(
+            name='BindDeviceResponse',
+            fields={
+                'status': serializers.CharField(),
+                'device_id': serializers.CharField(),
+                'platform': serializers.CharField(),
+            },
+        )
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def bind_device(request):
@@ -268,6 +305,20 @@ def bind_device(request):
     })
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='DeviceStatusResponse',
+            fields={
+                'bound': serializers.BooleanField(),
+                'platform': serializers.CharField(allow_null=True),
+                'device_id': serializers.CharField(allow_null=True),
+                'last_sync': serializers.DateField(allow_null=True),
+                'last_sync_time': serializers.DateTimeField(allow_null=True),
+            },
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def device_status(request):
@@ -312,6 +363,24 @@ def change_password(request):
     return Response({'status': 'Password updated successfully'})
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='UserStatsResponse',
+            fields={
+                'username': serializers.CharField(),
+                'total_steps': serializers.IntegerField(),
+                'challenges_won': serializers.IntegerField(),
+                'total_earned': serializers.CharField(),
+                'current_streak': serializers.IntegerField(),
+                'wallet_balance': serializers.CharField(),
+                'locked_balance': serializers.CharField(),
+                'available_balance': serializers.CharField(),
+                'member_since': serializers.CharField(),
+            },
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_stats(request):
@@ -329,10 +398,14 @@ def user_stats(request):
         'wallet_balance': str(user.wallet_balance),
         'locked_balance': str(user.locked_balance),
         'available_balance': str(user.available_balance),
-        'member_since': user.created_at,
+        'member_since': user.date_joined.strftime('%B %Y'),
     })
 
 
+@extend_schema(
+    request=SupportTicketCreateSerializer,
+    responses={201: UserSupportTicketSerializer},
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_support_ticket(request):
@@ -385,6 +458,17 @@ def create_support_ticket(request):
     return Response(UserSupportTicketSerializer(ticket).data, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='MySupportTicketsResponse',
+            fields={
+                'total': serializers.IntegerField(),
+                'results': UserSupportTicketSerializer(many=True),
+            },
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def my_support_tickets(request):
@@ -410,6 +494,21 @@ def my_support_tickets(request):
     })
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='MySupportTicketDetailResponse',
+            fields={
+                'ticket': UserSupportTicketSerializer(),
+                'messages': UserSupportTicketMessageSerializer(many=True),
+            },
+        ),
+        404: inline_serializer(
+            name='MySupportTicketNotFound',
+            fields={'error': serializers.CharField()},
+        ),
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def my_support_ticket_detail(request, ticket_id):
@@ -426,6 +525,26 @@ def my_support_ticket_detail(request, ticket_id):
     })
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='ReplySupportTicketRequest',
+        fields={'message': serializers.CharField()},
+    ),
+    responses={
+        200: inline_serializer(
+            name='ReplySupportTicketResponse',
+            fields={'status': serializers.CharField()},
+        ),
+        400: inline_serializer(
+            name='ReplySupportTicketBadRequest',
+            fields={'error': serializers.CharField()},
+        ),
+        404: inline_serializer(
+            name='ReplySupportTicketNotFound',
+            fields={'error': serializers.CharField()},
+        ),
+    },
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def reply_support_ticket(request, ticket_id):
@@ -480,6 +599,29 @@ def reply_support_ticket(request, ticket_id):
     return Response({'status': 'Reply sent successfully'})
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='UpdateTicketStatusRequest',
+        fields={'status': serializers.CharField()},
+    ),
+    responses={
+        200: inline_serializer(
+            name='UpdateTicketStatusResponse',
+            fields={
+                'status': serializers.CharField(),
+                'ticket': UserSupportTicketSerializer(),
+            },
+        ),
+        400: inline_serializer(
+            name='UpdateTicketStatusBadRequest',
+            fields={'error': serializers.CharField()},
+        ),
+        404: inline_serializer(
+            name='UpdateTicketStatusNotFound',
+            fields={'error': serializers.CharField()},
+        ),
+    },
+)
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def update_ticket_status(request, ticket_id):
@@ -527,6 +669,23 @@ def update_ticket_status(request, ticket_id):
     })
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='UpdateDailyGoalRequest',
+        fields={
+            'daily_goal': serializers.IntegerField(min_value=1000, max_value=60000),
+        },
+    ),
+    responses={
+        200: inline_serializer(
+            name='UpdateDailyGoalResponse',
+            fields={
+                'daily_goal': serializers.IntegerField(),
+                'message': serializers.CharField(),
+            },
+        )
+    },
+)
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def update_daily_goal(request):

@@ -26,8 +26,12 @@ function formatDateDivider(iso: string): string {
 }
 
 export default function GroupChat({ challengeId }: GroupChatProps) {
-  const { messages, connected, typingUsers, sending, sendMessage, sendTyping } =
+  const { messages, connected, realtimeUnavailable, typingUsers, sending, sendMessage, sendTyping } =
     useGroupChat(challengeId);
+
+  const statusText = connected ? 'Live' : realtimeUnavailable ? 'Fallback mode' : 'Reconnecting...';
+  const statusColor = connected ? '#34D399' : realtimeUnavailable ? '#F59E0B' : '#F87171';
+  const statusBg = connected ? '#ECFDF5' : realtimeUnavailable ? '#FFFBEB' : '#FEF2F2';
 
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -117,18 +121,18 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
         {/* Connection status pill */}
         <div
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-full"
-          style={{ background: connected ? '#ECFDF5' : '#FEF2F2' }}
+          style={{ background: statusBg }}
         >
           {connected ? (
             <Wifi size={11} color="#34D399" />
           ) : (
-            <WifiOff size={11} color="#F87171" />
+            <WifiOff size={11} color={statusColor} />
           )}
           <span
             className="text-xs font-semibold"
-            style={{ color: connected ? '#34D399' : '#F87171' }}
+            style={{ color: statusColor }}
           >
-            {connected ? 'Live' : 'Reconnecting...'}
+            {statusText}
           </span>
         </div>
       </div>
