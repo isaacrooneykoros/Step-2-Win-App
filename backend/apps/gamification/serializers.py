@@ -25,15 +25,15 @@ class UserXPSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'user', 'created_at', 'updated_at']
 
-    def get_level_progress(self, obj):
+    def get_level_progress(self, obj) -> int:
         """Get current level progress percentage"""
         return obj.get_level_progress()
 
-    def get_xp_to_next_level(self, obj):
+    def get_xp_to_next_level(self, obj) -> int:
         """Get remaining XP needed for next level"""
         return obj.get_xp_to_next_level()
 
-    def get_xp_for_next_level(self, obj):
+    def get_xp_for_next_level(self, obj) -> int:
         """Get total XP required for next level"""
         return obj.get_xp_for_next_level()
 

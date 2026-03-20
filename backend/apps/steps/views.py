@@ -423,6 +423,26 @@ def weekly_steps(request):
     ])
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='DayDetailResponse',
+            fields={
+                'date': serializers.CharField(),
+                'total_steps': serializers.IntegerField(),
+                'total_km': serializers.FloatField(),
+                'total_calories': serializers.IntegerField(),
+                'active_minutes': serializers.IntegerField(),
+                'peak_hour': serializers.IntegerField(allow_null=True),
+                'peak_steps': serializers.IntegerField(),
+                'hourly': serializers.ListField(),
+                'waypoints': serializers.ListField(),
+                'goal': serializers.IntegerField(),
+                'goal_achieved': serializers.BooleanField(),
+            },
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def day_detail(request, date_str):
@@ -500,6 +520,17 @@ def day_detail(request, date_str):
     return Response(data)
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='SyncHourlyStepsRequest',
+        fields={
+            'date': serializers.CharField(),
+            'hourly': serializers.ListField(),
+            'waypoints': serializers.ListField(required=False),
+        },
+    ),
+    responses={200: inline_serializer(name='SyncHourlyStepsResponse', fields={'message': serializers.CharField(), 'hourly_synced': serializers.IntegerField(), 'waypoints_synced': serializers.IntegerField()})},
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def sync_hourly_steps(request):

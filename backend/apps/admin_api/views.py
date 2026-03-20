@@ -681,6 +681,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
     """
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
 
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
     @action(detail=False, methods=['get'])
     def overview(self, request):
         """Get complete dashboard overview with enhanced metrics for Vault-style UI"""
@@ -936,6 +937,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
             'timestamp': now.isoformat(),
         })
 
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
     @action(detail=False, methods=['get'])
     def revenue_chart(self, request):
         """Get revenue data for chart"""
@@ -1071,7 +1073,10 @@ def get_audit_logs(request):
     })
 
 
-@extend_schema(responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT})
+@extend_schema(
+    operation_id='admin_support_tickets_list',
+    responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+)
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def get_support_tickets(request):
@@ -1121,7 +1126,10 @@ def get_support_tickets(request):
     })
 
 
-@extend_schema(responses={200: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT})
+@extend_schema(
+    operation_id='admin_support_ticket_detail',
+    responses={200: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT},
+)
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def get_support_ticket_detail(request, ticket_id):
