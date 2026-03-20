@@ -110,7 +110,7 @@ class ChallengeDetailSerializer(ChallengeSerializer):
             'participants', 'my_participation', 'platform_fee', 'net_pool'
         ]
     
-    def get_my_participation(self, obj):
+    def get_my_participation(self, obj) -> dict | None:
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             try:
@@ -292,27 +292,27 @@ class LobbyCardSerializer(serializers.ModelSerializer):
             'platform_bonus_kes', 'theme', 'user_is_joined', 'invite_code',
         ]
 
-    def get_participant_count(self, obj):
+    def get_participant_count(self, obj) -> int:
         return obj.participants.count()
 
-    def get_spots_remaining(self, obj):
+    def get_spots_remaining(self, obj) -> int:
         return max(0, obj.max_participants - obj.participants.count())
 
-    def get_fill_percentage(self, obj):
+    def get_fill_percentage(self, obj) -> int:
         count = obj.participants.count()
         if obj.max_participants == 0:
             return 0
         return min(100, round((count / obj.max_participants) * 100))
 
-    def get_is_almost_full(self, obj):
+    def get_is_almost_full(self, obj) -> bool:
         return self.get_fill_percentage(obj) >= 80
 
-    def get_days_remaining(self, obj):
+    def get_days_remaining(self, obj) -> int:
         from django.utils import timezone
         delta = obj.end_date - timezone.now().date()
         return max(0, delta.days)
 
-    def get_hours_remaining(self, obj):
+    def get_hours_remaining(self, obj) -> int:
         from django.utils import timezone
         import datetime
         end_dt = datetime.datetime.combine(obj.end_date, datetime.time(23, 59, 59))
@@ -320,7 +320,7 @@ class LobbyCardSerializer(serializers.ModelSerializer):
         delta = end_dt - timezone.now()
         return max(0, int(delta.total_seconds() / 3600))
 
-    def get_is_starting_soon(self, obj):
+    def get_is_starting_soon(self, obj) -> bool:
         from django.utils import timezone
         import datetime
         if obj.status != 'pending':
@@ -329,16 +329,16 @@ class LobbyCardSerializer(serializers.ModelSerializer):
         start_dt = timezone.make_aware(start_dt)
         return (start_dt - timezone.now()).total_seconds() < 7200
 
-    def get_effective_pool_kes(self, obj):
+    def get_effective_pool_kes(self, obj) -> str:
         return str(obj.total_pool + obj.platform_bonus_kes)
 
-    def get_user_is_joined(self, obj):
+    def get_user_is_joined(self, obj) -> bool:
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return False
         return obj.participants.filter(user=request.user).exists()
 
-    def get_milestone_label(self, obj):
+    def get_milestone_label(self, obj) -> str:
         labels = {50000: 'Beginner', 70000: 'Intermediate', 90000: 'Advanced'}
         return labels.get(obj.milestone, f'{obj.milestone:,} steps')
 

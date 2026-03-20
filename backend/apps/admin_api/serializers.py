@@ -46,7 +46,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
 
-    def get_xp_profile(self, obj):
+    def get_xp_profile(self, obj) -> dict | None:
         """Get user's XP profile"""
         try:
             xp = UserXP.objects.get(user=obj)
@@ -58,7 +58,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
         except UserXP.DoesNotExist:
             return None
 
-    def get_badges_count(self, obj):
+    def get_badges_count(self, obj) -> int:
         """Get count of badges earned"""
         return UserBadge.objects.filter(user=obj).count()
 
@@ -68,6 +68,7 @@ class AdminChallengeSerializer(serializers.ModelSerializer):
     Admin serializer for challenge data
     """
     created_by_username = serializers.CharField(source='creator.username', read_only=True)
+    platform_fee = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     current_entries = serializers.SerializerMethodField()
     
     class Meta:
@@ -99,7 +100,7 @@ class AdminChallengeSerializer(serializers.ModelSerializer):
             'platform_fee',
         ]
 
-    def get_current_entries(self, obj):
+    def get_current_entries(self, obj) -> int:
         """Get current number of entries"""
         return obj.current_participants
 
@@ -189,7 +190,7 @@ class AdminBadgeSerializer(serializers.ModelSerializer):
             'created_at',
         ]
 
-    def get_users_earned(self, obj):
+    def get_users_earned(self, obj) -> int:
         """Get count of users who earned this badge"""
         return UserBadge.objects.filter(badge=obj).count()
 
@@ -247,7 +248,7 @@ class SystemSettingsSerializer(serializers.Serializer):
     updated_at = serializers.DateTimeField(read_only=True)
     updated_by = serializers.SerializerMethodField()
     
-    def get_updated_by(self, obj):
+    def get_updated_by(self, obj) -> str | None:
         """Get username of user who last updated settings"""
         if obj.updated_by:
             return obj.updated_by.username

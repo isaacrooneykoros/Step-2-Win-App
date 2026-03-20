@@ -228,6 +228,12 @@ SPECTACULAR_SETTINGS = {
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'OPERATION_ID_METHOD_POSITION': 'POST',
+    'ENUM_NAME_OVERRIDES': {
+        'ChallengeStatusEnum': 'apps.challenges.models.Challenge.STATUS_CHOICES',
+        'SupportTicketStatusEnum': 'apps.admin_api.models.SupportTicket.STATUS_CHOICES',
+        'WithdrawalStatusEnum': 'apps.wallet.models.Withdrawal.STATUS_CHOICES',
+        'LegalDocumentStatusEnum': 'apps.legal.models.LegalDocument.STATUS_CHOICES',
+    },
 }
 
 CORS_ALLOWED_ORIGINS = os.getenv(

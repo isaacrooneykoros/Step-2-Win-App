@@ -1,6 +1,8 @@
-from rest_framework import viewsets, status, permissions
+from rest_framework import viewsets, status, permissions, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
+from drf_spectacular.types import OpenApiTypes
 from django.utils import timezone
 from django.db.models import Q, Sum
 from datetime import timedelta
@@ -71,12 +73,19 @@ class BadgeViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
 
+@extend_schema_view(
+    my_xp=extend_schema(responses={200: UserXPSerializer}),
+    leaderboard=extend_schema(responses={200: UserXPSerializer(many=True)}),
+    award_xp=extend_schema(responses={200: OpenApiTypes.OBJECT}),
+)
 class UserXPViewSet(viewsets.ViewSet):
     """
     User XP and level endpoint
     """
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserXPSerializer
 
+    @extend_schema(responses={200: UserXPSerializer})
     @action(detail=False, methods=['get'])
     def my_xp(self, request):
         """Get current user's XP profile"""
@@ -88,6 +97,7 @@ class UserXPViewSet(viewsets.ViewSet):
         serializer = UserXPSerializer(xp_profile)
         return Response(serializer.data)
 
+    @extend_schema(responses={200: UserXPSerializer(many=True)})
     @action(detail=False, methods=['get'])
     def leaderboard(self, request):
         """Get top users by XP"""
@@ -101,6 +111,7 @@ class UserXPViewSet(viewsets.ViewSet):
         serializer = UserXPSerializer(top_users, many=True)
         return Response(serializer.data)
 
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
     @action(detail=False, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def award_xp(self, request):
         """Admin endpoint to award XP to a user"""
@@ -142,6 +153,7 @@ class XPEventViewSet(viewsets.ReadOnlyModelViewSet):
     """
     XP event history
     """
+    queryset = XPEvent.objects.all()
     serializer_class = XPEventSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -190,6 +202,7 @@ class LevelMilestoneViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Level milestones tracking
     """
+    queryset = LevelMilestone.objects.all()
     serializer_class = LevelMilestoneSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -199,12 +212,18 @@ class LevelMilestoneViewSet(viewsets.ReadOnlyModelViewSet):
         return LevelMilestone.objects.filter(user=self.request.user)
 
 
+@extend_schema_view(
+    my_streak=extend_schema(responses={200: DailyLoginStreakSerializer}),
+    check_in=extend_schema(responses={200: DailyLoginStreakSerializer}),
+)
 class DailyLoginStreakViewSet(viewsets.ViewSet):
     """
     Daily login streak management
     """
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = DailyLoginStreakSerializer
 
+    @extend_schema(responses={200: DailyLoginStreakSerializer})
     @action(detail=False, methods=['get'])
     def my_streak(self, request):
         """Get current user's login streak"""
@@ -216,6 +235,7 @@ class DailyLoginStreakViewSet(viewsets.ViewSet):
         serializer = DailyLoginStreakSerializer(streak)
         return Response(serializer.data)
 
+    @extend_schema(responses={200: DailyLoginStreakSerializer})
     @action(detail=False, methods=['post'])
     def check_in(self, request):
         """Record a login and update streak"""
@@ -239,6 +259,7 @@ class GamificationSummaryViewSet(viewsets.ViewSet):
     """
     permission_classes = [permissions.IsAuthenticated]
 
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
     @action(detail=False, methods=['get'])
     def my_gamification(self, request):
         """Get complete gamification profile"""

@@ -82,35 +82,35 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'challenges_joined', 'best_streak', 'best_day_steps'
         ]
 
-    def get_device_bound(self, obj):
+    def get_device_bound(self, obj) -> bool:
         return obj.device_id is not None
 
-    def get_available_balance(self, obj):
+    def get_available_balance(self, obj) -> str:
         return str(obj.available_balance)
 
-    def get_trust_score(self, obj):
+    def get_trust_score(self, obj) -> int:
         trust = getattr(obj, 'trust_score', None)
         return trust.score if trust else 100
 
-    def get_trust_status(self, obj):
+    def get_trust_status(self, obj) -> str:
         trust = getattr(obj, 'trust_score', None)
         return trust.status if trust else 'GOOD'
 
-    def get_win_rate(self, obj):
+    def get_win_rate(self, obj) -> float:
         played = getattr(obj, 'challenges_joined', 0) or 0
         won = obj.challenges_won or 0
         if played == 0:
             return 0.0
         return round((won / played) * 100, 1)
 
-    def get_avg_payout_kes(self, obj):
+    def get_avg_payout_kes(self, obj) -> str:
         won = obj.challenges_won or 0
         total = float(obj.total_earned or 0)
         if won == 0:
             return '0.00'
         return str(round(total / won, 2))
 
-    def get_player_rank(self, obj):
+    def get_player_rank(self, obj) -> str:
         played = getattr(obj, 'challenges_joined', 0) or 0
         if played >= 100:
             return 'Champion'
@@ -124,7 +124,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return 'Challenger'
         return 'Newcomer'
 
-    def get_member_since(self, obj):
+    def get_member_since(self, obj) -> str:
         return obj.date_joined.strftime('%B %Y')
 
 
@@ -215,7 +215,7 @@ class UserSupportTicketSerializer(serializers.ModelSerializer):
             'message_count',
         ]
 
-    def get_message_count(self, obj):
+    def get_message_count(self, obj) -> int:
         return obj.messages.count()
 
 

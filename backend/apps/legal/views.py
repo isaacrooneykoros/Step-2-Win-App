@@ -182,7 +182,13 @@ def document_detail_admin(request, pk):
 
 @extend_schema(
     request=LegalDocumentAdminSerializer,
-    responses={201: LegalDocumentAdminSerializer, 400: serializers.DictField()},
+    responses={
+        201: LegalDocumentAdminSerializer,
+        400: inline_serializer(
+            name='CreateLegalDocumentBadRequest',
+            fields={'error': serializers.CharField(required=False)},
+        ),
+    },
 )
 @api_view(['POST'])
 @permission_classes([IsAdminUser])

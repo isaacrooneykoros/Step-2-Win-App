@@ -19,7 +19,7 @@ class LegalDocumentPublicSerializer(serializers.ModelSerializer):
             'uploaded_file',
         ]
 
-    def get_has_update(self, obj):
+    def get_has_update(self, obj) -> bool:
         """
         Returns True if the current user has not acknowledged this version.
         Used to show "Updated" badge in the app.
@@ -58,10 +58,10 @@ class LegalDocumentAdminSerializer(serializers.ModelSerializer):
             'published_at', 'created_at', 'updated_at',
         ]
 
-    def get_last_edited_by_username(self, obj):
+    def get_last_edited_by_username(self, obj) -> str | None:
         return obj.last_edited_by.username if obj.last_edited_by else None
 
-    def get_history_count(self, obj):
+    def get_history_count(self, obj) -> int:
         return obj.history.count()
 
 
@@ -76,5 +76,5 @@ class LegalDocumentVersionSerializer(serializers.ModelSerializer):
             'published_at', 'change_summary',
         ]
 
-    def get_published_by_username(self, obj):
+    def get_published_by_username(self, obj) -> str:
         return obj.published_by.username if obj.published_by else 'System'

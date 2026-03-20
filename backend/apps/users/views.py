@@ -149,6 +149,21 @@ def _build_unique_username(email: str, full_name: str = '') -> str:
     return username
 
 
+@extend_schema(
+    request=GoogleAuthSerializer,
+    responses={
+        200: inline_serializer(
+            name='GoogleAuthResponse',
+            fields={
+                'access': serializers.CharField(),
+                'refresh': serializers.CharField(),
+                'user': UserProfileSerializer(),
+            },
+        ),
+        400: inline_serializer(name='GoogleAuthError', fields={'error': serializers.CharField()}),
+        403: inline_serializer(name='GoogleAuthForbidden', fields={'error': serializers.CharField()}),
+    },
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def google_auth(request):
@@ -459,6 +474,7 @@ def create_support_ticket(request):
 
 
 @extend_schema(
+    operation_id='auth_support_tickets_list',
     responses={
         200: inline_serializer(
             name='MySupportTicketsResponse',
@@ -495,6 +511,7 @@ def my_support_tickets(request):
 
 
 @extend_schema(
+    operation_id='auth_support_ticket_detail',
     responses={
         200: inline_serializer(
             name='MySupportTicketDetailResponse',

@@ -70,6 +70,10 @@ class ChallengeListView(generics.ListAPIView):
         return queryset.order_by('-created_at')
 
 
+@extend_schema(
+    request=CreateChallengeSerializer,
+    responses={201: ChallengeDetailSerializer, 400: inline_serializer(name='CreateChallengeBadRequest', fields={'error': serializers.CharField(required=False), 'errors': serializers.DictField(required=False)})},
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_challenge(request):
@@ -390,6 +394,7 @@ def challenge_stats(request, pk):
 
 
 @extend_schema(
+    request=None,
     responses={
         200: inline_serializer(
             name='LeaveChallengeResponse',
@@ -460,6 +465,10 @@ def leave_challenge(request, pk):
     return Response({'status': 'Successfully left challenge'})
 
 
+@extend_schema(
+    request=None,
+    responses={201: ChallengeDetailSerializer, 400: inline_serializer(name='RematchBadRequest', fields={'error': serializers.CharField()})},
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def rematch_challenge(request, pk):
@@ -545,6 +554,10 @@ def rematch_challenge(request, pk):
     }, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(
+    request=inline_serializer(name='ChallengeChatSendRequest', fields={'content': serializers.CharField()}),
+    responses={200: inline_serializer(name='ChallengeChatResponse', fields={'messages': serializers.ListField(), 'count': serializers.IntegerField()}), 201: inline_serializer(name='ChallengeChatSentResponse', fields={'id': serializers.IntegerField(), 'sender': serializers.CharField(), 'content': serializers.CharField(), 'created_at': serializers.CharField()})},
+)
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def challenge_chat(request, pk):
@@ -657,6 +670,9 @@ def challenge_chat(request, pk):
         }, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(
+    responses={200: inline_serializer(name='ChallengeSocialStatsResponse', fields={'most_consistent': serializers.DictField(allow_null=True), 'biggest_single_day': serializers.DictField(allow_null=True), 'most_improved': serializers.DictField(allow_null=True)})},
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def challenge_social_stats(request, pk):
@@ -764,6 +780,7 @@ def challenge_social_stats(request, pk):
 
 
 @extend_schema(
+    operation_id='challenges_public_lobby',
     responses={
         200: inline_serializer(
             name='PublicLobbyResponse',
@@ -857,6 +874,13 @@ def public_lobby(request):
     })
 
 
+@extend_schema(
+    operation_id='challenges_lobby_card_detail',
+    responses={
+        200: LobbyCardSerializer,
+        404: inline_serializer(name='LobbyCardNotFound', fields={'error': serializers.CharField()}),
+    },
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def challenge_lobby_card(request, pk):
@@ -877,6 +901,9 @@ def challenge_lobby_card(request, pk):
     return Response(serializer.data)
 
 
+@extend_schema(
+    responses={200: inline_serializer(name='SpectatorLeaderboardResponse', fields={'challenge': serializers.DictField(), 'leaderboard': serializers.ListField(), 'qualified_count': serializers.IntegerField(), 'total_participants': serializers.IntegerField(), 'user_is_participant': serializers.BooleanField()})}
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def spectator_leaderboard(request, pk):
@@ -932,6 +959,10 @@ def spectator_leaderboard(request, pk):
     })
 
 
+@extend_schema(
+    request=inline_serializer(name='FeatureChallengeRequest', fields={'hours': serializers.IntegerField(required=False)}),
+    responses={200: inline_serializer(name='FeatureChallengeResponse', fields={'message': serializers.CharField(), 'featured_until': serializers.CharField()})},
+)
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def feature_challenge(request, pk):
@@ -958,6 +989,9 @@ def feature_challenge(request, pk):
     })
 
 
+@extend_schema(
+    responses={200: inline_serializer(name='ChallengeResultsResponse', fields={'challenge': serializers.DictField(), 'results': serializers.ListField(), 'total_participants': serializers.IntegerField(), 'qualified_count': serializers.IntegerField()})}
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def challenge_results(request, pk):
@@ -1036,6 +1070,9 @@ def challenge_results(request, pk):
     })
 
 
+@extend_schema(
+    responses={200: inline_serializer(name='MyRecentResultsResponse', fields={'has_results': serializers.BooleanField(), 'challenge': serializers.DictField(required=False), 'my_result': serializers.DictField(required=False), 'leaderboard': serializers.ListField(required=False), 'message': serializers.CharField(required=False)})}
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def my_recent_results(request):
