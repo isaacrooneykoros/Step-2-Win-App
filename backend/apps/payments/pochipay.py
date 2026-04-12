@@ -206,8 +206,8 @@ def initiate_mpesa_collection(
         if data.get('errors') or data.get('message') == 'error':
             raise ValueError(f"PochPay collection error: {data.get('message', data.get('errors'))}")
 
-        logger.info('M-Pesa STK Push sent | order_id=%s | phone=%s | amount=%s',
-                    order_id, _mask_phone(phone_number), amount)
+        logger.info('M-Pesa STK Push sent | order_id=%s | amount=%s',
+                    order_id, amount)
         return data['result']   # { collectionId, isProcessing }
 
     except requests.RequestException as e:
