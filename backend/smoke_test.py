@@ -7,6 +7,7 @@ import sys
 import django
 import requests
 from django.contrib.auth import get_user_model
+from requests import RequestException
 
 # Setup Django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'step2win.settings')
@@ -14,6 +15,20 @@ os.environ['USE_SQLITE'] = 'True'
 django.setup()
 
 User = get_user_model()
+
+BASE_TIMEOUT_SECONDS = 15
+MAX_RETRIES = 3
+
+
+def request_with_retry(method, url, **kwargs):
+    last_error = None
+    timeout = kwargs.pop('timeout', BASE_TIMEOUT_SECONDS)
+    for _ in range(MAX_RETRIES):
+        try:
+            return requests.request(method, url, timeout=timeout, **kwargs)
+        except RequestException as exc:
+            last_error = exc
+    raise last_error
 
 def test_api_endpoints():
     """Test key API endpoints"""
@@ -24,7 +39,7 @@ def test_api_endpoints():
     
     # Test 1: API Root
     try:
-        resp = requests.get(f"{base_url}/api/health/", timeout=5)
+        resp = request_with_retry('GET', f"{base_url}/api/health/")
         if resp.status_code != 200:
             print(f"❌ Health Check failed: {resp.status_code}")
             print(f"   Response: {resp.text[:200]}")
@@ -41,13 +56,13 @@ def test_api_endpoints():
     test_password = "TestPass123!"
     
     try:
-        resp = requests.post(f"{base_url}/api/auth/register/", json={
+        resp = request_with_retry('POST', f"{base_url}/api/auth/register/", json={
             "username": test_username,
             "email": test_email,
             "password": test_password,
             "confirm_password": test_password,
             "full_name": "Smoke Test User"
-        }, timeout=5)
+        })
         print(f"✅ User Registration: {resp.status_code}")
         if resp.status_code not in [200, 201]:
             print(f"   Response: {resp.text[:200]}")
@@ -58,10 +73,10 @@ def test_api_endpoints():
     
     # Test 3: Login
     try:
-        resp = requests.post(f"{base_url}/api/auth/login/", json={
+        resp = request_with_retry('POST', f"{base_url}/api/auth/login/", json={
             "username": test_username,
             "password": test_password
-        }, timeout=5)
+        })
         print(f"✅ User Login: {resp.status_code}")
         tokens = resp.json()
         access_token = tokens.get('access')
@@ -73,7 +88,7 @@ def test_api_endpoints():
     
     # Test 4: User Profile
     try:
-        resp = requests.get(f"{base_url}/api/auth/profile/", headers=headers, timeout=5)
+        resp = request_with_retry('GET', f"{base_url}/api/auth/profile/", headers=headers)
         print(f"✅ User Profile: {resp.status_code}")
         profile = resp.json()
         print(f"   User: {profile.get('username')}, XP: {profile.get('xp_profile', {}).get('total_xp', 'N/A')}")
@@ -82,7 +97,7 @@ def test_api_endpoints():
     
     # Test 5: Challenges List
     try:
-        resp = requests.get(f"{base_url}/api/challenges/", headers=headers, timeout=5)
+        resp = request_with_retry('GET', f"{base_url}/api/challenges/", headers=headers)
         print(f"✅ Challenges List: {resp.status_code}")
         if resp.status_code == 200:
             data = resp.json()
@@ -95,7 +110,7 @@ def test_api_endpoints():
     
     # Test 6: XP Profile
     try:
-        resp = requests.get(f"{base_url}/api/gamification/xp/my_xp/", headers=headers, timeout=5)
+        resp = request_with_retry('GET', f"{base_url}/api/gamification/xp/my_xp/", headers=headers)
         print(f"✅ XP Profile: {resp.status_code}")
         if resp.status_code == 200:
             xp_data = resp.json()
@@ -105,7 +120,7 @@ def test_api_endpoints():
     
     # Test 7: XP Events List
     try:
-        resp = requests.get(f"{base_url}/api/gamification/events/", headers=headers, timeout=5)
+        resp = request_with_retry('GET', f"{base_url}/api/gamification/events/", headers=headers)
         print(f"✅ XP Events: {resp.status_code}")
         if resp.status_code == 200:
             data = resp.json()
@@ -116,7 +131,7 @@ def test_api_endpoints():
     
     # Test 8: Admin API (should fail without admin perms)
     try:
-        resp = requests.get(f"{base_url}/api/admin/users/", headers=headers, timeout=5)
+        resp = request_with_retry('GET', f"{base_url}/api/admin/users/", headers=headers)
         if resp.status_code == 403:
             print("✅ Admin API Permission: Correctly forbidden for non-admin")
         else:

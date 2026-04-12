@@ -117,8 +117,8 @@ export function AnalyticsPage() {
       ? Math.round((filteredWithdrawals.filter((w) => w.status === 'approved' || w.status === 'processing').length / filteredWithdrawals.length) * 100)
       : 100
 
-    const activeUsers = users.filter((u) => u.is_active).length
-    const completedChallenges = challenges.filter((c) => c.status === 'completed').length
+    const activeUsers = overview?.users?.active_week ?? users.filter((u) => u.is_active).length
+    const completedChallenges = overview?.challenges?.completed_month ?? challenges.filter((c) => c.status === 'completed').length
 
     return {
       deposits,
@@ -130,20 +130,37 @@ export function AnalyticsPage() {
       activeUsers,
       completedChallenges,
     }
-  }, [filteredTransactions, filteredWithdrawals, users, challenges])
+  }, [challenges, filteredTransactions, filteredWithdrawals, overview?.challenges?.completed_month, overview?.users?.active_week, users])
 
   const radarData = useMemo(() => {
-    const totalChallenges = Math.max(challenges.length, 1)
-    const totalUsers = Math.max(users.length, 1)
+    const totalUsers = Math.max(overview?.users?.total ?? users.length, 1)
+    const totalChallengesFromOverview =
+      (overview?.challenges_active ?? 0) +
+      (overview?.challenges_pending ?? 0) +
+      (overview?.challenges_completed ?? 0)
+    const totalChallenges = Math.max(totalChallengesFromOverview || challenges.length, 1)
+    const approvedOrProcessed = filteredWithdrawals.filter(
+      (w) => w.status === 'approved' || w.status === 'processing'
+    ).length
+    const withdrawalApprovalRate = filteredWithdrawals.length
+      ? (approvedOrProcessed / filteredWithdrawals.length) * 100
+      : 0
+    const marginRate = summary.deposits > 0
+      ? (summary.revenue / summary.deposits) * 100
+      : 0
+    const payoutCoverage = (summary.payouts + summary.withdrawalAmount) > 0
+      ? (summary.deposits / (summary.payouts + summary.withdrawalAmount)) * 100
+      : 0
+
     return [
-      { metric: 'User Growth', value: Math.min(100, Math.round((summary.activeUsers / totalUsers) * 100)) },
-      { metric: 'Cashflow', value: Math.min(100, Math.round((summary.deposits / Math.max(summary.deposits + summary.payouts, 1)) * 100)) },
-      { metric: 'Retention', value: Math.min(100, Math.round((overview?.users?.active_week ?? 0) / Math.max(overview?.users?.total ?? 1, 1) * 100)) },
-      { metric: 'Challenge Ops', value: Math.min(100, Math.round((summary.completedChallenges / totalChallenges) * 100)) },
-      { metric: 'Risk', value: Math.max(10, 100 - Math.round((filteredWithdrawals.filter((w) => w.status === 'rejected').length / Math.max(filteredWithdrawals.length, 1)) * 100)) },
-      { metric: 'Engagement', value: Math.min(100, Math.round(((overview?.users?.new_week ?? 0) / Math.max(totalUsers, 1)) * 100 * 8)) },
+      { metric: 'Active Users', value: Math.max(0, Math.min(100, Math.round((summary.activeUsers / totalUsers) * 100))) },
+      { metric: 'New User Share', value: Math.max(0, Math.min(100, Math.round(((overview?.users?.new_week ?? 0) / totalUsers) * 100))) },
+      { metric: 'Challenge Ops', value: Math.max(0, Math.min(100, Math.round((summary.completedChallenges / totalChallenges) * 100))) },
+      { metric: 'Withdrawal Approval', value: Math.max(0, Math.min(100, Math.round(withdrawalApprovalRate))) },
+      { metric: 'Margin Rate', value: Math.max(0, Math.min(100, Math.round(marginRate))) },
+      { metric: 'Payout Coverage', value: Math.max(0, Math.min(100, Math.round(payoutCoverage))) },
     ]
-  }, [challenges.length, filteredWithdrawals, overview?.users?.active_week, overview?.users?.new_week, overview?.users?.total, summary.activeUsers, summary.completedChallenges, summary.deposits, summary.payouts, users.length])
+  }, [challenges.length, filteredWithdrawals, overview?.challenges_active, overview?.challenges_completed, overview?.challenges_pending, overview?.users?.new_week, overview?.users?.total, summary.activeUsers, summary.completedChallenges, summary.deposits, summary.payouts, summary.revenue, summary.withdrawalAmount, users.length])
 
   const transactionMixData = useMemo(() => {
     const totals = filteredTransactions.reduce<Record<string, number>>((acc, tx) => {

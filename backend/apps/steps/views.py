@@ -3,6 +3,7 @@ import logging
 
 import redis as redis_client
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Avg, Max, Sum
 from django.utils import timezone
@@ -48,14 +49,26 @@ def _check_idempotency(key: str, user_id: int) -> bool:
 
 def _allow_sync_tick(user_id: int, min_seconds: int = 1) -> bool:
     """Returns True when user is allowed to submit another sync tick."""
-    if _redis is None:
-        return True
-
     redis_key = f"step2win:sync_tick:{user_id}"
+    if _redis is None:
+        return cache.add(redis_key, '1', timeout=max(1, min_seconds))
+
     try:
         return _redis.set(redis_key, '1', nx=True, ex=max(1, min_seconds)) is not None
     except Exception:
-        return True
+        return cache.add(redis_key, '1', timeout=max(1, min_seconds))
+
+
+def _acquire_periodic_lock(lock_key: str, ttl_seconds: int) -> bool:
+    """Acquire a short-lived lock for periodic work (Redis, with cache fallback)."""
+    ttl_seconds = max(1, int(ttl_seconds))
+    if _redis is None:
+        return cache.add(lock_key, '1', timeout=ttl_seconds)
+
+    try:
+        return _redis.set(lock_key, '1', nx=True, ex=ttl_seconds) is not None
+    except Exception:
+        return cache.add(lock_key, '1', timeout=ttl_seconds)
 
 
 @extend_schema(
@@ -225,6 +238,8 @@ def sync_health(request):
 
     is_suspicious = anti_is_suspicious or legacy_is_suspicious
 
+    previous_steps = existing_record.steps if existing_record else None
+
     record, _ = HealthRecord.objects.update_or_create(
         user=user,
         date=date,
@@ -246,68 +261,67 @@ def sync_health(request):
     from apps.challenges.models import Challenge, Participant
     from apps.challenges.services import finalize_expired_challenges
 
-    finalize_expired_challenges(today=date)
+    if _acquire_periodic_lock('step2win:finalize_expired_challenges', 60):
+        finalize_expired_challenges(today=date)
 
-    active_challenges = Challenge.objects.filter(
-        participants__user=user,
-        status='active',
-        start_date__lte=date,
-        end_date__gte=date,
-    )
-    for challenge in active_challenges:
-        total = HealthRecord.objects.filter(
-            user=user,
-            date__gte=challenge.start_date,
-            date__lte=challenge.end_date,
-            is_suspicious=False,
-        ).aggregate(total=Sum('steps'))['total'] or 0
+    should_recompute_challenges = (
+        previous_steps is None or approved_steps != previous_steps
+    ) and _acquire_periodic_lock(f'step2win:participant_recompute:{user.id}', 15)
 
-        Participant.objects.filter(challenge=challenge, user=user).update(
-            steps=total,
-            qualified=total >= challenge.milestone,
+    if should_recompute_challenges:
+        active_challenges = Challenge.objects.filter(
+            participants__user=user,
+            status='active',
+            start_date__lte=date,
+            end_date__gte=date,
         )
+        for challenge in active_challenges:
+            total = HealthRecord.objects.filter(
+                user=user,
+                date__gte=challenge.start_date,
+                date__lte=challenge.end_date,
+                is_suspicious=False,
+            ).aggregate(total=Sum('steps'))['total'] or 0
 
-        # ── Update tiebreaker tracking fields ─────────────────────────────────
-        try:
-            participant = Participant.objects.get(challenge=challenge, user=user)
+            Participant.objects.filter(challenge=challenge, user=user).update(
+                steps=total,
+                qualified=total >= challenge.milestone,
+            )
 
-            # 1. Set milestone_reached_at if just crossed threshold
-            milestone_just_reached = False
-            if (participant.milestone_reached_at is None
-                    and participant.steps >= challenge.milestone):
-                participant.milestone_reached_at = timezone.now()
-                milestone_just_reached = True
+            # ── Update tiebreaker tracking fields ─────────────────────────────
+            try:
+                participant = Participant.objects.get(challenge=challenge, user=user)
 
-            # 2. Update best_day_steps
-            if record.steps > participant.best_day_steps:
-                participant.best_day_steps = record.steps
+                milestone_just_reached = False
+                if (participant.milestone_reached_at is None
+                        and participant.steps >= challenge.milestone):
+                    participant.milestone_reached_at = timezone.now()
+                    milestone_just_reached = True
 
-            # 3. GPS percentage — placeholder for future GPS implementation
-            # When GPS data is available, update gps_step_percentage here
-            # For now, it defaults to 0
+                if record.steps > participant.best_day_steps:
+                    participant.best_day_steps = record.steps
 
-            participant.save(update_fields=[
-                'milestone_reached_at',
-                'best_day_steps',
-            ])
+                participant.save(update_fields=[
+                    'milestone_reached_at',
+                    'best_day_steps',
+                ])
 
-            # Push celebration system message to group chat (private challenges only)
-            if milestone_just_reached and challenge.is_private:
-                try:
-                    from asgiref.sync import async_to_sync
-                    from apps.challenges.consumers import push_system_message
-                    milestone_k = challenge.milestone // 1000
-                    async_to_sync(push_system_message)(
-                        challenge.id,
-                        f'🎉 {user.username} just hit {milestone_k}K steps and qualified!'
-                    )
-                except Exception as e:
-                    logger.warning(f'System message push failed: {e}')
+                if milestone_just_reached and challenge.is_private:
+                    try:
+                        from asgiref.sync import async_to_sync
+                        from apps.challenges.consumers import push_system_message
+                        milestone_k = challenge.milestone // 1000
+                        async_to_sync(push_system_message)(
+                            challenge.id,
+                            f'🎉 {user.username} just hit {milestone_k}K steps and qualified!'
+                        )
+                    except Exception as e:
+                        logger.warning(f'System message push failed: {e}')
 
-        except Participant.DoesNotExist:
-            pass
-        except Exception as e:
-            logger.warning(f'Tiebreaker update failed for user {user.id}: {e}')
+            except Participant.DoesNotExist:
+                pass
+            except Exception as e:
+                logger.warning(f'Tiebreaker update failed for user {user.id}: {e}')
 
     payload = HealthRecordSerializer(record).data
     payload.update({
