@@ -1,10 +1,33 @@
+# ---------------------------------------------------------------------------
+# Managed databases (free tier)
+# ---------------------------------------------------------------------------
+databases:
+  - name: step2win-db
+    plan: free           # 90-day free trial on Render; upgrade to starter ($7/mo) after
+    ipAllowList: []      # Allow connections from Render's internal network
+
+# ---------------------------------------------------------------------------
+# Managed Redis (free tier)
+# ---------------------------------------------------------------------------
+  - type: redis
+    name: step2win-redis
+    plan: free
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+# ---------------------------------------------------------------------------
+# Application services
+# ---------------------------------------------------------------------------
 services:
+  # ── Web / API ──────────────────────────────────────────────────────────────
   - type: web
     name: step2win-backend
     env: python
+    plan: free           # Free tier: web service sleeps after 15 min of inactivity
     rootDir: backend
     buildCommand: bash render-build.sh
     startCommand: bash render-start.sh
+    healthCheckPath: /api/health/
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
@@ -20,20 +43,29 @@ services:
         generateValue: true
       - key: APP_SIGNING_SECRET
         generateValue: true
+      # Auto-wired from managed services above — no manual copy-paste needed
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: step2win-db
+          property: connectionString
       - key: REDIS_URL
-        sync: false
+        fromService:
+          type: redis
+          name: step2win-redis
+          property: connectionString
       - key: CELERY_BROKER_URL
-        sync: false
+        fromService:
+          type: redis
+          name: step2win-redis
+          property: connectionString
       - key: CELERY_RESULT_BACKEND
         value: django-db
       - key: ALLOWED_HOSTS
-        sync: false
+        sync: false       # Set to your Render domain, e.g. step2win-backend.onrender.com
       - key: CSRF_TRUSTED_ORIGINS
-        sync: false
+        sync: false       # e.g. https://step2win-backend.onrender.com
       - key: CORS_ALLOWED_ORIGINS
-        sync: false
+        sync: false       # e.g. https://your-frontend.onrender.com
       - key: DJANGO_ADMIN_URL
         value: admin-s2w-secure/
       - key: ADMIN_REGISTRATION_CODE
@@ -53,9 +85,12 @@ services:
       - key: SENTRY_DSN
         sync: false
 
+  # ── Celery worker (requires paid Starter plan ~$7/mo on Render) ───────────
+  # Background task processing: fraud scan, challenge finalization, etc.
   - type: worker
     name: step2win-celery-worker
     env: python
+    plan: starter        # Workers are not available on the free plan
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: bash render-worker.sh
@@ -71,45 +106,49 @@ services:
       - key: USE_REDIS
         value: "True"
       - key: SECRET_KEY
-        sync: false
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: SECRET_KEY
       - key: APP_SIGNING_SECRET
-        sync: false
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: APP_SIGNING_SECRET
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: step2win-db
+          property: connectionString
       - key: REDIS_URL
-        sync: false
+        fromService:
+          type: redis
+          name: step2win-redis
+          property: connectionString
       - key: CELERY_BROKER_URL
-        sync: false
+        fromService:
+          type: redis
+          name: step2win-redis
+          property: connectionString
       - key: CELERY_RESULT_BACKEND
         value: django-db
       - key: ALLOWED_HOSTS
         sync: false
-      - key: CSRF_TRUSTED_ORIGINS
-        sync: false
-      - key: CORS_ALLOWED_ORIGINS
-        sync: false
       - key: DJANGO_ADMIN_URL
         value: admin-s2w-secure/
-      - key: ADMIN_REGISTRATION_CODE
-        sync: false
       - key: POCHIPAY_EMAIL
         sync: false
       - key: POCHIPAY_PASSWORD
         sync: false
       - key: POCHIPAY_WEBHOOK_SECRET
         sync: false
-      - key: POCHIPAY_DEPOSIT_CALLBACK_URL
-        sync: false
-      - key: POCHIPAY_PAYOUT_CALLBACK_URL
-        sync: false
-      - key: POCHIPAY_WITHDRAWAL_CALLBACK_URL
-        sync: false
       - key: SENTRY_DSN
         sync: false
 
+  # ── Celery beat scheduler (requires paid Starter plan ~$7/mo on Render) ───
   - type: worker
     name: step2win-celery-beat
     env: python
+    plan: starter
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: bash render-beat.sh
@@ -125,38 +164,34 @@ services:
       - key: USE_REDIS
         value: "True"
       - key: SECRET_KEY
-        sync: false
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: SECRET_KEY
       - key: APP_SIGNING_SECRET
-        sync: false
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: APP_SIGNING_SECRET
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: step2win-db
+          property: connectionString
       - key: REDIS_URL
-        sync: false
+        fromService:
+          type: redis
+          name: step2win-redis
+          property: connectionString
       - key: CELERY_BROKER_URL
-        sync: false
+        fromService:
+          type: redis
+          name: step2win-redis
+          property: connectionString
       - key: CELERY_RESULT_BACKEND
         value: django-db
       - key: ALLOWED_HOSTS
         sync: false
-      - key: CSRF_TRUSTED_ORIGINS
-        sync: false
-      - key: CORS_ALLOWED_ORIGINS
-        sync: false
       - key: DJANGO_ADMIN_URL
         value: admin-s2w-secure/
-      - key: ADMIN_REGISTRATION_CODE
-        sync: false
-      - key: POCHIPAY_EMAIL
-        sync: false
-      - key: POCHIPAY_PASSWORD
-        sync: false
-      - key: POCHIPAY_WEBHOOK_SECRET
-        sync: false
-      - key: POCHIPAY_DEPOSIT_CALLBACK_URL
-        sync: false
-      - key: POCHIPAY_PAYOUT_CALLBACK_URL
-        sync: false
-      - key: POCHIPAY_WITHDRAWAL_CALLBACK_URL
-        sync: false
       - key: SENTRY_DSN
         sync: false

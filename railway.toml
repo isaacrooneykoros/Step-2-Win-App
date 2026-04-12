@@ -1,0 +1,31 @@
+# ---------------------------------------------------------------------------
+# Railway deployment configuration
+# https://docs.railway.app/reference/config-as-code
+#
+# The free Hobby plan gives $5 of credit/month — enough to run the web
+# service, Celery worker, Celery beat, PostgreSQL, and Redis for a small
+# startup app.
+#
+# One-time setup:
+#   1. Go to https://railway.app → New Project → Deploy from GitHub repo
+#   2. Select isaacrooneykoros/Step-2-Win-App
+#   3. Add a PostgreSQL plugin  → Railway auto-sets DATABASE_URL
+#   4. Add a Redis plugin       → Railway auto-sets REDIS_URL
+#   5. Set the env vars listed in RAILWAY_DEPLOYMENT.md (ALLOWED_HOSTS, etc.)
+#   6. Add a second service from the same repo for the Celery worker
+#      Start command: bash -lc 'cd backend && bash render-worker.sh'
+#   7. Add a third service for Celery beat
+#      Start command: bash -lc 'cd backend && bash render-beat.sh'
+# ---------------------------------------------------------------------------
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+# Uses the "web" process from the root Procfile.
+# Override per-service in the Railway dashboard if needed.
+startCommand = "bash -lc 'cd backend && bash render-start.sh'"
+healthcheckPath = "/api/health/"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
