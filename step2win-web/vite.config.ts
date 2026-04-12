@@ -28,6 +28,16 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: false
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-query': ['@tanstack/react-query'],
+          'vendor-map': ['leaflet', 'react-leaflet'],
+          'vendor-capacitor': ['@capacitor/core', '@capacitor/device', '@capacitor/preferences'],
+        },
+      },
+    },
   }
 })

@@ -19,7 +19,7 @@ class UserIsolationAuditMiddleware:
         response = self.get_response(request)
         return response
 
-    def process_view(self, request, view_func, view_args, view_kwargs):
+    def process_view(self, request, _view_func, _view_args, _view_kwargs):
         # Only audit authenticated API requests
         if not hasattr(request, 'user') or not request.user.is_authenticated:
             return None

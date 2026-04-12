@@ -18,7 +18,7 @@ from drf_spectacular.utils import extend_schema, inline_serializer
 
 from . import intasend
 from .models import PaymentTransaction, CallbackLog, WithdrawalRequest
-from apps.core.throttles import DepositRateThrottle, WithdrawalRateThrottle
+from apps.core.throttles import DepositRateThrottle
 
 logger = logging.getLogger(__name__)
 

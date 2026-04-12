@@ -14,7 +14,6 @@ from apps.gamification.serializers import (
     XPEventSerializer,
     LevelMilestoneSerializer,
     DailyLoginStreakSerializer,
-    UserGamificationSummarySerializer,
     UserXPSerializer,
 )
 from apps.users.models import UserXP

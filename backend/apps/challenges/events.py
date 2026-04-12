@@ -41,7 +41,8 @@ def send_challenge_event(challenge, event_type, message, metadata=None):
                 f'challenge_{challenge.id}',
                 {
                     'type': 'chat_message',
-                    'message': ChallengeMessageSerializer(msg).data
+                    'message': ChallengeMessageSerializer(msg).data,
+                    'metadata': metadata or {},
                 }
             )
     except Exception as e:
