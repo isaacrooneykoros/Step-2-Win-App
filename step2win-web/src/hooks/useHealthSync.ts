@@ -51,6 +51,8 @@ export function useHealthSync() {
   const [isConnectingDevice, setIsConnectingDevice] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<'unknown' | 'granted' | 'denied' | 'unavailable'>('unknown');
   const hasAttemptedAutoEnableRef = useRef(false);
+  const syncInFlightRef = useRef(false);
+  const lastSyncedFingerprintRef = useRef('');
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const userId = useAuthStore((state) => state.user?.id);
@@ -94,18 +96,26 @@ export function useHealthSync() {
   }, [showToast]);
 
   const runSyncHealth = useCallback(async (options?: { silent?: boolean }) => {
+    if (syncInFlightRef.current) {
+      return;
+    }
+
+    syncInFlightRef.current = true;
     setIsSyncing(true);
     try {
       const platform = Capacitor.getPlatform();
 
-      if (platform === 'android' || platform === 'ios') {
-        const shouldAutoEnable = !hasAttemptedAutoEnableRef.current || permissionStatus !== 'granted';
-        if (shouldAutoEnable) {
-          hasAttemptedAutoEnableRef.current = true;
-          const enabled = await connectDevice({ silent: true });
-          if (!enabled) {
-            return;
-          }
+      if (platform !== 'android' && platform !== 'ios') {
+        setPermissionStatus('unavailable');
+        return;
+      }
+
+      const shouldAutoEnable = !hasAttemptedAutoEnableRef.current || permissionStatus !== 'granted';
+      if (shouldAutoEnable) {
+        hasAttemptedAutoEnableRef.current = true;
+        const enabled = await connectDevice({ silent: true });
+        if (!enabled) {
+          return;
         }
       }
 
@@ -118,11 +128,24 @@ export function useHealthSync() {
         data = await readAppleHealth();
         setPermissionStatus('granted');
       } else {
-        setPermissionStatus('unavailable');
-        data = simulateData();
+        return;
+      }
+
+      const fingerprint = [
+        data.date,
+        data.source,
+        data.steps,
+        data.distance_km ?? '',
+        data.calories_active ?? '',
+        data.active_minutes ?? '',
+      ].join('|');
+
+      if (options?.silent && fingerprint === lastSyncedFingerprintRef.current) {
+        return;
       }
 
       await stepsService.syncHealth(data, buildSignedHeaders(String(userId ?? ''), data));
+      lastSyncedFingerprintRef.current = fingerprint;
 
       await queryClient.invalidateQueries({ queryKey: ['health'] });
       await queryClient.invalidateQueries({ queryKey: ['steps'] });
@@ -142,6 +165,7 @@ export function useHealthSync() {
         showToast({ message: extractSyncErrorMessage(error), type: 'error' });
       }
     } finally {
+      syncInFlightRef.current = false;
       setIsSyncing(false);
     }
   }, [connectDevice, permissionStatus, queryClient, showToast, userId]);
@@ -152,7 +176,7 @@ export function useHealthSync() {
   return { syncHealth, syncHealthSilent, connectDevice, isSyncing, isConnectingDevice, permissionStatus };
 }
 
-export function useAutoHealthSync(intervalMs: number = 180000) {
+export function useAutoHealthSync(intervalMs: number = 1000) {
   const { syncHealthSilent, isSyncing } = useHealthSync();
 
   useEffect(() => {
@@ -272,18 +296,6 @@ async function readAppleHealth() {
   }).then((r: any) => (r.quantity ? Math.round(r.quantity) : null)).catch(() => null);
 
   return { date: dateStr, source: 'apple_health' as const, steps, distance_km, calories_active, active_minutes };
-}
-
-function simulateData() {
-  const steps = Math.floor(Math.random() * 8000) + 2000;
-  return {
-    date: new Date().toISOString().split('T')[0],
-    source: 'manual' as const,
-    steps,
-    distance_km: parseFloat((steps * 0.0008).toFixed(2)),
-    calories_active: Math.floor(steps * 0.04),
-    active_minutes: Math.floor(steps / 100),
-  };
 }
 
 async function getHealthConnectModule() {

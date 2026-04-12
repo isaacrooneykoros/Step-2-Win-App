@@ -13,7 +13,7 @@ const navItems = [
 
 export default function MainLayout() {
   useStepsWebSocket();
-  useAutoHealthSync(180000);
+  useAutoHealthSync(1000);
 
   return (
     <div className="app-shell min-h-screen flex flex-col">

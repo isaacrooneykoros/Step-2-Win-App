@@ -179,18 +179,8 @@ export default function StepsHistoryScreen() {
           </div>
           <h3 className="text-text-primary font-bold text-lg mb-2">No Steps Yet</h3>
           <p className="text-text-secondary text-sm text-center leading-relaxed">
-            Sync your fitness device to start tracking your steps
+            Steps are synced automatically once device health permissions are enabled.
           </p>
-          <button
-            onClick={() => navigate('/steps')}
-            className="mt-5 px-6 py-3 rounded-xl text-white text-sm font-bold"
-            style={{
-              background: '#4F9CF9',
-              boxShadow: '0 4px 12px rgba(79,156,249,0.3)',
-            }}
-          >
-            Sync Steps Now
-          </button>
         </div>
       )}
     </div>
