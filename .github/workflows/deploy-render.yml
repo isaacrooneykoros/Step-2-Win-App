@@ -16,6 +16,8 @@ jobs:
   deploy:
     name: Trigger Render deploy
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Call Render deploy hook
         # Add RENDER_DEPLOY_HOOK_URL as a repository secret in GitHub:
