@@ -168,7 +168,7 @@ def withdraw(request):
     amount = serializer.validated_data['amount']
     phone_number = serializer.validated_data['phone_number']
 
-    from apps.payments import pochipay
+    from apps.payments import intasend
     from apps.payments.models import PaymentTransaction
 
     user = request.user
@@ -262,17 +262,17 @@ def withdraw(request):
             status='processing',
         )
 
-        tracking_reference = pochipay.generate_tracking_reference('WDR')
-        request_id = f"WDR-{uuid.uuid4().hex[:16].upper()}"
+        # Use a unique placeholder reference; updated below with IntaSend's tracking_id
+        temp_ref = f"WDR-{uuid.uuid4().hex[:16].upper()}"
 
-        PaymentTransaction.objects.create(
+        txn = PaymentTransaction.objects.create(
             user=user,
             type='payout',
             status='pending',
             amount_kes=amount,
             order_id=str(withdrawal.reference_number),
-            tracking_reference=tracking_reference,
-            request_id=request_id,
+            tracking_reference=temp_ref,
+            request_id='',
             phone_number=phone_number,
             narration='Step2Win instant wallet withdrawal',
         )
@@ -289,21 +289,24 @@ def withdraw(request):
                 'withdrawal_id': withdrawal.id,  # type: ignore[attr-defined]
                 'status': 'processing',
                 'phone_number': phone_number,
-                'tracking_reference': tracking_reference,
             }
         )
 
-        # Send instant payout to M-Pesa
-        pochipay.send_to_mobile(
+        # Send instant payout to M-Pesa via IntaSend
+        callback_url = getattr(settings, 'INTASEND_PAYOUT_CALLBACK_URL', '')
+        result = intasend.send_to_mobile(
             recipients=[{
+                'name': 'Step2Win Withdrawal',
+                'account': phone_number,
                 'amount': float(amount),
-                'remarks': 'Step2Win wallet withdrawal',
-                'trackingReference': tracking_reference,
-                'phoneNumber': phone_number,
             }],
-            request_id=request_id,
-            title='Step2Win Wallet Withdrawal',
+            callback_url=callback_url,
         )
+        # Store IntaSend's tracking_id for callback matching
+        tracking_id = result.get('tracking_id', temp_ref)
+        txn.tracking_reference = tracking_id
+        txn.request_id = tracking_id
+        txn.save(update_fields=['tracking_reference', 'request_id'])
 
     except Exception as exc:
         return Response(
