@@ -229,33 +229,6 @@ npx cap open android
 - Min withdrawal: $10
 - Max deposit: $10,000
 
-## 📝 Environment Variables
-
-### Backend (.env)
-```
-SECRET_KEY=your-secret-key
-DEBUG=True
-DB_NAME=step2win
-DB_USER=postgres
-DB_PASSWORD=your-password
-REDIS_URL=redis://localhost:6379/0
-CORS_ALLOWED_ORIGINS=http://localhost:5173
-```
-
-### Frontend (.env)
-```
-VIT🎉 Project Status
-
-**The Step2Win platform is now fully implemented and ready for testing!**
-
-Both backend and frontend are complete with all core features:
-- User authentication and authorization
-- Challenge creation, joining, and management  
-- Real-time leaderboards and step tracking
-- Wallet system with deposits and withdrawals
-- Profile management and device binding
-- Fraud detection and security features
-
 Ready for: Local testing → Database setup → Production deployment
 ## 🤝 Contributing
 
