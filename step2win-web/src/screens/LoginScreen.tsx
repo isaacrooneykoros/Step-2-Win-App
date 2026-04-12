@@ -8,10 +8,12 @@ import { authService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { googleClientIdHelpText, isGoogleClientIdConfigured } from '../config/googleAuth';
 import Input from '../components/ui/Input';
+import { useToast } from '../components/ui/Toast';
 
 export default function LoginScreen() {
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
+  const { showToast } = useToast();
   
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -59,7 +61,15 @@ export default function LoginScreen() {
       );
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed. Please try again.');
+      const data = err?.response?.data;
+      const message =
+        data?.error ||
+        data?.message ||
+        (!err?.response
+          ? 'Unable to reach server. Confirm backend is running on http://127.0.0.1:8000.'
+          : 'Login failed. Please try again.');
+      setError(message);
+      showToast({ message, type: 'error' });
     } finally {
       setIsLoading(false);
     }

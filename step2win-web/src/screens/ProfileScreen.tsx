@@ -48,7 +48,7 @@ export default function ProfileScreen() {
   const { user, logout } = useAuthStore();
   const isStepsSocketConnected = useStepsSyncStore((state) => state.isStepsSocketConnected);
   const lastStepsUpdateAt = useStepsSyncStore((state) => state.lastStepsUpdateAt);
-  const { syncHealth, isSyncing } = useHealthSync();
+  const { permissionStatus } = useHealthSync();
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
@@ -76,11 +76,6 @@ export default function ProfileScreen() {
       });
     }
   }, [profile]);
-
-  const { data: deviceStatus } = useQuery({
-    queryKey: ['device-status'],
-    queryFn: authService.getDeviceStatus,
-  });
 
   const changePasswordMutation = useMutation({
     mutationFn: (data: any) => authService.changePassword(data),
@@ -214,6 +209,28 @@ export default function ProfileScreen() {
         return 'Score recovers automatically with normal daily activity. Contact support if you believe this is an error.';
     }
   })();
+
+  const devicePermissionGranted = permissionStatus === 'granted';
+  const canSyncDeviceSteps = devicePermissionGranted;
+
+  const deviceStatusLabel = (() => {
+    if (canSyncDeviceSteps) return 'Auto Sync Active';
+    if (permissionStatus === 'denied') return 'Permission Required';
+    if (permissionStatus === 'unavailable') return 'Mobile App Required';
+    return 'Initializing';
+  })();
+
+  const deviceStatusClass = canSyncDeviceSteps
+    ? 'text-accent-green'
+    : permissionStatus === 'unavailable'
+      ? 'text-text-muted'
+      : 'text-accent-red';
+
+  const deviceDotClass = canSyncDeviceSteps
+    ? 'bg-accent-green'
+    : permissionStatus === 'unavailable'
+      ? 'bg-text-muted'
+      : 'bg-accent-red';
 
   return (
     <div className="screen-enter pb-nav bg-bg-page">
@@ -456,25 +473,22 @@ export default function ProfileScreen() {
               <Activity size={24} strokeWidth={2.5} className="text-accent-green" />
             </div>
             <div className="flex-1">
-              <h3 className="text-text-primary font-bold mb-1">Fitness Device</h3>
-              <p className="text-text-muted text-xs mb-1.5">Tracking: Steps • Distance • Calories • Active Minutes</p>
+              <h3 className="text-text-primary font-bold mb-1">Device Steps</h3>
+              <p className="text-text-muted text-xs mb-1.5">Tracking runs automatically from device health data every few minutes.</p>
               <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${
-                  deviceStatus?.bound ? 'bg-accent-green' : 'bg-accent-red'
-                }`} />
-                <span className={`text-sm font-medium ${
-                  deviceStatus?.bound ? 'text-accent-green' : 'text-accent-red'
-                }`}>
-                  {deviceStatus?.bound ? 'Connected' : 'Not Connected'}
+                <div className={`w-2 h-2 rounded-full ${deviceDotClass}`} />
+                <span className={`text-sm font-medium ${deviceStatusClass}`}>
+                  {deviceStatusLabel}
                 </span>
               </div>
+              {(permissionStatus === 'denied' || permissionStatus === 'unavailable') && (
+                <p className="text-text-muted text-xs mt-1">
+                  {permissionStatus === 'denied'
+                    ? 'Please allow Health permissions in device settings to sync steps.'
+                    : 'Open the mobile app to enable device step permissions.'}
+                </p>
+              )}
             </div>
-            <button
-              onClick={syncHealth}
-              className="px-4 py-2 rounded-xl text-sm font-bold text-accent-blue bg-tint-blue"
-            >
-              {isSyncing ? 'Syncing…' : 'Sync'}
-            </button>
           </div>
         </div>
       </div>

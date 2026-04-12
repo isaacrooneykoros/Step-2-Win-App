@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 
 function resolveApiBaseUrl(): string {
   const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  const fallback = 'http://10.0.2.2:8000';
+  const fallback = 'http://localhost:8000';
   const base = envBase || fallback;
 
   const platform = Capacitor.getPlatform();
@@ -32,7 +32,7 @@ api.interceptors.request.use(
         config.headers.Authorization = `Bearer ${value}`;
       }
     } catch (e) {
-      const value = sessionStorage.getItem('access_token');
+      const value = localStorage.getItem('access_token');
       if (value) {
         config.headers.Authorization = `Bearer ${value}`;
       }
@@ -90,7 +90,7 @@ api.interceptors.response.use(
           const { value } = await Preferences.get({ key: 'refresh_token' });
           refreshToken = value;
         } catch (e) {
-          refreshToken = sessionStorage.getItem('refresh_token');
+          refreshToken = localStorage.getItem('refresh_token');
         }
 
         if (!refreshToken) {
@@ -113,9 +113,9 @@ api.interceptors.response.use(
             await Preferences.set({ key: 'refresh_token', value: newRefresh });
           }
         } catch (e) {
-          sessionStorage.setItem('access_token', newAccess);
+          localStorage.setItem('access_token', newAccess);
           if (newRefresh) {
-            sessionStorage.setItem('refresh_token', newRefresh);
+            localStorage.setItem('refresh_token', newRefresh);
           }
         }
 
@@ -140,9 +140,9 @@ api.interceptors.response.use(
           await Preferences.remove({ key: 'refresh_token' });
           await Preferences.remove({ key: 'session_id' });
         } catch (e) {
-          sessionStorage.removeItem('access_token');
-          sessionStorage.removeItem('refresh_token');
-          sessionStorage.removeItem('session_id');
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          localStorage.removeItem('session_id');
         }
 
         // Check if session was revoked
