@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema, inline_serializer
 
-from . import pochipay
+from . import intasend
 from .models import PaymentTransaction, CallbackLog, WithdrawalRequest
 from apps.core.throttles import DepositRateThrottle, WithdrawalRateThrottle
 
@@ -83,7 +83,7 @@ def initiate_deposit(request):
         return Response({'error': f'Maximum deposit is KES {MAX_DEPOSIT}'}, status=400)
 
     try:
-        phone = pochipay.format_phone(phone)
+        phone = intasend.format_phone(phone)
     except ValueError as e:
         return Response({'error': str(e)}, status=400)
 
@@ -100,9 +100,9 @@ def initiate_deposit(request):
                      'Please wait for it to complete before initiating another.',
             'order_id': recent_pending.order_id,
         }, status=400)
-    # ── Create transaction record first (before calling PochPay) ──────────
+    # ── Create transaction record first (before calling IntaSend) ──────────
     order_id           = f"DEP-{uuid.uuid4().hex[:20].upper()}"
-    tracking_reference = pochipay.generate_tracking_reference('DEP')
+    tracking_reference = intasend.generate_tracking_reference('DEP')
 
     txn = PaymentTransaction.objects.create(
         user               = user,
@@ -115,16 +115,17 @@ def initiate_deposit(request):
         narration          = f'Step2Win wallet deposit - {user.username}',
     )
 
-    # ── Send STK Push via PochPay ──────────────────────────────────────────
+    # ── Send STK Push via IntaSend ─────────────────────────────────────────
     try:
-        result = pochipay.initiate_mpesa_collection(
-            order_id        = order_id,
-            bill_ref_number = f'S2W-{user.id}',
-            phone_number    = phone,
-            amount          = float(amount),
-            narration       = 'Step2Win Deposit',
+        invoice = intasend.initiate_mpesa_collection(
+            order_id     = order_id,
+            phone_number = phone,
+            amount       = float(amount),
+            narration    = 'Step2Win Deposit',
+            user_email   = getattr(user, 'email', ''),
         )
-        txn.collection_id = result.get('collectionId', '')
+        # Store IntaSend's invoice_id for status polling (collection_id field)
+        txn.collection_id = invoice.get('invoice_id', '')
         txn.status        = 'pending'
         txn.save(update_fields=['collection_id', 'status', 'updated_at'])
 
@@ -134,9 +135,9 @@ def initiate_deposit(request):
         txn.save(update_fields=['status', 'fail_reason', 'updated_at'])
         logger.error(f'Deposit STK Push failed for user {user.id}: {e}')
 
-        if isinstance(e, pochipay.PochiPayAPIError):
+        if isinstance(e, intasend.IntaSendAPIError):
             # Configuration/auth issues should surface as 400 for easier debugging.
-            if e.status_code == 400 or 'credentials missing' in str(e).lower():
+            if e.status_code == 400 or 'api key missing' in str(e).lower():
                 return Response({'error': str(e)}, status=400)
 
         return Response({'error': 'Payment initiation failed. Please try again.'}, status=502)
@@ -155,51 +156,65 @@ def initiate_deposit(request):
 @require_POST
 def deposit_callback(request):
     """
-    PochPay calls this URL when a deposit M-Pesa transaction completes.
+    IntaSend calls this URL when a deposit (STK Push) M-Pesa transaction completes.
+    Register this URL in the IntaSend dashboard under Settings > Webhooks.
     This endpoint MUST be public (no authentication).
-    MUST return 200 quickly — PochPay may retry if it times out.
+    MUST return 200 quickly — IntaSend may retry if it times out.
 
-    Callback payload:
-        orderId, billRefNumber, phoneNumber, amount,
-        thirdPartyReference, failReason, isSuccessful
+    IntaSend webhook payload format:
+        {
+          "invoice": {
+            "invoice_id": "...",
+            "state": "COMPLETE" | "FAILED" | "PENDING",
+            "api_ref": "<our order_id>",
+            "mpesa_reference": "MPESA_TXN_REF",
+            "failed_reason": null | "...",
+            "value": 100,
+            ...
+          }
+        }
     """
     import json
     import hmac
     import hashlib
 
-    # ── Webhook secret verification ───────────────────────────────────────
-    webhook_secret = getattr(settings, 'POCHIPAY_WEBHOOK_SECRET', None)
+    # ── Optional webhook challenge verification ───────────────────────────
+    webhook_secret = getattr(settings, 'INTASEND_WEBHOOK_SECRET', None)
     if webhook_secret:
-        provided_sig = request.headers.get('X-Pochipay-Signature', '')
-        expected_sig = hmac.new(
-            webhook_secret.encode(),
-            request.body,
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(provided_sig, expected_sig):
-            logger.warning('Deposit callback: invalid webhook signature — rejected')
-            return JsonResponse({'error': 'Invalid signature'}, status=403)
+        provided_sig = request.headers.get('X-IntaSend-Signature', '')
+        if provided_sig:
+            expected_sig = hmac.new(
+                webhook_secret.encode(),
+                request.body,
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(provided_sig, expected_sig):
+                logger.warning('Deposit callback: invalid webhook signature — rejected')
+                return JsonResponse({'error': 'Invalid signature'}, status=403)
 
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
+    # ── Extract IntaSend invoice fields ───────────────────────────────────
+    invoice      = payload.get('invoice', {})
+    order_id     = invoice.get('api_ref', '')          # our order_id passed as api_ref
+    state        = invoice.get('state', '')
+    is_successful = state == 'COMPLETE'
+    mpesa_ref    = invoice.get('mpesa_reference', '')
+    fail_reason  = invoice.get('failed_reason', '') or invoice.get('failed_code', '')
+
     # Log the raw callback first — always, even if we reject it
     log = CallbackLog.objects.create(
         type        = 'deposit',
         raw_payload = payload,
-        order_id    = payload.get('orderId', ''),
+        order_id    = order_id,
     )
 
-    order_id     = payload.get('orderId')
-    is_successful = payload.get('isSuccessful', False)
-    mpesa_ref    = payload.get('thirdPartyReference', '')
-    fail_reason  = payload.get('failReason', '')
-
     if not order_id:
-        logger.warning(f'Deposit callback missing orderId: {payload}')
-        return JsonResponse({'status': 'ok'})  # always 200 to PochPay
+        logger.warning(f'Deposit callback missing api_ref (order_id): {payload}')
+        return JsonResponse({'status': 'ok'})  # always 200 to IntaSend
 
     # ── Idempotency: check if already processed ───────────────────────────
     try:
@@ -245,7 +260,7 @@ def deposit_callback(request):
 
             else:
                 txn.status               = 'failed' if fail_reason else 'cancelled'
-                txn.fail_reason          = fail_reason or payload.get('resultDescription', '')
+                txn.fail_reason          = fail_reason
                 txn.callback_received_at = timezone.now()
                 txn.save(update_fields=['status', 'fail_reason',
                                         'callback_received_at', 'updated_at'])
@@ -259,7 +274,7 @@ def deposit_callback(request):
 
     except Exception as e:
         logger.error(f'Deposit callback processing error for {order_id}: {e}')
-        # Still return 200 so PochPay doesn't retry endlessly
+        # Still return 200 so IntaSend doesn't retry endlessly
         return JsonResponse({'status': 'ok'})
 
     return JsonResponse({'status': 'ok'})
@@ -271,43 +286,65 @@ def deposit_callback(request):
 @require_POST
 def payout_callback(request):
     """
-    PochPay calls this URL when a challenge payout completes.
+    IntaSend calls this URL when a challenge payout (send-money) completes.
     This endpoint MUST be public (no authentication).
-    Callback payload:
-        successful, requestId, trackingReference, thirdPartyReference, failReason
+    MUST return 200 quickly — IntaSend may retry if it times out.
+
+    IntaSend send-money webhook payload format:
+        {
+          "tracking_id": "<IntaSend batch tracking_id stored as tracking_reference>",
+          "status": "COMPLETE" | "FAILED" | "PENDING",
+          "transactions": [
+            {
+              "status": "COMPLETE",
+              "account": "2547XXXXXXXX",
+              "amount": 100,
+              "mpesa_reference": "MPESA_TXN_REF",
+              "failed_reason": null
+            }
+          ]
+        }
     """
     import json
     import hmac
     import hashlib
 
-    # ── Webhook secret verification ───────────────────────────────────────
-    webhook_secret = getattr(settings, 'POCHIPAY_WEBHOOK_SECRET', None)
+    # ── Optional webhook signature verification ───────────────────────────
+    webhook_secret = getattr(settings, 'INTASEND_WEBHOOK_SECRET', None)
     if webhook_secret:
-        provided_sig = request.headers.get('X-Pochipay-Signature', '')
-        expected_sig = hmac.new(
-            webhook_secret.encode(),
-            request.body,
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(provided_sig, expected_sig):
-            logger.warning('Payout callback: invalid webhook signature — rejected')
-            return JsonResponse({'error': 'Invalid signature'}, status=403)
+        provided_sig = request.headers.get('X-IntaSend-Signature', '')
+        if provided_sig:
+            expected_sig = hmac.new(
+                webhook_secret.encode(),
+                request.body,
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(provided_sig, expected_sig):
+                logger.warning('Payout callback: invalid webhook signature — rejected')
+                return JsonResponse({'error': 'Invalid signature'}, status=403)
 
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
+    # ── Extract IntaSend send-money fields ────────────────────────────────
+    tracking_ref  = payload.get('tracking_id', '')
+    status_str    = payload.get('status', '')
+    is_successful = status_str == 'COMPLETE'
+    transactions  = payload.get('transactions', [])
+    first_txn     = transactions[0] if transactions else {}
+    mpesa_ref     = first_txn.get('mpesa_reference', '')
+    fail_reason   = (
+        first_txn.get('failed_reason', '')
+        or payload.get('failed_reason', '')
+    )
+
     log = CallbackLog.objects.create(
         type        = 'payout',
         raw_payload = payload,
-        order_id    = payload.get('trackingReference', ''),
+        order_id    = tracking_ref,
     )
-
-    tracking_ref  = payload.get('trackingReference')
-    is_successful = payload.get('successful', False)
-    mpesa_ref     = payload.get('thirdPartyReference', '')
-    fail_reason   = payload.get('failReason', '')
 
     if not tracking_ref:
         return JsonResponse({'status': 'ok'})
@@ -317,7 +354,7 @@ def payout_callback(request):
             tracking_reference=tracking_ref, type='payout'
         )
     except PaymentTransaction.DoesNotExist:
-        logger.error(f'Payout callback for unknown trackingReference={tracking_ref}')
+        logger.error(f'Payout callback for unknown tracking_id={tracking_ref}')
         return JsonResponse({'status': 'ok'})
 
     if txn.status in ('completed', 'failed'):
@@ -521,7 +558,7 @@ MAX_DAILY      = Decimal(str(settings.MAX_DAILY_WITHDRAWAL))
 def get_banks(request):
     """Returns the list of supported banks for bank withdrawals. Cached 24h."""
     try:
-        banks = pochipay.get_available_banks()
+        banks = intasend.get_available_banks()
         return Response({'banks': banks})
     except Exception as e:
         logger.error(f'Failed to fetch bank list: {e}')
@@ -602,7 +639,7 @@ def request_withdrawal(request):
         if not phone:
             return Response({'error': 'phone_number is required for M-Pesa'}, status=400)
         try:
-            phone = pochipay.format_phone(phone)
+            phone = intasend.format_phone(phone)
         except ValueError as e:
             return Response({'error': str(e)}, status=400)
 
@@ -615,11 +652,15 @@ def request_withdrawal(request):
                 status=400
             )
         try:
-            banks = pochipay.get_available_banks()
-            valid_codes = [b.get('bankCode') for b in banks]
+            banks = intasend.get_available_banks()
+            valid_codes = [b.get('bankCode') or b.get('bank_code') for b in banks]
             if bank_code not in valid_codes:
                 return Response({'error': 'Invalid bank_code'}, status=400)
-            bank_name = next((b.get('name', '') for b in banks if b.get('bankCode') == bank_code), '')
+            bank_name = next(
+                (b.get('name', '') for b in banks
+                 if (b.get('bankCode') or b.get('bank_code')) == bank_code),
+                ''
+            )
         except Exception:
             return Response({'error': 'Could not validate bank. Try again.'}, status=502)
 
@@ -788,45 +829,65 @@ def cancel_withdrawal(request, withdrawal_id):
 @require_POST
 def withdrawal_callback(request):
     """
-    PochPay calls this URL when a withdrawal disbursement completes or fails.
+    IntaSend calls this URL when an admin-approved withdrawal disbursement completes.
     Public endpoint — no authentication.
     Always return 200 quickly.
 
-    Payload:
-        successful, requestId, trackingReference, thirdPartyReference, failReason
+    IntaSend send-money webhook payload format:
+        {
+          "tracking_id": "<IntaSend tracking_id stored as WithdrawalRequest.tracking_reference>",
+          "status": "COMPLETE" | "FAILED" | "PENDING",
+          "transactions": [
+            {
+              "status": "COMPLETE",
+              "account": "2547XXXXXXXX",
+              "amount": 100,
+              "mpesa_reference": "MPESA_TXN_REF",
+              "failed_reason": null
+            }
+          ]
+        }
     """
     import json
     import hmac
     import hashlib
 
-    # ── Webhook secret verification ───────────────────────────────────────
-    webhook_secret = getattr(settings, 'POCHIPAY_WEBHOOK_SECRET', None)
+    # ── Optional webhook signature verification ───────────────────────────
+    webhook_secret = getattr(settings, 'INTASEND_WEBHOOK_SECRET', None)
     if webhook_secret:
-        provided_sig = request.headers.get('X-Pochipay-Signature', '')
-        expected_sig = hmac.new(
-            webhook_secret.encode(),
-            request.body,
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(provided_sig, expected_sig):
-            logger.warning('Withdrawal callback: invalid webhook signature — rejected')
-            return JsonResponse({'error': 'Invalid signature'}, status=403)
+        provided_sig = request.headers.get('X-IntaSend-Signature', '')
+        if provided_sig:
+            expected_sig = hmac.new(
+                webhook_secret.encode(),
+                request.body,
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(provided_sig, expected_sig):
+                logger.warning('Withdrawal callback: invalid webhook signature — rejected')
+                return JsonResponse({'error': 'Invalid signature'}, status=403)
 
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
+    # ── Extract IntaSend send-money fields ────────────────────────────────
+    tracking_ref  = payload.get('tracking_id', '')
+    status_str    = payload.get('status', '')
+    is_successful = status_str == 'COMPLETE'
+    transactions  = payload.get('transactions', [])
+    first_txn     = transactions[0] if transactions else {}
+    mpesa_ref     = first_txn.get('mpesa_reference', '')
+    fail_reason   = (
+        first_txn.get('failed_reason', '')
+        or payload.get('failed_reason', '')
+    )
+
     log = CallbackLog.objects.create(
         type='withdrawal',
         raw_payload=payload,
-        order_id=payload.get('trackingReference', ''),
+        order_id=tracking_ref,
     )
-
-    tracking_ref = payload.get('trackingReference')
-    is_successful = payload.get('successful', False)
-    mpesa_ref = payload.get('thirdPartyReference', '')
-    fail_reason = payload.get('failReason', '')
 
     if not tracking_ref:
         return JsonResponse({'status': 'ok'})
@@ -834,7 +895,7 @@ def withdrawal_callback(request):
     try:
         withdrawal = WithdrawalRequest.objects.get(tracking_reference=tracking_ref)
     except WithdrawalRequest.DoesNotExist:
-        logger.error(f'Withdrawal callback for unknown trackingReference={tracking_ref}')
+        logger.error(f'Withdrawal callback for unknown tracking_id={tracking_ref}')
         return JsonResponse({'status': 'ok'})
 
     if withdrawal.status in ('completed', 'failed'):
