@@ -2,14 +2,18 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GoogleOAuthProvider } from '@react-oauth/google';
+import { Capacitor } from '@capacitor/core';
 import { useAuthStore } from './store/authStore';
 import { GOOGLE_CLIENT_ID, isGoogleClientIdConfigured } from './config/googleAuth';
 import MainLayout from './components/layout/MainLayout';
 import { PageLoader } from './components/ui/LoadingSpinner';
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
+import PreflightScreen from './screens/PreflightScreen';
 import type { ReactNode } from 'react';
 import { OnboardingScreen } from './components/screens/OnboardingScreen';
+
+const PREFLIGHT_SESSION_KEY = 'preflight_checked_v1';
 
 const HomeScreen = lazy(() => import('./screens/HomeScreen'));
 const ChallengesScreen = lazy(() => import('./screens/ChallengesScreen'));
@@ -54,12 +58,37 @@ function AuthLoadRedirect({
   isAuthenticated: boolean;
 }) {
   const location = useLocation();
+  const isNative = Capacitor.isNativePlatform();
+  const preflightChecked = sessionStorage.getItem(PREFLIGHT_SESSION_KEY) === 'true';
 
   if (loading) {
     return null;
   }
 
-  if (!isAuthenticated && location.pathname !== '/login' && location.pathname !== '/register') {
+  if (
+    !isAuthenticated &&
+    isNative &&
+    !preflightChecked &&
+    location.pathname !== '/preflight'
+  ) {
+    return <Navigate to="/preflight" replace />;
+  }
+
+  if (
+    !isAuthenticated &&
+    isNative &&
+    preflightChecked &&
+    location.pathname === '/preflight'
+  ) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (
+    !isAuthenticated &&
+    location.pathname !== '/login' &&
+    location.pathname !== '/register' &&
+    location.pathname !== '/preflight'
+  ) {
     return <Navigate to="/login" replace />;
   }
 
@@ -100,6 +129,7 @@ export default function App() {
           <AuthLoadRedirect loading={loading} isAuthenticated={isAuthenticated} />
           <Routes>
             {/* Public routes */}
+            <Route path="/preflight" element={<PreflightScreen />} />
             <Route path="/login" element={<LoginScreen />} />
             <Route path="/register" element={<RegisterScreen />} />
 

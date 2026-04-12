@@ -1,19 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import { Preferences } from '@capacitor/preferences';
-import { Capacitor } from '@capacitor/core';
-
-function resolveApiBaseUrl(): string {
-  const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  const fallback = 'http://localhost:8000';
-  const base = envBase || fallback;
-
-  const platform = Capacitor.getPlatform();
-  if (platform === 'android' && (base.includes('127.0.0.1') || base.includes('localhost'))) {
-    return base.replace('127.0.0.1', '10.0.2.2').replace('localhost', '10.0.2.2');
-  }
-
-  return base;
-}
+import { resolveApiBaseUrl } from '../../config/network';
 
 const api = axios.create({
   baseURL: resolveApiBaseUrl(),

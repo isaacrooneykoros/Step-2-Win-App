@@ -74,7 +74,7 @@ export default function RegisterScreen() {
           }
         }
       } else if (!err?.response) {
-        toastMessage = 'Unable to reach server. Confirm backend is running on http://localhost:8000.';
+        toastMessage = 'Unable to reach server. Confirm VITE_API_BASE_URL points to a reachable backend.';
         setErrors({ form: toastMessage });
       } else {
         setErrors({ form: 'Registration failed. Please try again.' });

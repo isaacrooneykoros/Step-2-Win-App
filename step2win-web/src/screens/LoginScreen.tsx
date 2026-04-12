@@ -66,7 +66,7 @@ export default function LoginScreen() {
         data?.error ||
         data?.message ||
         (!err?.response
-          ? 'Unable to reach server. Confirm backend is running on http://127.0.0.1:8000.'
+          ? 'Unable to reach server. Confirm VITE_API_BASE_URL points to a reachable backend.'
           : 'Login failed. Please try again.');
       setError(message);
       showToast({ message, type: 'error' });

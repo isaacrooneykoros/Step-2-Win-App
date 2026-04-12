@@ -4,6 +4,7 @@ import { Send } from 'lucide-react';
 import { challengesService } from '../../services/api';
 import { useToast } from '../ui/Toast';
 import type { ChatMessage } from '../../types';
+import { getStoredAccessToken, resolveWsBaseUrl } from '../../config/network';
 
 interface ChallengeChatProps {
   challengeId: number;
@@ -37,35 +38,43 @@ export function ChallengeChat({ challengeId }: ChallengeChatProps) {
 
   // WebSocket connection for real-time updates
   useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
+    let websocket: WebSocket | null = null;
+    let cancelled = false;
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws/challenges/${challengeId}/chat/?token=${token}`;
-    
-    const websocket = new WebSocket(wsUrl);
+    const connect = async () => {
+      const token = await getStoredAccessToken();
+      if (!token || cancelled) return;
 
-    websocket.onopen = () => {
-      console.log('Chat WebSocket connected');
+      const wsBase = resolveWsBaseUrl();
+      const wsUrl = `${wsBase}/ws/challenges/${challengeId}/chat/?token=${encodeURIComponent(token)}`;
+
+      websocket = new WebSocket(wsUrl);
+
+      websocket.onopen = () => {
+        console.log('Chat WebSocket connected');
+      };
+
+      websocket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'chat.message') {
+          queryClient.invalidateQueries({ queryKey: ['challenges', challengeId, 'chat'] });
+        }
+      };
+
+      websocket.onerror = (error) => {
+        console.error('Chat WebSocket error:', error);
+      };
+
+      websocket.onclose = () => {
+        console.log('Chat WebSocket disconnected');
+      };
     };
 
-    websocket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'chat.message') {
-        queryClient.invalidateQueries({ queryKey: ['challenges', challengeId, 'chat'] });
-      }
-    };
-
-    websocket.onerror = (error) => {
-      console.error('Chat WebSocket error:', error);
-    };
-
-    websocket.onclose = () => {
-      console.log('Chat WebSocket disconnected');
-    };
+    void connect();
 
     return () => {
-      websocket.close();
+      cancelled = true;
+      websocket?.close();
     };
   }, [challengeId, queryClient]);
 

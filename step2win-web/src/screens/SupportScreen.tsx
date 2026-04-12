@@ -6,6 +6,7 @@ import { supportService } from '../services/api';
 import { useToast } from '../components/ui/Toast';
 import { BaseModal } from '../components/ui/BaseModal';
 import type { SupportCategory, SupportPriority, SupportStatus, SupportTicket } from '../types';
+import { resolveWsBaseUrl } from '../config/network';
 
 const LIMIT = 20;
 
@@ -105,8 +106,7 @@ export default function SupportScreen() {
       const token = prefToken || localStorage.getItem('access_token');
       if (!token || cancelled) return;
 
-      const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) || 'http://127.0.0.1:8000';
-      const wsBase = apiBase.replace(/^http/, 'ws').replace(/\/$/, '');
+      const wsBase = resolveWsBaseUrl();
       socket = new WebSocket(`${wsBase}/ws/support/tickets/${selectedTicketId}/?token=${encodeURIComponent(token)}`);
       wsRef.current = socket;
 
