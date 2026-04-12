@@ -8,38 +8,13 @@
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Preferences } from '@capacitor/preferences';
-import { Capacitor } from '@capacitor/core';
 import { ChatMessage } from '../types';
 import { challengesService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
-
-function resolveApiBaseUrl(): string {
-  const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  const fallback = 'http://127.0.0.1:8000';
-  const base = envBase || fallback;
-
-  const platform = Capacitor.getPlatform();
-  if (platform === 'android' && (base.includes('127.0.0.1') || base.includes('localhost'))) {
-    return base.replace('127.0.0.1', '10.0.2.2').replace('localhost', '10.0.2.2');
-  }
-
-  return base;
-}
-
-function resolveWsBase(): string {
-  const explicit = import.meta.env.VITE_WS_URL as string | undefined;
-  const raw = explicit || resolveApiBaseUrl();
-  try {
-    const parsed = new URL(raw);
-    const protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${parsed.host}`;
-  } catch {
-    return raw.replace('https://', 'wss://').replace('http://', 'ws://').replace(/\/$/, '');
-  }
-}
+import { resolveApiBaseUrl, resolveWsBaseUrl } from '../config/network';
 
 const API_BASE = resolveApiBaseUrl();
-const WS_BASE = resolveWsBase();
+const WS_BASE = resolveWsBaseUrl();
 
 export function useGroupChat(challengeId: number) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);

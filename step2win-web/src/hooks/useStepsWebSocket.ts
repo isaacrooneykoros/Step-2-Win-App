@@ -1,22 +1,27 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStepsSyncStore } from '../store/stepsSyncStore';
+import { getStoredAccessToken, resolveWsBaseUrl } from '../config/network';
 
 export function useStepsWebSocket() {
   const queryClient = useQueryClient();
   const setStepsSocketConnected = useStepsSyncStore((state) => state.setStepsSocketConnected);
   const setLastStepsUpdateAt = useStepsSyncStore((state) => state.setLastStepsUpdateAt);
+  const wsBase = resolveWsBaseUrl();
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/steps/sync/?token=${token}`;
     let socket: WebSocket | null = null;
     let reconnectTimer: number | undefined;
+    let cancelled = false;
 
-    const connect = () => {
+    const connect = async () => {
+      const token = await getStoredAccessToken();
+      if (!token || cancelled) {
+        setStepsSocketConnected(false);
+        return;
+      }
+
+      const wsUrl = `${wsBase}/ws/steps/sync/?token=${encodeURIComponent(token)}`;
       socket = new WebSocket(wsUrl);
 
       socket.onopen = () => {
@@ -45,18 +50,21 @@ export function useStepsWebSocket() {
 
       socket.onclose = () => {
         setStepsSocketConnected(false);
-        reconnectTimer = window.setTimeout(connect, 5000);
+        if (!cancelled) {
+          reconnectTimer = window.setTimeout(connect, 5000);
+        }
       };
     };
 
-    connect();
+    void connect();
 
     return () => {
+      cancelled = true;
       setStepsSocketConnected(false);
       if (reconnectTimer) {
         window.clearTimeout(reconnectTimer);
       }
       socket?.close();
     };
-  }, [queryClient, setStepsSocketConnected, setLastStepsUpdateAt]);
+  }, [queryClient, setStepsSocketConnected, setLastStepsUpdateAt, wsBase]);
 }
