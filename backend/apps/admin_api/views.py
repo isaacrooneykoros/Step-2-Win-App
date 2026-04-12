@@ -200,7 +200,7 @@ def admin_register(request):
 
 class IsAdminUser(permissions.BasePermission):
     """Custom permission to check if user is admin"""
-    def has_permission(self, request, view):
+    def has_permission(self, request, _view):
         return request.user and request.user.is_staff
 
 

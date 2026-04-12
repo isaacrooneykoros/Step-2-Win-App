@@ -25,7 +25,7 @@ class SupportChatConsumer(AsyncWebsocketConsumer):
             await self.close(code=4404)
             return
 
-        is_allowed = await self._can_access_ticket(self.user.id, self.ticket_id)
+        is_allowed = await self._can_access_ticket(self.user.id, self.ticket.user_id)
         if not is_allowed:
             await self.close(code=4403)
             return
@@ -39,11 +39,11 @@ class SupportChatConsumer(AsyncWebsocketConsumer):
             'ticket_id': self.ticket_id,
         }))
 
-    async def disconnect(self, close_code):
+    async def disconnect(self, _close_code):
         if hasattr(self, 'group_name'):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
-    async def receive(self, text_data=None, bytes_data=None):
+    async def receive(self, text_data=None, _bytes_data=None):
         # Messaging is persisted via existing HTTP endpoints.
         # WebSocket is used for real-time push updates only.
         return
@@ -91,13 +91,8 @@ class SupportChatConsumer(AsyncWebsocketConsumer):
             return None
 
     @database_sync_to_async
-    def _can_access_ticket(self, user_id, ticket_id):
-        try:
-            ticket = SupportTicket.objects.get(id=ticket_id)
-        except SupportTicket.DoesNotExist:
-            return False
-
-        if ticket.user_id == user_id:
+    def _can_access_ticket(self, user_id, ticket_user_id):
+        if ticket_user_id == user_id:
             return True
 
         return User.objects.filter(id=user_id, is_staff=True, is_active=True).exists()

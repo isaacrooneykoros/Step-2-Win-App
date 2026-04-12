@@ -56,11 +56,11 @@ class ChallengeChatConsumer(AsyncWebsocketConsumer):
             'messages': history,
         }))
 
-    async def disconnect(self, close_code):
+    async def disconnect(self, _close_code):
         if hasattr(self, 'group_name'):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
-    async def receive(self, text_data=None, bytes_data=None):
+    async def receive(self, text_data=None, _bytes_data=None):
         try:
             data = json.loads(text_data)
         except json.JSONDecodeError:

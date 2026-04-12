@@ -1,0 +1,7 @@
+# Scan application code only; test fixtures and migrations create high-noise findings.
+exclude_dirs:
+  - tests
+  - migrations
+targets:
+  - apps
+  - step2win

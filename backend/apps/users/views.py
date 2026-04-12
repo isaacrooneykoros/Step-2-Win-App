@@ -11,9 +11,7 @@ from django.db import transaction
 from django.utils.text import slugify
 from decimal import Decimal
 import json
-from urllib.request import urlopen
-from urllib.parse import urlencode
-from urllib.error import URLError, HTTPError
+import requests
 from .models import User
 from .serializers import (
     RegisterSerializer,
@@ -174,13 +172,15 @@ def google_auth(request):
     serializer.is_valid(raise_exception=True)
 
     token = serializer.validated_data['token']
-    query = urlencode({'access_token': token})
-    userinfo_url = f"https://www.googleapis.com/oauth2/v3/userinfo?{query}"
-
     try:
-        with urlopen(userinfo_url, timeout=10) as response:
-            payload = json.loads(response.read().decode('utf-8'))
-    except (HTTPError, URLError, TimeoutError, ValueError):
+        response = requests.get(
+            'https://www.googleapis.com/oauth2/v3/userinfo',
+            params={'access_token': token},
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError, json.JSONDecodeError):
         return Response(
             {'error': 'Invalid Google token'},
             status=status.HTTP_400_BAD_REQUEST,
