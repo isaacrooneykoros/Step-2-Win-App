@@ -369,15 +369,15 @@ POCHIPAY_WEBHOOK_SECRET = os.getenv('POCHIPAY_WEBHOOK_SECRET', '')
 # Callback URLs - must be public, unauthenticated POST endpoints
 POCHIPAY_DEPOSIT_CALLBACK_URL = os.getenv(
     'POCHIPAY_DEPOSIT_CALLBACK_URL',
-    'https://api.step2win.com/api/payments/mpesa/deposit-callback/'
+    'https://step-2-win-app.onrender.com/api/payments/mpesa/deposit-callback/'
 )
 POCHIPAY_PAYOUT_CALLBACK_URL = os.getenv(
     'POCHIPAY_PAYOUT_CALLBACK_URL',
-    'https://api.step2win.com/api/payments/mpesa/payout-callback/'
+    'https://step-2-win-app.onrender.com/api/payments/mpesa/payout-callback/'
 )
 POCHIPAY_WITHDRAWAL_CALLBACK_URL = os.getenv(
     'POCHIPAY_WITHDRAWAL_CALLBACK_URL',
-    'https://api.step2win.com/api/payments/mpesa/withdrawal-callback/'
+    'https://step-2-win-app.onrender.com/api/payments/mpesa/withdrawal-callback/'
 )
 
 # Step2Win business rules
