@@ -1819,7 +1819,8 @@ def retry_payout(request, txn_id):
         status_data = intasend.get_disbursement_status(txn.tracking_reference)
         return Response({'status': 'Status retrieved', 'result': status_data})
     except Exception as e:
-        return Response({'error': str(e)}, status=502)
+        logger.error(f'Retry payout status check failed | txn={txn_id}: {e}')
+        return Response({'error': 'Failed to retrieve disbursement status from IntaSend.'}, status=502)
 
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
@@ -2041,4 +2042,4 @@ def retry_failed_withdrawal(request, withdrawal_id):
 
     except Exception as e:
         logger.error(f'Withdrawal status check failed | id={withdrawal_id}: {e}')
-        return Response({'error': str(e)}, status=502)
+        return Response({'error': 'Failed to retrieve withdrawal status from IntaSend.'}, status=502)

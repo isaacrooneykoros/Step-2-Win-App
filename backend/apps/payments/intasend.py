@@ -115,8 +115,8 @@ def initiate_mpesa_collection(
         data = resp.json()
         invoice = data.get('invoice', {})
         logger.info(
-            'IntaSend STK Push sent | order_id=%s | invoice_id=%s | phone=%s',
-            order_id, invoice.get('invoice_id'), phone_number,
+            'IntaSend STK Push sent | order_id=%s | invoice_id=%s',
+            order_id, invoice.get('invoice_id'),
         )
         return invoice  # {'invoice_id': '...', 'state': 'PENDING', ...}
 
@@ -298,8 +298,8 @@ def send_withdrawal_to_mobile(
     )
     tracking_id = data.get('tracking_id', '')
     logger.info(
-        'Withdrawal sent to M-Pesa | tracking_id=%s | amount=%s | phone=%s',
-        tracking_id, amount, phone_number,
+        'Withdrawal sent to M-Pesa | tracking_id=%s | amount=%s',
+        tracking_id, amount,
     )
     return tracking_id
 
