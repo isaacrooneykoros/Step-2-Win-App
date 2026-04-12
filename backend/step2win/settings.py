@@ -238,7 +238,9 @@ SPECTACULAR_SETTINGS = {
 
 CORS_ALLOWED_ORIGINS = os.getenv(
     'CORS_ALLOWED_ORIGINS',
-    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174'
+    # Local web dev + Capacitor Android (capacitor://localhost) + Capacitor with androidScheme=https (https://localhost)
+    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,'
+    'capacitor://localhost,https://localhost'
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT']
@@ -246,6 +248,8 @@ CORS_ALLOW_HEADERS = [
     'accept', 'accept-encoding', 'authorization',
     'content-type', 'dnt', 'origin', 'user-agent',
     'x-csrftoken', 'x-requested-with',
+    # Custom headers used by the mobile app for step-sync request signing
+    'x-app-signature', 'x-timestamp', 'x-idempotency-key',
 ]
 
 # Prefer Redis in hosted environments when REDIS_URL is present.
