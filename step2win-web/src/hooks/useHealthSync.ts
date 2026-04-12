@@ -7,7 +7,7 @@ import { useAuthStore } from '../store/authStore';
 import { v4 as uuidv4 } from 'uuid';
 import CryptoJS from 'crypto-js';
 
-const APP_SIGNING_SECRET = import.meta.env.VITE_APP_SIGNING_SECRET || 'change-me-in-production';
+const APP_SIGNING_SECRET = import.meta.env.VITE_APP_SIGNING_SECRET || '';
 
 function buildSignedHeaders(userId: string, body: object): Record<string, string> {
   const timestamp = Math.floor(Date.now() / 1000).toString();
