@@ -2,11 +2,15 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.generic import RedirectView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 from rest_framework import permissions
 from step2win.health import health_check
 
 urlpatterns = [
+    # Root — redirect to the health-check so opening the site shows something useful
+    path('', RedirectView.as_view(url='/api/health/', permanent=False)),
+
     # Admin — URL is obscured via DJANGO_ADMIN_URL env var (default: admin-s2w-secure/)
     path(settings.ADMIN_URL, admin.site.urls),
 
