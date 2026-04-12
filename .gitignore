@@ -27,6 +27,11 @@ htmlcov/
 .env.*
 !.env.example
 !**/.env.example
+# Celery broker SQLite files (local dev only — never commit)
+celery_broker.db
+celery_broker.sqlite3
+**/celery_broker.db
+**/celery_broker.sqlite3
 .venv
 env/
 venv/

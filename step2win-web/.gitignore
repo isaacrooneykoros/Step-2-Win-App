@@ -19,11 +19,14 @@ android/
 ios/
 .capacitor
 
-# Environment
+# Environment — exclude all .env.* variants except the committed example files
+# Note: negation patterns (!.env.example) must come AFTER the glob they negate
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+.env.staging
+.env.production
 
 # Logs
 npm-debug.log*

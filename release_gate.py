@@ -36,6 +36,7 @@ def main() -> int:
         'SECRET_KEY': 'prod-check-secret-key-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
         'ALLOWED_HOSTS': 'api.step2win.example',
         'CSRF_TRUSTED_ORIGINS': 'https://api.step2win.example',
+        'APP_SIGNING_SECRET': 'prod-gate-signing-secret-0123456789ABCDEFGHIJ',
     }
 
     backend_test_env = {

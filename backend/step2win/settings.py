@@ -31,6 +31,12 @@ if not DEBUG:
 USE_REDIS = os.getenv('USE_REDIS', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'True') == 'True'
 APP_SIGNING_SECRET = os.environ.get('APP_SIGNING_SECRET', '')
+if not DEBUG:
+    _unsafe_signing_secrets = {'change-this-app-signing-secret', 'change-me-in-production'}
+    if not APP_SIGNING_SECRET or APP_SIGNING_SECRET in _unsafe_signing_secrets or len(APP_SIGNING_SECRET) < 32:
+        raise ImproperlyConfigured(
+            'APP_SIGNING_SECRET must be set to a random string of at least 32 characters in production.'
+        )
 
 INSTALLED_APPS = [
     'daphne',
