@@ -25,7 +25,7 @@ from apps.wallet.models import WalletTransaction, Withdrawal
 from apps.gamification.models import Badge, UserBadge, XPEvent
 from apps.steps.models import HealthRecord
 from apps.payments.models import WithdrawalRequest
-from apps.payments import pochipay
+from apps.payments import intasend
 from apps.payments.views import _notify_user
 from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiTypes
 
@@ -1765,7 +1765,7 @@ def action_flag(request, flag_id):
 def payments_overview(request):
     """Admin dashboard financial overview."""
     from apps.payments.models import PaymentTransaction
-    from apps.payments import pochipay
+    from apps.payments import intasend
     from datetime import timedelta
 
     today      = timezone.now().date()
@@ -1779,9 +1779,9 @@ def payments_overview(request):
     )
     pending_txns = PaymentTransaction.objects.filter(status='pending')
 
-    # Get live platform balance from PochPay
+    # Get live platform balance from IntaSend
     try:
-        platform_balance = pochipay.get_platform_balance()
+        platform_balance = intasend.get_platform_balance()
     except Exception:
         platform_balance = {'balance': 'Error fetching', 'currency': 'KES'}
 
@@ -1803,24 +1803,24 @@ def payments_overview(request):
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def retry_payout(request, txn_id):
-    """Admin retries a failed/pending payout using the narrationId from PochPay."""
+    """Admin checks current IntaSend status of a failed/pending payout."""
     from apps.payments.models import PaymentTransaction
-    from apps.payments import pochipay
+    from apps.payments import intasend
 
     txn = get_object_or_404(PaymentTransaction, id=txn_id, type='payout')
 
     if txn.status == 'completed':
         return Response({'error': 'Transaction already completed'}, status=400)
 
-    # Get narrationId from PochPay first
-    status_data = pochipay.get_disbursement_status(txn.tracking_reference)
-    narration_id = status_data.get('result', {}).get('narrationId')
+    if not txn.tracking_reference:
+        return Response({'error': 'No tracking reference available — cannot check status'}, status=400)
 
-    if not narration_id:
-        return Response({'error': 'No narrationId available for retry'}, status=400)
-
-    result = pochipay.retry_pending_disbursement(narration_id)
-    return Response({'status': 'Retry initiated', 'result': result})
+    try:
+        status_data = intasend.get_disbursement_status(txn.tracking_reference)
+        return Response({'status': 'Status retrieved', 'result': status_data})
+    except Exception as e:
+        logger.error(f'Retry payout status check failed | txn={txn_id}: {e}')
+        return Response({'error': 'Failed to retrieve disbursement status from IntaSend.'}, status=502)
 
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
@@ -1896,7 +1896,8 @@ def withdrawal_stats(request):
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def approve_withdrawal(request, withdrawal_id):
     """
-    Admin approves a withdrawal. This immediately sends it to PochPay.
+    Admin approves a withdrawal. This immediately sends it to IntaSend.
+    IntaSend generates a tracking_id which is stored in the withdrawal record.
     """
     withdrawal = get_object_or_404(WithdrawalRequest, id=withdrawal_id)
 
@@ -1906,68 +1907,68 @@ def approve_withdrawal(request, withdrawal_id):
             status=400
         )
 
-    tracking_ref = pochipay.generate_tracking_reference('WDR')
-    request_id = f"WDR-{withdrawal.id}-{uuid.uuid4().hex[:6].upper()}"
+    callback_url = getattr(settings, 'INTASEND_WITHDRAWAL_CALLBACK_URL', '')
+    remarks = f'Step2Win withdrawal for {withdrawal.user.username}'
 
-    withdrawal.tracking_reference = tracking_ref
-    withdrawal.request_id = request_id
     withdrawal.status = 'approved'
     withdrawal.reviewed_by = request.user
     withdrawal.reviewed_at = timezone.now()
-    withdrawal.save(update_fields=[
-        'tracking_reference', 'request_id', 'status',
-        'reviewed_by', 'reviewed_at', 'updated_at'
-    ])
+    withdrawal.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'updated_at'])
 
     try:
         if withdrawal.method == 'mpesa':
-            pochipay.send_withdrawal_to_mobile(
-                tracking_reference=tracking_ref,
-                request_id=request_id,
+            tracking_id = intasend.send_withdrawal_to_mobile(
                 phone_number=withdrawal.phone_number,
                 amount=float(withdrawal.amount_kes),
-                remarks=f'Step2Win withdrawal for {withdrawal.user.username}',
+                remarks=remarks,
+                callback_url=callback_url,
             )
 
         elif withdrawal.method == 'bank':
-            pochipay.send_withdrawal_to_bank(
-                tracking_reference=tracking_ref,
-                request_id=request_id,
+            tracking_id = intasend.send_withdrawal_to_bank(
                 bank_code=withdrawal.bank_code,
                 account_number=withdrawal.account_number,
                 amount=float(withdrawal.amount_kes),
                 remarks=f'Step2Win bank withdrawal for {withdrawal.user.username}',
+                callback_url=callback_url,
             )
 
         elif withdrawal.method == 'paybill':
-            pochipay.send_withdrawal_to_paybill(
-                tracking_reference=tracking_ref,
-                request_id=request_id,
+            tracking_id = intasend.send_withdrawal_to_paybill(
                 short_code=withdrawal.short_code,
                 account_number=withdrawal.account_number or None,
-                is_paybill=withdrawal.is_paybill,
                 amount=float(withdrawal.amount_kes),
                 remarks='Step2Win paybill withdrawal',
+                callback_url=callback_url,
             )
 
+        else:
+            return Response({'error': f'Unknown withdrawal method: {withdrawal.method}'}, status=400)
+
+        # Store IntaSend's tracking_id for callback matching and status queries
+        withdrawal.tracking_reference = tracking_id
+        withdrawal.request_id = tracking_id
         withdrawal.status = 'processing'
-        withdrawal.save(update_fields=['status', 'updated_at'])
+        withdrawal.save(update_fields=[
+            'tracking_reference', 'request_id', 'status', 'updated_at'
+        ])
 
         _notify_user(withdrawal.user, 'withdrawal_approved',
                      amount=withdrawal.amount_kes, method=withdrawal.method)
 
         logger.info(
             f'Withdrawal approved and sent | id={withdrawal_id} | '
-            f'admin={request.user.username} | KES {withdrawal.amount_kes}'
+            f'admin={request.user.username} | KES {withdrawal.amount_kes} | '
+            f'tracking_id={tracking_id}'
         )
         return Response({
-            'message': 'Withdrawal approved and sent to PochPay.',
-            'tracking_reference': tracking_ref,
+            'message': 'Withdrawal approved and sent to IntaSend.',
+            'tracking_id': tracking_id,
             'status': 'processing',
         })
 
     except Exception as e:
-        logger.error(f'PochPay call failed after approval | id={withdrawal_id}: {e}')
+        logger.error(f'IntaSend call failed after approval | id={withdrawal_id}: {e}')
 
         with db_transaction.atomic():
             locked_user = withdrawal.user.__class__.objects.select_for_update().get(id=withdrawal.user.id)
@@ -1975,7 +1976,7 @@ def approve_withdrawal(request, withdrawal_id):
             locked_user.save(update_fields=['wallet_balance', 'updated_at'])
 
             withdrawal.status = 'failed'
-            withdrawal.fail_reason = f'PochPay error: {str(e)}'
+            withdrawal.fail_reason = f'IntaSend error: {str(e)}'
             withdrawal.save(update_fields=['status', 'fail_reason', 'updated_at'])
 
         return Response({'error': 'Disbursement failed. Balance refunded to user.'}, status=502)
@@ -2026,31 +2027,19 @@ def reject_withdrawal(request, withdrawal_id):
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def retry_failed_withdrawal(request, withdrawal_id):
     """
-    Admin retries a failed withdrawal using PochPay narrationId.
-    First fetches the current status from PochPay to get narrationId.
+    Admin checks current IntaSend status of a failed withdrawal.
+    Returns the current status from IntaSend.
+    To re-send a failed withdrawal, use approve_withdrawal on a new request.
     """
     withdrawal = get_object_or_404(WithdrawalRequest, id=withdrawal_id)
 
     if not withdrawal.tracking_reference:
-        return Response({'error': 'No tracking reference — cannot retry'}, status=400)
+        return Response({'error': 'No tracking reference — cannot check status'}, status=400)
 
     try:
-        status_data = pochipay.get_disbursement_status(withdrawal.tracking_reference)
-        narration_id = status_data.get('result', {}).get('narrationId')
-
-        if not narration_id:
-            return Response(
-                {'error': 'narrationId not available — transaction may not be retryable'},
-                status=400
-            )
-
-        result = pochipay.retry_pending_disbursement(narration_id)
-
-        withdrawal.status = 'processing'
-        withdrawal.save(update_fields=['status', 'updated_at'])
-
-        return Response({'message': 'Retry initiated', 'result': result})
+        status_data = intasend.get_disbursement_status(withdrawal.tracking_reference)
+        return Response({'message': 'Status retrieved', 'result': status_data})
 
     except Exception as e:
-        logger.error(f'Withdrawal retry failed | id={withdrawal_id}: {e}')
-        return Response({'error': str(e)}, status=502)
+        logger.error(f'Withdrawal status check failed | id={withdrawal_id}: {e}')
+        return Response({'error': 'Failed to retrieve withdrawal status from IntaSend.'}, status=502)
