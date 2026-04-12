@@ -78,4 +78,17 @@ export const stepsService = {
     const response = await api.post(`/api/steps/sync/hourly/`, data);
     return response.data;
   },
+
+  /**
+   * Fetch a single-use server-held nonce required by POST /api/steps/sync/.
+   *
+   * The nonce is stored in Redis (TTL 120 s) and consumed on first use, making
+   * sync requests non-replayable without a new authenticated server round-trip.
+   * This replaces the previous VITE_APP_SIGNING_SECRET approach, which shipped
+   * a shared secret inside the JS bundle.
+   */
+  getSyncNonce: async (): Promise<{ nonce: string; expires_in: number }> => {
+    const response = await api.get<{ nonce: string; expires_in: number }>('/api/steps/sync/nonce/');
+    return response.data;
+  },
 };

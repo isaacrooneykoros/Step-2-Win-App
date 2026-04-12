@@ -3,21 +3,38 @@ import { Capacitor } from '@capacitor/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { stepsService } from '../services/api/steps';
 import { useToast } from '../components/ui/Toast';
-import { useAuthStore } from '../store/authStore';
 import { v4 as uuidv4 } from 'uuid';
-import CryptoJS from 'crypto-js';
 
-const APP_SIGNING_SECRET = import.meta.env.VITE_APP_SIGNING_SECRET || 'change-me-in-production';
+/**
+ * Fetches a single-use server-issued nonce before each sync request.
+ *
+ * Why: the previous approach embedded APP_SIGNING_SECRET as a VITE_ env
+ * variable, which means it is compiled into the JS bundle and visible to
+ * anyone who decompiles the APK. A server-held nonce is never shipped in
+ * the client, making each sync request non-replayable.
+ *
+ * The nonce is stored on the server (Redis, 120 s TTL) and consumed on
+ * first use — a second identical request is rejected.
+ */
+async function fetchSyncNonce(): Promise<string | null> {
+  try {
+    const result = await stepsService.getSyncNonce();
+    return result.nonce;
+  } catch {
+    // If the nonce endpoint fails (e.g. network blip), continue without it.
+    // The server-side middleware degrades gracefully when Redis is unavailable.
+    return null;
+  }
+}
 
-function buildSignedHeaders(userId: string, body: object): Record<string, string> {
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const bodyHash = CryptoJS.SHA256(JSON.stringify(body)).toString();
-  const message = `${userId}:${timestamp}:${bodyHash}`;
-  return {
-    'X-App-Signature': CryptoJS.HmacSHA256(message, APP_SIGNING_SECRET).toString(),
-    'X-Timestamp': timestamp,
+function buildSyncHeaders(nonce: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
     'X-Idempotency-Key': uuidv4(),
   };
+  if (nonce) {
+    headers['X-Sync-Nonce'] = nonce;
+  }
+  return headers;
 }
 
 function extractSyncErrorMessage(error: unknown): string {
@@ -50,7 +67,6 @@ export function useHealthSync() {
   const [isSyncing, setIsSyncing] = useState(false);
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const userId = useAuthStore((state) => state.user?.id);
 
   const runSyncHealth = useCallback(async (options?: { silent?: boolean }) => {
     setIsSyncing(true);
@@ -66,7 +82,11 @@ export function useHealthSync() {
         data = simulateData();
       }
 
-      await stepsService.syncHealth(data, buildSignedHeaders(String(userId ?? ''), data));
+      // Fetch a server-issued nonce before each sync.  The nonce is stored in
+      // Redis (120 s TTL) and consumed on first use — preventing replay attacks
+      // without embedding any secret in the client bundle.
+      const nonce = await fetchSyncNonce();
+      await stepsService.syncHealth(data, buildSyncHeaders(nonce));
 
       await queryClient.invalidateQueries({ queryKey: ['health'] });
       await queryClient.invalidateQueries({ queryKey: ['steps'] });
@@ -84,7 +104,7 @@ export function useHealthSync() {
     } finally {
       setIsSyncing(false);
     }
-  }, [queryClient, showToast, userId]);
+  }, [queryClient, showToast]);
 
   const syncHealth = useCallback(() => runSyncHealth(), [runSyncHealth]);
   const syncHealthSilent = useCallback(() => runSyncHealth({ silent: true }), [runSyncHealth]);
@@ -176,7 +196,10 @@ async function readAndroidHealthConnect() {
       )
     : null;
 
-  const distance_km = steps > 0 ? parseFloat((steps * 0.0008).toFixed(2)) : null;
+  // When Health Connect does not report distance, omit it rather than estimating.
+  // The server anti-cheat uses distance as one signal; an omitted value is safer
+  // than a value derived from a fixed stride length that varies widely across users.
+  const distance_km = null;
   const active_minutes = steps > 0 ? Math.floor(steps / 100) : null;
 
   return { date: dateStr, source: 'google_fit' as const, steps, distance_km, calories_active, active_minutes };
@@ -248,7 +271,7 @@ function simulateData() {
     date: new Date().toISOString().split('T')[0],
     source: 'manual' as const,
     steps,
-    distance_km: parseFloat((steps * 0.0008).toFixed(2)),
+    distance_km: null,  // Do not estimate — varies too much per user stride length
     calories_active: Math.floor(steps * 0.04),
     active_minutes: Math.floor(steps / 100),
   };

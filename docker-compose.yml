@@ -1,0 +1,69 @@
+# docker-compose.yml — local development environment
+#
+# Usage:
+#   docker compose up            # start Postgres + Redis
+#   docker compose up -d         # start in background
+#   docker compose down          # stop and remove containers
+#   docker compose down -v       # also removes volumes (wipes DB data)
+#
+# After starting the stack, run the Django server locally:
+#   cd backend && python manage.py migrate && python manage.py runserver
+
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       step2win
+      POSTGRES_USER:     step2win
+      POSTGRES_PASSWORD: step2windev
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U step2win']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Optional: run the full Django API inside Docker ────────────────────
+  # Uncomment this block if you prefer to run everything in containers.
+  # Requires building from the backend Dockerfile first.
+  #
+  # backend:
+  #   build: ./backend
+  #   env_file: ./backend/.env
+  #   environment:
+  #     DATABASE_URL: postgres://step2win:step2windev@postgres:5432/step2win
+  #     REDIS_URL:    redis://redis:6379/0
+  #     USE_REDIS:    "true"
+  #     DEBUG:        "true"
+  #   ports:
+  #     - '8000:8000'
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./backend:/app
+
+volumes:
+  postgres_data:
+  redis_data:

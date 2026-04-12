@@ -46,6 +46,47 @@ def _check_idempotency(key: str, user_id: int) -> bool:
         return True
 
 
+import uuid as _uuid_module
+
+
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='SyncNonceResponse',
+            fields={
+                'nonce': serializers.CharField(),
+                'expires_in': serializers.IntegerField(),
+            },
+        )
+    },
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def sync_nonce(request):
+    """
+    Issues a single-use, server-held nonce for the next step-sync request.
+    The frontend must include this nonce as the X-Sync-Nonce header when
+    calling POST /api/steps/sync/.
+
+    Why: VITE_ environment variables are embedded in the compiled JS bundle
+    and are visible to anyone who decompiles the app. A server-held nonce
+    avoids shipping any shared secret in the client and makes each sync
+    request unique and non-replayable without a new server round-trip.
+    """
+    nonce = _uuid_module.uuid4().hex
+    nonce_key = f"step2win:sync_nonce:{request.user.id}"
+
+    # Store in Redis with a 120 s TTL. Falls back gracefully if Redis is down —
+    # the middleware skip-validates when the nonce store is unavailable.
+    if _redis is not None:
+        try:
+            _redis.set(nonce_key, nonce, ex=120)
+        except Exception:
+            pass
+
+    return Response({'nonce': nonce, 'expires_in': 120})
+
+
 @extend_schema(
     request=HealthSyncSerializer,
     responses={

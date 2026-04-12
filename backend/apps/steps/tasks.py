@@ -82,58 +82,79 @@ def cleanup_old_suspicious_activities():
 
 @shared_task
 def nightly_fraud_scan():
-    """2 AM nightly: catches multi-day patterns missed by real-time checks."""
+    """2 AM nightly: catches multi-day patterns missed by real-time checks.
+
+    Performance: replaces per-user query loops with two bulk aggregations —
+    one for 14-consecutive-high-step-days and one for weekly totals.
+    """
     from django.contrib.auth import get_user_model
+    from django.db.models import Count, Q
     from apps.steps.models import HealthRecord, FraudFlag
 
     user_model = get_user_model()
     today = timezone.now().date()
     yesterday = today - timedelta(days=1)
+    window_start = yesterday - timedelta(days=13)   # 14-day window
+    week_start = yesterday - timedelta(days=6)      # 7-day window
 
-    active_users = user_model.objects.filter(
-        health_records__date__gte=today - timedelta(days=14)
-    ).distinct()
-
-    for user in active_users:
-        high_days = HealthRecord.objects.filter(
-            user=user,
-            date__gte=yesterday - timedelta(days=13),
+    # ── Flag 1: no_rest_days — 14 consecutive days with 40k+ steps ──────
+    # Count high-step days per user in one aggregation query.
+    high_step_counts = (
+        HealthRecord.objects
+        .filter(
+            date__gte=window_start,
             date__lte=yesterday,
             steps__gte=40_000,
             is_suspicious=False,
-        ).count()
-        if high_days >= 14:
-            FraudFlag.objects.get_or_create(
-                user=user,
-                date=yesterday,
-                flag_type='no_rest_days',
-                defaults={
-                    'severity': 'medium',
-                    'details': {
-                        'consecutive_days': high_days,
-                        'note': f'{high_days} consecutive days of 40k+ steps',
-                    },
-                },
-            )
+            user__is_active=True,
+        )
+        .values('user_id')
+        .annotate(high_days=Count('id'))
+        .filter(high_days__gte=14)
+    )
 
-        total = HealthRecord.objects.filter(
+    for row in high_step_counts:
+        user = user_model.objects.get(id=row['user_id'])
+        FraudFlag.objects.get_or_create(
             user=user,
-            date__gte=yesterday - timedelta(days=6),
-            date__lte=yesterday,
-        ).aggregate(t=Sum('steps'))['t'] or 0
-        if total > 420_000:
-            FraudFlag.objects.get_or_create(
-                user=user,
-                date=yesterday,
-                flag_type='weekly_cap',
-                defaults={
-                    'severity': 'high',
-                    'details': {
-                        'week_total': total,
-                        'note': f'Weekly {total:,} > 420,000 maximum',
-                    },
+            date=yesterday,
+            flag_type='no_rest_days',
+            defaults={
+                'severity': 'medium',
+                'details': {
+                    'consecutive_days': row['high_days'],
+                    'note': f"{row['high_days']} consecutive days of 40k+ steps",
                 },
-            )
+            },
+        )
+
+    # ── Flag 2: weekly_cap — > 420,000 steps in 7 days ──────────────────
+    weekly_totals = (
+        HealthRecord.objects
+        .filter(
+            date__gte=week_start,
+            date__lte=yesterday,
+            user__is_active=True,
+        )
+        .values('user_id')
+        .annotate(week_total=Sum('steps'))
+        .filter(week_total__gt=420_000)
+    )
+
+    for row in weekly_totals:
+        user = user_model.objects.get(id=row['user_id'])
+        FraudFlag.objects.get_or_create(
+            user=user,
+            date=yesterday,
+            flag_type='weekly_cap',
+            defaults={
+                'severity': 'high',
+                'details': {
+                    'week_total': row['week_total'],
+                    'note': f"Weekly {row['week_total']:,} > 420,000 maximum",
+                },
+            },
+        )
 
     logger.info('Nightly fraud scan complete')
     return 'Nightly fraud scan complete'
@@ -207,39 +228,57 @@ def update_user_streak_records():
     Runs nightly. Updates current_streak and best_streak for all users.
     current_streak = consecutive days with steps > 0 ending today
     best_streak    = max streak ever — only ever goes up
+
+    Performance: instead of issuing one DB query per user per day in a Python
+    loop (O(users × streak_length) queries), we fetch all relevant HealthRecord
+    dates in a single bulk query, then compute streaks entirely in Python.
     """
     from apps.users.models import User
     from apps.steps.models import HealthRecord
     import datetime
 
     today = timezone.now().date()
-    users = User.objects.filter(is_active=True)
+
+    # ── Step 1: fetch all non-suspicious step dates per active user ──────
+    # A single query; 365-day lookback covers the max possible streak.
+    lookback = today - datetime.timedelta(days=365)
+    step_dates_qs = (
+        HealthRecord.objects
+        .filter(
+            user__is_active=True,
+            date__gte=lookback,
+            steps__gt=0,
+            is_suspicious=False,
+        )
+        .values_list('user_id', 'date')
+        .order_by('user_id', 'date')
+    )
+
+    # Build a set of step-days per user in Python
+    from collections import defaultdict
+    step_days: dict[int, set] = defaultdict(set)
+    for user_id, date in step_dates_qs:
+        step_days[user_id].add(date)
+
+    # ── Step 2: compute streaks and bulk-update ───────────────────────────
+    users = User.objects.filter(is_active=True).only('id', 'current_streak', 'best_streak')
+    updated_count = 0
 
     for user in users:
+        days = step_days.get(user.id, set())
+
         streak = 0
         check_date = today
+        while check_date in days and streak <= 365:
+            streak += 1
+            check_date -= datetime.timedelta(days=1)
 
-        while True:
-            has_steps = HealthRecord.objects.filter(
-                user=user,
-                date=check_date,
-                steps__gt=0,
-                is_suspicious=False,
-            ).exists()
-
-            if has_steps:
-                streak += 1
-                check_date -= datetime.timedelta(days=1)
-                if streak > 365:
-                    break
-            else:
-                break
-
-        update_fields = {'current_streak': streak}
+        updates = {'current_streak': streak}
         if streak > user.best_streak:
-            update_fields['best_streak'] = streak
+            updates['best_streak'] = streak
 
-        User.objects.filter(id=user.id).update(**update_fields)
+        User.objects.filter(id=user.id).update(**updates)
+        updated_count += 1
 
-    logger.info(f'update_user_streak_records: updated {users.count()} users.')
-    return f'Updated {users.count()} users'
+    logger.info(f'update_user_streak_records: updated {updated_count} users.')
+    return f'Updated {updated_count} users'

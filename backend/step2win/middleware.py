@@ -34,8 +34,40 @@ class UserIsolationAuditMiddleware:
 
 class SecurityHeadersMiddleware:
     """Adds security headers to every response."""
+
+    # Default CSP: allows inline scripts/styles required by Capacitor native builds.
+    # For the web PWA or admin panel, set CAPACITOR_CSP_MODE=false via environment
+    # to remove unsafe-inline, which tightens XSS protection.
+    _CSP_CAPACITOR = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' https: wss:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self';"
+    )
+
+    _CSP_STRICT = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "img-src 'self' data: https:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' https: wss:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self';"
+    )
+
     def __init__(self, get_response):
         self.get_response = get_response
+        # CAPACITOR_CSP_MODE=true (default) → allow unsafe-inline for native shell
+        # CAPACITOR_CSP_MODE=false → strict CSP for web/admin deployments
+        capacitor_mode = os.getenv('CAPACITOR_CSP_MODE', 'true').lower() != 'false'
+        self._default_csp = self._CSP_CAPACITOR if capacitor_mode else self._CSP_STRICT
 
     def __call__(self, request):
         response = self.get_response(request)
@@ -45,14 +77,6 @@ class SecurityHeadersMiddleware:
         response['Permissions-Policy'] = 'geolocation=(self), camera=()'
         response['Content-Security-Policy'] = os.getenv(
             'CONTENT_SECURITY_POLICY',
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
-            "font-src 'self' data:; "
-            "connect-src 'self' https: wss:; "
-            "frame-ancestors 'none'; "
-            "base-uri 'self'; "
-            "form-action 'self';"
+            self._default_csp,
         )
         return response

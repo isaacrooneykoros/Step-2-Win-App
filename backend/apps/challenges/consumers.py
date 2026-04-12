@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from urllib.parse import parse_qs
@@ -15,6 +16,10 @@ from apps.core.sanitizers import sanitize_chat_message
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
+# Unauthenticated connections are closed after this many seconds if they have
+# not completed a valid JWT handshake (connect → auth check).
+_AUTH_TIMEOUT_SECONDS = 10
+
 
 class ChallengeChatConsumer(AsyncWebsocketConsumer):
     """
@@ -22,7 +27,18 @@ class ChallengeChatConsumer(AsyncWebsocketConsumer):
     """
     
     async def connect(self):
-        self.user = await self._authenticate_user()
+        # Enforce authentication timeout: close the socket if the JWT check
+        # does not resolve within _AUTH_TIMEOUT_SECONDS seconds.
+        try:
+            self.user = await asyncio.wait_for(
+                self._authenticate_user(),
+                timeout=_AUTH_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning('WebSocket connection timed out during authentication')
+            await self.close(code=4001)
+            return
+
         if not self.user:
             await self.close(code=4001)
             return

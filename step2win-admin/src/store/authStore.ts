@@ -1,7 +1,12 @@
 /**
  * Auth Store - Step2Win Admin
- * Access token: in-memory only
- * Refresh token: localStorage for session restoration
+ * Access token: in-memory only (never persisted)
+ * Refresh token: sessionStorage — tab-scoped, cleared automatically on tab/browser close.
+ *
+ * Security note: sessionStorage is still accessible to JavaScript on the same origin,
+ * so it is not immune to XSS. For the highest-security deployments, migrate to httpOnly
+ * cookies set by the backend. sessionStorage is used here as a meaningful improvement
+ * over localStorage, which persists indefinitely across sessions.
  */
 
 import { create } from 'zustand';
@@ -35,14 +40,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   isHydrated: false,
 
   setAuth: (access, refresh, user) => {
-    localStorage.setItem(REFRESH_KEY, refresh);
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    sessionStorage.setItem(REFRESH_KEY, refresh);
+    sessionStorage.setItem(USER_KEY, JSON.stringify(user));
     set({ accessToken: access, user, isHydrated: true });
   },
 
   clearAuth: () => {
-    localStorage.removeItem(REFRESH_KEY);
-    localStorage.removeItem(USER_KEY);
+    sessionStorage.removeItem(REFRESH_KEY);
+    sessionStorage.removeItem(USER_KEY);
     set({ accessToken: null, user: null, isHydrated: true, isLoading: false });
   },
 
@@ -52,8 +57,8 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   loadSession: async () => {
     set({ isLoading: true });
-    const refresh = localStorage.getItem(REFRESH_KEY);
-    const rawUser = localStorage.getItem(USER_KEY);
+    const refresh = sessionStorage.getItem(REFRESH_KEY);
+    const rawUser = sessionStorage.getItem(USER_KEY);
     const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
     if (!refresh) {
@@ -74,13 +79,13 @@ export const useAuthStore = create<AuthState>((set) => ({
         if (rawUser) {
           const user = JSON.parse(rawUser) as AdminUser;
           if (!user.is_staff) {
-            localStorage.removeItem(REFRESH_KEY);
-            localStorage.removeItem(USER_KEY);
+            sessionStorage.removeItem(REFRESH_KEY);
+            sessionStorage.removeItem(USER_KEY);
             set({ accessToken: null, user: null, isLoading: false, isHydrated: true });
             return;
           }
 
-          localStorage.setItem(REFRESH_KEY, data.refresh ?? refresh);
+          sessionStorage.setItem(REFRESH_KEY, data.refresh ?? refresh);
           set({ accessToken: data.access, user, isLoading: false, isHydrated: true });
           return;
         }
@@ -89,8 +94,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       // Ignore network and parse errors and force login.
     }
 
-    localStorage.removeItem(REFRESH_KEY);
-    localStorage.removeItem(USER_KEY);
+    sessionStorage.removeItem(REFRESH_KEY);
+    sessionStorage.removeItem(USER_KEY);
     set({ accessToken: null, user: null, isLoading: false, isHydrated: true });
   },
 }));

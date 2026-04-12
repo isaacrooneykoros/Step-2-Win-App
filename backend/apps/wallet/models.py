@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from decimal import Decimal
 import uuid
 from auditlog.registry import auditlog
@@ -11,7 +12,11 @@ def generate_reference_number():
 
 class WalletTransaction(models.Model):
     """
-    Model for tracking all wallet transactions
+    Model for tracking all wallet transactions.
+
+    The ``user`` field is nullable only for platform-level fee records
+    (``type='fee'``). Every other transaction type must have a user.
+    This invariant is enforced by :meth:`clean`.
     """
     TYPE_CHOICES = [
         ('deposit', 'Deposit'),
@@ -27,7 +32,11 @@ class WalletTransaction(models.Model):
         on_delete=models.CASCADE, 
         related_name='transactions',
         null=True,
-        blank=True
+        blank=True,
+        help_text=(
+            'Required for all transaction types except "fee". '
+            'Platform fee records may have user=None.'
+        ),
     )
     type = models.CharField(max_length=20, choices=TYPE_CHOICES)
     amount = models.DecimalField(
@@ -67,6 +76,15 @@ class WalletTransaction(models.Model):
         ]
         ordering = ['-created_at']
     
+    def clean(self):
+        # Platform fee transactions may legitimately have no user (they represent
+        # the pool-level deduction, not a per-user credit/debit). All other types
+        # MUST be linked to a user.
+        if self.type != 'fee' and self.user_id is None:
+            raise ValidationError(
+                {'user': f'user is required for transaction type "{self.type}".'}
+            )
+
     def __str__(self):
         return f"{self.get_type_display()} - {self.amount} - {self.created_at}"  # type: ignore[attr-defined]
 

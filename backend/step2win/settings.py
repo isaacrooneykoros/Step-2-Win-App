@@ -79,7 +79,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'axes.middleware.AxesMiddleware',
-    'apps.steps.middleware.HMACSignatureMiddleware',
+    'apps.steps.middleware.SyncNonceMiddleware',
     'step2win.middleware.UserIsolationAuditMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -114,11 +114,23 @@ TEMPLATES = [
 WSGI_APPLICATION = 'step2win.wsgi.application'
 ASGI_APPLICATION = 'step2win.asgi.application'
 
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
-    },
-}
+# Use RedisChannelLayer when Redis is available so messages reach all workers.
+# InMemoryChannelLayer is per-process and silently drops messages under gunicorn -w N.
+if USE_REDIS:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [os.getenv('REDIS_URL', 'redis://localhost:6379/0')],
+            },
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
 
 USE_SQLITE = os.getenv('USE_SQLITE', 'False') == 'True'
 DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
