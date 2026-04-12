@@ -1,0 +1,28 @@
+name: Deploy to Render
+
+# Triggers automatically on every push to main that touches backend code.
+# Render also has native GitHub auto-deploy; this workflow exists as an
+# explicit, logged record of each deployment and lets you add pre-deploy
+# checks (e.g., smoke tests) before releasing.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'render.yaml'
+
+jobs:
+  deploy:
+    name: Trigger Render deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Call Render deploy hook
+        # Add RENDER_DEPLOY_HOOK_URL as a repository secret in GitHub:
+        #   Settings → Secrets and variables → Actions → New repository secret
+        # Get the URL from: Render Dashboard → step2win-backend → Settings → Deploy Hook
+        run: |
+          curl --fail -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          echo "Deploy hook triggered successfully."
