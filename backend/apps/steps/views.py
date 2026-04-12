@@ -46,6 +46,18 @@ def _check_idempotency(key: str, user_id: int) -> bool:
         return True
 
 
+def _allow_sync_tick(user_id: int, min_seconds: int = 1) -> bool:
+    """Returns True when user is allowed to submit another sync tick."""
+    if _redis is None:
+        return True
+
+    redis_key = f"step2win:sync_tick:{user_id}"
+    try:
+        return _redis.set(redis_key, '1', nx=True, ex=max(1, min_seconds)) is not None
+    except Exception:
+        return True
+
+
 @extend_schema(
     request=HealthSyncSerializer,
     responses={
@@ -72,7 +84,7 @@ def _check_idempotency(key: str, user_id: int) -> bool:
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-@ratelimit(key='user', rate='10/h', method='POST', block=True)
+@ratelimit(key='user', rate='3600/h', method='POST', block=True)
 def sync_health(request):
     """
     Receives steps + distance + calories + active minutes from device.
@@ -95,11 +107,51 @@ def sync_health(request):
 
     user = request.user
     submitted_steps = data.get('steps', 0)
-    date = data.get('date', timezone.now().date())
+    now = timezone.now()
+    date = data.get('date', now.date())
 
     idem_key = request.headers.get('X-Idempotency-Key')
     if idem_key and not _check_idempotency(idem_key, user.id):
         return Response({'error': 'Duplicate request'}, status=409)
+
+    if not _allow_sync_tick(user.id, min_seconds=1):
+        return Response({'error': 'Sync too frequent. Maximum 1 request per second.'}, status=429)
+
+    existing_record = HealthRecord.objects.filter(user=user, date=date).first()
+    if existing_record:
+        if submitted_steps < existing_record.steps:
+            FraudFlag.objects.create(
+                user=user,
+                date=date,
+                flag_type='non_monotonic_steps',
+                severity='high',
+                details={
+                    'submitted_steps': submitted_steps,
+                    'previous_steps': existing_record.steps,
+                    'note': 'Submitted steps decreased compared to existing total for the same day.',
+                },
+            )
+            return Response({'error': 'Submitted steps cannot be lower than previously synced steps.'}, status=400)
+
+        elapsed_seconds = max(1.0, (now - existing_record.synced_at).total_seconds())
+        delta_steps = submitted_steps - existing_record.steps
+        max_delta = int(elapsed_seconds * 5) + 200
+        if delta_steps > max_delta:
+            FraudFlag.objects.create(
+                user=user,
+                date=date,
+                flag_type='step_velocity_spike',
+                severity='high',
+                details={
+                    'submitted_steps': submitted_steps,
+                    'previous_steps': existing_record.steps,
+                    'delta_steps': delta_steps,
+                    'elapsed_seconds': round(elapsed_seconds, 2),
+                    'max_allowed_delta': max_delta,
+                    'note': 'Delta exceeds allowed step increase for elapsed sync interval.',
+                },
+            )
+            return Response({'error': 'Step delta too high for the elapsed time window.'}, status=400)
 
     trust, _ = TrustScore.objects.get_or_create(user=user)
     if trust.status == 'BAN':
@@ -114,7 +166,7 @@ def sync_health(request):
         distance_km=data.get('distance_km'),
         calories=data.get('calories_active'),
         active_minutes=data.get('active_minutes'),
-        submitted_at=timezone.now(),
+        submitted_at=now,
     )
 
     if result.should_block:

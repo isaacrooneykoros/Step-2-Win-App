@@ -10,9 +10,10 @@ import type { InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../../store/authStore';
 
 const REFRESH_KEY = 's2w_admin_refresh';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
+  baseURL: API_BASE,
   timeout: 15_000,
   headers: { 'Content-Type': 'application/json' },
 });
@@ -76,7 +77,7 @@ api.interceptors.response.use(
 
     try {
       const response = await axios.post<{ access: string; refresh?: string }>(
-        `${import.meta.env.VITE_API_BASE_URL}/api/auth/refresh/`,
+        `${API_BASE}/api/auth/refresh/`,
         { refresh }
       );
 
