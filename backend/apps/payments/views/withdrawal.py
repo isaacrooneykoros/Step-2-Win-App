@@ -124,8 +124,8 @@ def request_withdrawal(request):
             return Response({'error': 'phone_number is required for M-Pesa'}, status=400)
         try:
             phone = pochipay.format_phone(phone)
-        except ValueError as e:
-            return Response({'error': str(e)}, status=400)
+        except ValueError:
+            return Response({'error': 'Invalid phone number format. Use format: 07XXXXXXXX or +254XXXXXXXXX'}, status=400)
 
     elif method == 'bank':
         bank_code      = data.get('bank_code')

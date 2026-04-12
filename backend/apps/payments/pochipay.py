@@ -17,6 +17,15 @@ TOKEN_CACHE_KEY = 'pochipay:access_token'
 TOKEN_TTL_SECONDS = 3500   # Refresh 100s before PochPay's 3600s expiry
 
 
+def _mask_phone(phone: str) -> str:
+    """Return a partially masked phone number for safe logging.
+    E.g. +254712345678 → +254***5678
+    """
+    if not phone or len(phone) < 5:
+        return '***'
+    return phone[:4] + '***' + phone[-4:]
+
+
 class PochiPayAPIError(Exception):
     """Raised when a PochiPay API call fails."""
 
@@ -197,7 +206,8 @@ def initiate_mpesa_collection(
         if data.get('errors') or data.get('message') == 'error':
             raise ValueError(f"PochPay collection error: {data.get('message', data.get('errors'))}")
 
-        logger.info(f'M-Pesa STK Push sent | order_id={order_id} | phone={phone_number} | amount={amount}')
+        logger.info('M-Pesa STK Push sent | order_id=%s | phone=%s | amount=%s',
+                    order_id, _mask_phone(phone_number), amount)
         return data['result']   # { collectionId, isProcessing }
 
     except requests.RequestException as e:

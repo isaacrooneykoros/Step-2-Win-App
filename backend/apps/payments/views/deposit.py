@@ -74,8 +74,8 @@ def initiate_deposit(request):
 
     try:
         phone = pochipay.format_phone(phone)
-    except ValueError as e:
-        return Response({'error': str(e)}, status=400)
+    except ValueError:
+        return Response({'error': 'Invalid phone number format. Use format: 07XXXXXXXX or +254XXXXXXXXX'}, status=400)
 
     recent_pending = PaymentTransaction.objects.filter(
         user=user,
@@ -123,8 +123,10 @@ def initiate_deposit(request):
         logger.error(f'Deposit STK Push failed for user {user.id}: {e}')
 
         if isinstance(e, pochipay.PochiPayAPIError):
+            # Return a generic client-friendly message — do not expose internal
+            # API error details (which may include credential info) to the user.
             if e.status_code == 400 or 'credentials missing' in str(e).lower():
-                return Response({'error': str(e)}, status=400)
+                return Response({'error': 'Payment provider configuration error. Please contact support.'}, status=400)
 
         return Response({'error': 'Payment initiation failed. Please try again.'}, status=502)
 
