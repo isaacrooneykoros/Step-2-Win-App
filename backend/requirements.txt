@@ -20,6 +20,7 @@ whitenoise==6.9.0
 Pillow==11.1.0
 setuptools==80.9.0
 requests==2.31.0
+intasend-python==1.1.2
 mammoth==1.6.0
 PyPDF2==3.0.1
 # ── Security additions ──

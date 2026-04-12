@@ -275,10 +275,6 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.steps.tasks.update_user_streak_records',
         'schedule': crontab(hour=0, minute=15),
     },
-    'refresh-pochipay-token': {
-        'task': 'apps.payments.tasks.refresh_pochipay_token',
-        'schedule': crontab(minute=0, hour='*/1'),
-    },
     'reconcile-pending-payments': {
         'task': 'apps.payments.tasks.reconcile_pending_payments',
         'schedule': crontab(minute='*/30'),
@@ -360,23 +356,27 @@ if ENABLE_DEFENDER:
 
 AUTH_USER_MODEL = 'users.User'
 
-# PochPay Configuration
-POCHIPAY_BASE_URL = 'https://app.pochipay.com/api/v1'
-POCHIPAY_EMAIL = os.getenv('POCHIPAY_EMAIL', '')
-POCHIPAY_PASSWORD = os.getenv('POCHIPAY_PASSWORD', '')
-POCHIPAY_WEBHOOK_SECRET = os.getenv('POCHIPAY_WEBHOOK_SECRET', '')
+# IntaSend Configuration
+# Get your API keys from https://payment.intasend.com (live) or https://sandbox.intasend.com (test)
+INTASEND_API_KEY = os.getenv('INTASEND_API_KEY', '')          # Secret/Token key
+INTASEND_PUBLISHABLE_KEY = os.getenv('INTASEND_PUBLISHABLE_KEY', '')  # Publishable key
+INTASEND_WEBHOOK_SECRET = os.getenv('INTASEND_WEBHOOK_SECRET', '')    # Webhook challenge secret
+INTASEND_TEST_MODE = os.getenv('INTASEND_TEST_MODE', 'False').strip().lower() == 'true'
 
-# Callback URLs - must be public, unauthenticated POST endpoints
-POCHIPAY_DEPOSIT_CALLBACK_URL = os.getenv(
-    'POCHIPAY_DEPOSIT_CALLBACK_URL',
+# Callback URLs — must be publicly accessible, unauthenticated POST endpoints.
+# Register these in the IntaSend dashboard under Settings > Webhooks.
+# For deposits (STK Push), configure the webhook URL in the IntaSend dashboard.
+# For payouts and withdrawals, callback_url is passed per request.
+INTASEND_DEPOSIT_CALLBACK_URL = os.getenv(
+    'INTASEND_DEPOSIT_CALLBACK_URL',
     'https://step-2-win-app.onrender.com/api/payments/mpesa/deposit-callback/'
 )
-POCHIPAY_PAYOUT_CALLBACK_URL = os.getenv(
-    'POCHIPAY_PAYOUT_CALLBACK_URL',
+INTASEND_PAYOUT_CALLBACK_URL = os.getenv(
+    'INTASEND_PAYOUT_CALLBACK_URL',
     'https://step-2-win-app.onrender.com/api/payments/mpesa/payout-callback/'
 )
-POCHIPAY_WITHDRAWAL_CALLBACK_URL = os.getenv(
-    'POCHIPAY_WITHDRAWAL_CALLBACK_URL',
+INTASEND_WITHDRAWAL_CALLBACK_URL = os.getenv(
+    'INTASEND_WITHDRAWAL_CALLBACK_URL',
     'https://step-2-win-app.onrender.com/api/payments/mpesa/withdrawal-callback/'
 )
 

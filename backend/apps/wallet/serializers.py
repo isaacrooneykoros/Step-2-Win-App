@@ -53,9 +53,9 @@ class WithdrawalSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         phone_number = attrs.get('phone_number')
         
-        from apps.payments import pochipay
+        from apps.payments import intasend
         try:
-            formatted = pochipay.format_phone(phone_number)
+            formatted = intasend.format_phone(phone_number)
         except ValueError as exc:
             raise serializers.ValidationError({'phone_number': str(exc)})
 
