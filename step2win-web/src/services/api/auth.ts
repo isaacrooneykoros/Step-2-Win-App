@@ -6,7 +6,6 @@ import type {
   User,
   ChangePasswordData,
   DeviceBinding,
-  DeviceStatus,
 } from '../../types';
 
 export const authService = {
@@ -69,14 +68,6 @@ export const authService = {
    */
   bindDevice: async (data: DeviceBinding): Promise<{ status: string }> => {
     const response = await api.post<{ status: string }>('/api/auth/bind-device/', data);
-    return response.data;
-  },
-
-  /**
-   * Get device status
-   */
-  getDeviceStatus: async (): Promise<DeviceStatus> => {
-    const response = await api.get<DeviceStatus>('/api/auth/device-status/');
     return response.data;
   },
 

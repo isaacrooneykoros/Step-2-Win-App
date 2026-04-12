@@ -118,11 +118,13 @@ USE_SQLITE = os.getenv('USE_SQLITE', 'False') == 'True'
 DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
 
 if DATABASE_URL:
+    # Render Postgres should always use SSL, including local development against remote DB.
+    require_ssl = (not DEBUG) or ('render.com' in DATABASE_URL)
     DATABASES = {
         'default': dj_database_url.parse(
             DATABASE_URL,
             conn_max_age=600,
-            ssl_require=not DEBUG,
+            ssl_require=require_ssl,
         )
     }
 elif USE_SQLITE:

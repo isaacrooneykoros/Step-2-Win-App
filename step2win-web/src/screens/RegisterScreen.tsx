@@ -6,10 +6,12 @@ import { authService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { googleClientIdHelpText, isGoogleClientIdConfigured } from '../config/googleAuth';
 import Input from '../components/ui/Input';
+import { useToast } from '../components/ui/Toast';
 
 export default function RegisterScreen() {
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
+  const { showToast } = useToast();
   
   const [formData, setFormData] = useState({
     username: '',
@@ -20,6 +22,13 @@ export default function RegisterScreen() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+
+  const getFieldError = (value: unknown): string => {
+    if (Array.isArray(value)) {
+      return typeof value[0] === 'string' ? value[0] : '';
+    }
+    return typeof value === 'string' ? value : '';
+  };
 
   const getPasswordStrength = (password: string) => {
     if (password.length === 0) return { strength: 0, label: '' };
@@ -45,11 +54,33 @@ export default function RegisterScreen() {
       await setAuth(response.user, response.access, response.refresh);
       navigate('/');
     } catch (err: any) {
-      const apiErrors = err.response?.data?.details || {};
-      setErrors(apiErrors);
-      if (err.response?.data?.message) {
-        setErrors({ form: err.response.data.message });
+      const data = err?.response?.data;
+      let toastMessage = 'Request failed. Please try again.';
+
+      if (data && typeof data === 'object') {
+        const normalizedErrors = (data.details && typeof data.details === 'object') ? data.details : data;
+        setErrors(normalizedErrors as Record<string, string>);
+
+        if (typeof data.message === 'string') {
+          setErrors((prev) => ({ ...prev, form: data.message }));
+          toastMessage = data.message;
+        } else if (typeof data.error === 'string') {
+          setErrors((prev) => ({ ...prev, form: data.error }));
+          toastMessage = data.error;
+        } else {
+          const nonFieldErrors = (normalizedErrors as Record<string, unknown>).non_field_errors;
+          if (Array.isArray(nonFieldErrors) && typeof nonFieldErrors[0] === 'string') {
+            toastMessage = nonFieldErrors[0];
+          }
+        }
+      } else if (!err?.response) {
+        toastMessage = 'Unable to reach server. Confirm backend is running on http://localhost:8000.';
+        setErrors({ form: toastMessage });
+      } else {
+        setErrors({ form: 'Registration failed. Please try again.' });
       }
+
+      showToast({ message: toastMessage, type: 'error' });
     } finally {
       setIsLoading(false);
     }
@@ -109,7 +140,7 @@ export default function RegisterScreen() {
             value={formData.username}
             onChange={handleChange}
             placeholder="Choose a username"
-            error={errors.username?.[0]}
+            error={getFieldError(errors.username)}
             required
             autoComplete="username"
           />
@@ -121,7 +152,7 @@ export default function RegisterScreen() {
             value={formData.email}
             onChange={handleChange}
             placeholder="your@email.com"
-            error={errors.email?.[0]}
+            error={getFieldError(errors.email)}
             required
             autoComplete="email"
           />
@@ -133,7 +164,7 @@ export default function RegisterScreen() {
             value={formData.phone_number}
             onChange={handleChange}
             placeholder="254712345678"
-            error={errors.phone_number?.[0]}
+            error={getFieldError(errors.phone_number)}
             autoComplete="tel"
           />
 
@@ -145,7 +176,7 @@ export default function RegisterScreen() {
               value={formData.password}
               onChange={handleChange}
               placeholder="Create a strong password"
-              error={errors.password?.[0]}
+              error={getFieldError(errors.password)}
               required
               autoComplete="new-password"
             />
@@ -171,7 +202,7 @@ export default function RegisterScreen() {
             value={formData.confirm_password}
             onChange={handleChange}
             placeholder="Confirm your password"
-            error={errors.confirm_password?.[0]}
+            error={getFieldError(errors.confirm_password)}
             required
             autoComplete="new-password"
           />

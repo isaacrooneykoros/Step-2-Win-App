@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { stepsService } from '../services/api/steps';
@@ -48,21 +48,77 @@ function extractSyncErrorMessage(error: unknown): string {
 
 export function useHealthSync() {
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isConnectingDevice, setIsConnectingDevice] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<'unknown' | 'granted' | 'denied' | 'unavailable'>('unknown');
+  const hasAttemptedAutoEnableRef = useRef(false);
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const userId = useAuthStore((state) => state.user?.id);
+
+  const connectDevice = useCallback(async (options?: { silent?: boolean }) => {
+    const platform = Capacitor.getPlatform();
+
+    if (platform !== 'android' && platform !== 'ios') {
+      setPermissionStatus('unavailable');
+      if (!options?.silent) {
+        showToast({
+          message: 'Device step permissions are only available in the mobile app.',
+          type: 'error',
+        });
+      }
+      return false;
+    }
+
+    setIsConnectingDevice(true);
+    try {
+      if (platform === 'android') {
+        await ensureAndroidHealthPermissions();
+      } else {
+        await ensureAppleHealthPermissions();
+      }
+
+      setPermissionStatus('granted');
+      if (!options?.silent) {
+        showToast({ message: 'Device step access enabled.', type: 'success' });
+      }
+      return true;
+    } catch (error) {
+      setPermissionStatus('denied');
+      if (!options?.silent) {
+        showToast({ message: extractSyncErrorMessage(error), type: 'error' });
+      }
+      return false;
+    } finally {
+      setIsConnectingDevice(false);
+    }
+  }, [showToast]);
 
   const runSyncHealth = useCallback(async (options?: { silent?: boolean }) => {
     setIsSyncing(true);
     try {
       const platform = Capacitor.getPlatform();
+
+      if (platform === 'android' || platform === 'ios') {
+        const shouldAutoEnable = !hasAttemptedAutoEnableRef.current || permissionStatus !== 'granted';
+        if (shouldAutoEnable) {
+          hasAttemptedAutoEnableRef.current = true;
+          const enabled = await connectDevice({ silent: true });
+          if (!enabled) {
+            return;
+          }
+        }
+      }
+
       let data;
 
       if (platform === 'android') {
         data = await readAndroidHealthConnect();
+        setPermissionStatus('granted');
       } else if (platform === 'ios') {
         data = await readAppleHealth();
+        setPermissionStatus('granted');
       } else {
+        setPermissionStatus('unavailable');
         data = simulateData();
       }
 
@@ -78,18 +134,22 @@ export function useHealthSync() {
       }
     } catch (error) {
       console.error('Sync error:', error);
+      const platform = Capacitor.getPlatform();
+      if (platform === 'android' || platform === 'ios') {
+        setPermissionStatus('denied');
+      }
       if (!options?.silent) {
         showToast({ message: extractSyncErrorMessage(error), type: 'error' });
       }
     } finally {
       setIsSyncing(false);
     }
-  }, [queryClient, showToast, userId]);
+  }, [connectDevice, permissionStatus, queryClient, showToast, userId]);
 
   const syncHealth = useCallback(() => runSyncHealth(), [runSyncHealth]);
   const syncHealthSilent = useCallback(() => runSyncHealth({ silent: true }), [runSyncHealth]);
 
-  return { syncHealth, syncHealthSilent, isSyncing };
+  return { syncHealth, syncHealthSilent, connectDevice, isSyncing, isConnectingDevice, permissionStatus };
 }
 
 export function useAutoHealthSync(intervalMs: number = 180000) {
@@ -113,14 +173,7 @@ export function useAutoHealthSync(intervalMs: number = 180000) {
 }
 
 async function readAndroidHealthConnect() {
-  let HealthConnect: any;
-  try {
-    const moduleName = 'capacitor-health-connect';
-    const mod = await import(/* @vite-ignore */ moduleName);
-    HealthConnect = mod.HealthConnect;
-  } catch {
-    return simulateData();
-  }
+  const HealthConnect = await getHealthConnectModule();
 
   const now = new Date();
   const start = new Date(now);
@@ -132,14 +185,7 @@ async function readAndroidHealthConnect() {
   const endOfDay = end.toISOString();
   const dateStr = new Date().toISOString().split('T')[0];
 
-  try {
-    await HealthConnect.requestHealthPermissions({
-      read: ['Steps', 'ActiveCaloriesBurned'],
-      write: [],
-    });
-  } catch {
-    return simulateData();
-  }
+  await ensureAndroidHealthPermissions();
 
   const timeRangeFilter = {
     operator: 'between',
@@ -183,14 +229,7 @@ async function readAndroidHealthConnect() {
 }
 
 async function readAppleHealth() {
-  let HealthKit: any;
-  try {
-    const moduleName = '@capacitor-community/health-kit';
-    const mod = await import(/* @vite-ignore */ moduleName);
-    HealthKit = mod.HealthKit;
-  } catch {
-    return simulateData();
-  }
+  const HealthKit = await getHealthKitModule();
 
   const now = new Date();
   const start = new Date(now);
@@ -202,14 +241,7 @@ async function readAppleHealth() {
   const endOfDay = end.toISOString();
   const dateStr = new Date().toISOString().split('T')[0];
 
-  await HealthKit.requestAuthorization({
-    read: [
-      'HKQuantityTypeIdentifierStepCount',
-      'HKQuantityTypeIdentifierDistanceWalkingRunning',
-      'HKQuantityTypeIdentifierActiveEnergyBurned',
-      'HKQuantityTypeIdentifierAppleExerciseTime',
-    ],
-  });
+  await ensureAppleHealthPermissions();
 
   const steps = await HealthKit.getStatisticsQuantity({
     identifier: 'HKQuantityTypeIdentifierStepCount',
@@ -252,4 +284,52 @@ function simulateData() {
     calories_active: Math.floor(steps * 0.04),
     active_minutes: Math.floor(steps / 100),
   };
+}
+
+async function getHealthConnectModule() {
+  try {
+    const moduleName = 'capacitor-health-connect';
+    const mod = await import(/* @vite-ignore */ moduleName);
+    return mod.HealthConnect;
+  } catch {
+    throw new Error('Health Connect is not available on this device.');
+  }
+}
+
+async function ensureAndroidHealthPermissions() {
+  const HealthConnect = await getHealthConnectModule();
+  try {
+    await HealthConnect.requestHealthPermissions({
+      read: ['Steps', 'ActiveCaloriesBurned'],
+      write: [],
+    });
+  } catch {
+    throw new Error('Device step permission is required. Please allow access to continue.');
+  }
+}
+
+async function getHealthKitModule() {
+  try {
+    const moduleName = '@capacitor-community/health-kit';
+    const mod = await import(/* @vite-ignore */ moduleName);
+    return mod.HealthKit;
+  } catch {
+    throw new Error('Apple Health is not available on this device.');
+  }
+}
+
+async function ensureAppleHealthPermissions() {
+  const HealthKit = await getHealthKitModule();
+  try {
+    await HealthKit.requestAuthorization({
+      read: [
+        'HKQuantityTypeIdentifierStepCount',
+        'HKQuantityTypeIdentifierDistanceWalkingRunning',
+        'HKQuantityTypeIdentifierActiveEnergyBurned',
+        'HKQuantityTypeIdentifierAppleExerciseTime',
+      ],
+    });
+  } catch {
+    throw new Error('Device step permission is required. Please allow access to continue.');
+  }
 }

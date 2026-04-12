@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { useAuthStore } from './store/authStore';
@@ -46,6 +46,26 @@ function withSuspense(element: ReactNode) {
   return <Suspense fallback={<PageLoader />}>{element}</Suspense>;
 }
 
+function AuthLoadRedirect({
+  loading,
+  isAuthenticated,
+}: {
+  loading: boolean;
+  isAuthenticated: boolean;
+}) {
+  const location = useLocation();
+
+  if (loading) {
+    return null;
+  }
+
+  if (!isAuthenticated && location.pathname !== '/login' && location.pathname !== '/register') {
+    return <Navigate to="/login" replace />;
+  }
+
+  return null;
+}
+
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -77,6 +97,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <GoogleOAuthProvider clientId={isGoogleClientIdConfigured ? GOOGLE_CLIENT_ID : 'invalid-client-id'}>
         <BrowserRouter>
+          <AuthLoadRedirect loading={loading} isAuthenticated={isAuthenticated} />
           <Routes>
             {/* Public routes */}
             <Route path="/login" element={<LoginScreen />} />
