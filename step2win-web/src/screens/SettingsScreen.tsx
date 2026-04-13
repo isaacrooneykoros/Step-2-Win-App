@@ -23,6 +23,7 @@ import { authService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { useToast } from '../components/ui/Toast';
 import { BaseModal } from '../components/ui/BaseModal';
+import { PermissionStatusCard } from '../components/PermissionStatusIndicator';
 import { useHealthSync } from '../hooks/useHealthSync';
 import type { User } from '../types';
 import { applyThemeMode, loadThemeMode, saveThemeMode, type ThemeMode } from '../config/theme';
@@ -487,6 +488,12 @@ export default function SettingsScreen() {
       <div className="px-4 pb-4">
         <div className="card rounded-3xl p-4">
           <p className="text-xs uppercase tracking-widest text-text-muted mb-3">Permissions</p>
+          
+          {/* Permission status card */}
+          <div className="mb-4">
+            <PermissionStatusCard />
+          </div>
+
           <div className="flex items-center justify-between mb-3">
             <div>
               <p className="text-text-primary text-sm font-semibold">Step tracking</p>

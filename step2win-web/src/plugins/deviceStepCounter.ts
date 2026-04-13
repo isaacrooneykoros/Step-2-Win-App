@@ -1,6 +1,6 @@
 import { registerPlugin } from '@capacitor/core';
 
-export type PermissionState = 'prompt' | 'prompt-with-rationale' | 'granted' | 'denied';
+export type PermissionState = 'prompt' | 'prompt-with-rationale' | 'granted' | 'denied' | 'unavailable';
 
 export interface DeviceStepCounterPermissionStatus {
   activityRecognition: PermissionState;
