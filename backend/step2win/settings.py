@@ -29,7 +29,7 @@ if not DEBUG:
     if any(host in {'localhost', '127.0.0.1', 'testserver'} for host in ALLOWED_HOSTS):
         raise ImproperlyConfigured('Production ALLOWED_HOSTS cannot contain localhost/testserver values.')
 USE_REDIS = os.getenv('USE_REDIS', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
-ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'True') == 'True'
+ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 APP_SIGNING_SECRET = os.environ.get('APP_SIGNING_SECRET', '')
 
 INSTALLED_APPS = [
@@ -303,11 +303,11 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TIMEZONE = TIME_ZONE
 
-if USE_REDIS:
+if USE_REDIS and os.getenv('REDIS_URL'):
     CACHES = {
         'default': {
             'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-            'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/1'),
+            'LOCATION': os.getenv('REDIS_URL'),
         }
     }
 else:
@@ -365,8 +365,8 @@ if ENABLE_DEFENDER:
     DEFENDER_COOLOFF_TIME        = 3600  # 1 hour
     DEFENDER_LOGIN_FAILURE_LIMIT = 5
     DEFENDER_LOCKOUT_TEMPLATE    = None
-    DEFENDER_USE_CELERY          = True
-    DEFENDER_REDIS_URL           = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+    DEFENDER_USE_CELERY          = bool(os.getenv('REDIS_URL'))
+    DEFENDER_REDIS_URL           = os.getenv('REDIS_URL', '')
 
 AUTH_USER_MODEL = 'users.User'
 
