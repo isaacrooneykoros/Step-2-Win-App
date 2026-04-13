@@ -6,6 +6,8 @@ import { useToast } from '../components/ui/Toast';
 import { useAuthStore } from '../store/authStore';
 import { v4 as uuidv4 } from 'uuid';
 import CryptoJS from 'crypto-js';
+import { DeviceStepCounter } from '../plugins/deviceStepCounter';
+import type { User } from '../types';
 
 const APP_SIGNING_SECRET = import.meta.env.VITE_APP_SIGNING_SECRET || '';
 
@@ -60,11 +62,11 @@ export function useHealthSync() {
   const connectDevice = useCallback(async (options?: { silent?: boolean }) => {
     const platform = Capacitor.getPlatform();
 
-    if (platform !== 'android' && platform !== 'ios') {
+    if (platform !== 'android') {
       setPermissionStatus('unavailable');
       if (!options?.silent) {
         showToast({
-          message: 'Device step permissions are only available in the mobile app.',
+          message: 'Native step sensor tracking is currently available on Android only.',
           type: 'error',
         });
       }
@@ -73,15 +75,13 @@ export function useHealthSync() {
 
     setIsConnectingDevice(true);
     try {
-      if (platform === 'android') {
-        await ensureAndroidHealthPermissions();
-      } else {
-        await ensureAppleHealthPermissions();
-      }
+      await ensureAndroidStepPermissions();
+      await DeviceStepCounter.startBackgroundCapture().catch(() => ({ running: false }));
+      await DeviceStepCounter.getTodaySteps();
 
       setPermissionStatus('granted');
       if (!options?.silent) {
-        showToast({ message: 'Device step access enabled.', type: 'success' });
+        showToast({ message: 'Step sensor access enabled.', type: 'success' });
       }
       return true;
     } catch (error) {
@@ -105,7 +105,7 @@ export function useHealthSync() {
     try {
       const platform = Capacitor.getPlatform();
 
-      if (platform !== 'android' && platform !== 'ios') {
+      if (platform !== 'android') {
         setPermissionStatus('unavailable');
         return;
       }
@@ -125,10 +125,8 @@ export function useHealthSync() {
       let data;
 
       if (platform === 'android') {
-        data = await readAndroidHealthConnect();
-        setPermissionStatus('granted');
-      } else if (platform === 'ios') {
-        data = await readAppleHealth();
+        const profile = queryClient.getQueryData<User>(['profile']);
+        data = await readAndroidSensorSteps(profile);
         setPermissionStatus('granted');
       } else {
         return;
@@ -161,7 +159,7 @@ export function useHealthSync() {
     } catch (error) {
       console.error('Sync error:', error);
       const platform = Capacitor.getPlatform();
-      if (platform === 'android' || platform === 'ios') {
+      if (platform === 'android') {
         setPermissionStatus('denied');
       }
       if (!options?.silent) {
@@ -199,152 +197,59 @@ export function useAutoHealthSync(intervalMs: number = 1000) {
   return { isSyncing };
 }
 
-async function readAndroidHealthConnect() {
-  const HealthConnect = await getHealthConnectModule();
-
+async function readAndroidSensorSteps(profile?: User) {
   const now = new Date();
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(now);
-  end.setHours(23, 59, 59, 999);
+  const dateStr = now.toISOString().split('T')[0];
 
-  const startOfDay = start.toISOString();
-  const endOfDay = end.toISOString();
-  const dateStr = new Date().toISOString().split('T')[0];
+  await ensureAndroidStepPermissions();
+  await DeviceStepCounter.startBackgroundCapture().catch(() => ({ running: false }));
+  const reading = await DeviceStepCounter.getTodaySteps();
+  const steps = Math.max(0, Math.round(Number(reading.steps) || 0));
 
-  await ensureAndroidHealthPermissions();
+  const strideCm = clampNumber(profile?.stride_length_cm, 40, 130, 78);
+  const weightKg = clampNumber(profile?.weight_kg, 30, 220, 70);
+  const cadenceSpm = clampNumber(reading.cadence_spm, 0, 400, 0);
+  const burstSteps5s = Math.max(0, Math.round(Number(reading.burst_steps_5s) || 0));
 
-  const timeRangeFilter = {
-    operator: 'between',
-    startTime: startOfDay,
-    endTime: endOfDay,
-  };
+  const distanceMeters = steps * (strideCm / 100);
+  const distance_km = steps > 0 ? parseFloat((distanceMeters / 1000).toFixed(2)) : null;
 
-  const stepsRecords = await HealthConnect.readRecords({
-    type: 'Steps',
-    timeRangeFilter,
-  }).catch(() => ({ records: [] }));
-
-  const caloriesRecords = await HealthConnect.readRecords({
-    type: 'ActiveCaloriesBurned',
-    timeRangeFilter,
-  }).catch(() => ({ records: [] }));
-
-  const stepItems = Array.isArray((stepsRecords as any)?.records)
-    ? (stepsRecords as any).records
-    : [];
-  const calorieItems = Array.isArray((caloriesRecords as any)?.records)
-    ? (caloriesRecords as any).records
-    : [];
-
-  const steps = stepItems.reduce((sum: number, item: any) => {
-    return sum + (Number(item?.count) || 0);
-  }, 0);
-
-  const calories_active = calorieItems.length
-    ? Math.round(
-        calorieItems.reduce((sum: number, item: any) => {
-          return sum + (Number(item?.energy?.value) || 0);
-        }, 0)
-      )
+  // Dynamic MET estimate based on cadence + user weight for tighter calorie estimate.
+  const cadenceForMet = cadenceSpm > 0 ? cadenceSpm : (steps > 0 ? Math.min(160, Math.max(60, steps / 60)) : 0);
+  const met = cadenceForMet >= 130 ? 6.5 : cadenceForMet >= 110 ? 4.8 : cadenceForMet >= 90 ? 3.5 : 2.5;
+  const active_minutes = steps > 0 ? Math.round(steps / 120) : null;
+  const calories_active = active_minutes && active_minutes > 0
+    ? Math.round((met * 3.5 * weightKg / 200) * active_minutes)
     : null;
 
-  const distance_km = steps > 0 ? parseFloat((steps * 0.0008).toFixed(2)) : null;
-  const active_minutes = steps > 0 ? Math.floor(steps / 100) : null;
-
-  return { date: dateStr, source: 'health_connect' as const, steps, distance_km, calories_active, active_minutes };
+  return {
+    date: dateStr,
+    source: 'device_sensor' as const,
+    steps,
+    distance_km,
+    calories_active,
+    active_minutes,
+    cadence_spm: cadenceSpm,
+    burst_steps_5s: burstSteps5s,
+  };
 }
 
-async function readAppleHealth() {
-  const HealthKit = await getHealthKitModule();
-
-  const now = new Date();
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(now);
-  end.setHours(23, 59, 59, 999);
-
-  const startOfDay = start.toISOString();
-  const endOfDay = end.toISOString();
-  const dateStr = new Date().toISOString().split('T')[0];
-
-  await ensureAppleHealthPermissions();
-
-  const steps = await HealthKit.getStatisticsQuantity({
-    identifier: 'HKQuantityTypeIdentifierStepCount',
-    startDate: startOfDay,
-    endDate: endOfDay,
-    unit: 'count',
-  }).then((r: any) => Math.round(r.quantity ?? 0)).catch(() => 0);
-
-  const distance_km = await HealthKit.getStatisticsQuantity({
-    identifier: 'HKQuantityTypeIdentifierDistanceWalkingRunning',
-    startDate: startOfDay,
-    endDate: endOfDay,
-    unit: 'km',
-  }).then((r: any) => (r.quantity ? parseFloat(r.quantity.toFixed(2)) : null)).catch(() => null);
-
-  const calories_active = await HealthKit.getStatisticsQuantity({
-    identifier: 'HKQuantityTypeIdentifierActiveEnergyBurned',
-    startDate: startOfDay,
-    endDate: endOfDay,
-    unit: 'kcal',
-  }).then((r: any) => (r.quantity ? Math.round(r.quantity) : null)).catch(() => null);
-
-  const active_minutes = await HealthKit.getStatisticsQuantity({
-    identifier: 'HKQuantityTypeIdentifierAppleExerciseTime',
-    startDate: startOfDay,
-    endDate: endOfDay,
-    unit: 'min',
-  }).then((r: any) => (r.quantity ? Math.round(r.quantity) : null)).catch(() => null);
-
-  return { date: dateStr, source: 'apple_health' as const, steps, distance_km, calories_active, active_minutes };
-}
-
-async function getHealthConnectModule() {
-  try {
-    const moduleName = 'capacitor-health-connect';
-    const mod = await import(/* @vite-ignore */ moduleName);
-    return mod.HealthConnect;
-  } catch {
-    throw new Error('Health Connect is not available on this device.');
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return fallback;
   }
+  return Math.min(max, Math.max(min, n));
 }
 
-async function ensureAndroidHealthPermissions() {
-  const HealthConnect = await getHealthConnectModule();
-  try {
-    await HealthConnect.requestHealthPermissions({
-      read: ['Steps', 'ActiveCaloriesBurned'],
-      write: [],
-    });
-  } catch {
-    throw new Error('Device step permission is required. Please allow access to continue.');
+async function ensureAndroidStepPermissions() {
+  const status = await DeviceStepCounter.checkPermissions();
+  if (status.activityRecognition === 'granted') {
+    return;
   }
-}
 
-async function getHealthKitModule() {
-  try {
-    const moduleName = '@capacitor-community/health-kit';
-    const mod = await import(/* @vite-ignore */ moduleName);
-    return mod.HealthKit;
-  } catch {
-    throw new Error('Apple Health is not available on this device.');
-  }
-}
-
-async function ensureAppleHealthPermissions() {
-  const HealthKit = await getHealthKitModule();
-  try {
-    await HealthKit.requestAuthorization({
-      read: [
-        'HKQuantityTypeIdentifierStepCount',
-        'HKQuantityTypeIdentifierDistanceWalkingRunning',
-        'HKQuantityTypeIdentifierActiveEnergyBurned',
-        'HKQuantityTypeIdentifierAppleExerciseTime',
-      ],
-    });
-  } catch {
-    throw new Error('Device step permission is required. Please allow access to continue.');
+  const requested = await DeviceStepCounter.requestPermissions();
+  if (requested.activityRecognition !== 'granted') {
+    throw new Error('Activity recognition permission is required to count your steps.');
   }
 }

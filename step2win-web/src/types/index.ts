@@ -6,6 +6,11 @@ export interface User {
   email: string;
   phone_number?: string | null;
   daily_goal: number;
+  stride_length_cm: number;
+  weight_kg: number;
+  calibration_quality?: 'excellent' | 'good' | 'noisy' | null;
+  calibration_variance_pct?: number | null;
+  last_calibrated_at?: string | null;
   wallet_balance: string;
   locked_balance: string;
   available_balance: string;
@@ -291,7 +296,7 @@ export interface WalletSummary {
 
 // ==================== Steps Types ====================
 
-export type StepSource = 'health_connect' | 'google_fit' | 'apple_health' | 'manual';
+export type StepSource = 'device_sensor' | 'health_connect' | 'google_fit' | 'apple_health' | 'manual';
 export type StepsPeriod = '1d' | '1w' | '1m' | '3m' | '1y' | 'all';
 
 export interface HealthRecord {
@@ -448,6 +453,8 @@ export interface StepSyncForm {
   distance_km?: number | null;
   calories_active?: number | null;
   active_minutes?: number | null;
+  cadence_spm?: number | null;
+  burst_steps_5s?: number | null;
 }
 
 // ==================== Support Types ====================

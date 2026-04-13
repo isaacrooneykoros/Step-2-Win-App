@@ -50,6 +50,40 @@ export default function ProfileScreen() {
     return { label: 'Restricted', color: 'text-accent-red', bar: '#F87171' };
   }, [trustScore]);
 
+  const calibrationBadge = useMemo(() => {
+    const quality = currentUser?.calibration_quality;
+    const variance = currentUser?.calibration_variance_pct ?? null;
+    const calibratedAt = currentUser?.last_calibrated_at;
+
+    if (!quality || !calibratedAt) {
+      return null;
+    }
+
+    const ts = new Date(calibratedAt);
+    const ageDays = Math.floor((Date.now() - ts.getTime()) / (1000 * 60 * 60 * 24));
+    const stale = ageDays >= 30;
+    const rerunRecommended = quality === 'noisy' || stale;
+
+    const tone = quality === 'excellent'
+      ? 'text-accent-green'
+      : quality === 'good'
+        ? 'text-accent-blue'
+        : 'text-accent-yellow';
+
+    const label = quality.charAt(0).toUpperCase() + quality.slice(1);
+    const subtitle = variance !== null
+      ? `${label} • ${variance.toFixed(1)}% variance`
+      : label;
+
+    return {
+      subtitle,
+      tone,
+      ts,
+      ageDays,
+      rerunRecommended,
+    };
+  }, [currentUser?.calibration_quality, currentUser?.calibration_variance_pct, currentUser?.last_calibrated_at]);
+
   return (
     <div className="screen-enter pb-nav bg-bg-page min-h-screen">
       <div className="pt-safe px-4 pt-5 pb-4">
@@ -115,6 +149,34 @@ export default function ProfileScreen() {
             <div className="h-full rounded-full" style={{ width: `${trustScore}%`, backgroundColor: standing.bar }} />
           </div>
           <p className="text-xs text-text-muted mt-1">Trust score: {trustScore}/100</p>
+        </div>
+      </div>
+
+      <div className="px-4 pb-4">
+        <div className="card rounded-3xl p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-text-primary">Stride Calibration</p>
+            {calibrationBadge ? (
+              <span className={`text-xs font-semibold ${calibrationBadge.tone}`}>{calibrationBadge.subtitle}</span>
+            ) : (
+              <span className="text-xs text-text-muted">Not calibrated yet</span>
+            )}
+          </div>
+
+          {calibrationBadge ? (
+            <>
+              <p className="text-xs text-text-muted mt-1">
+                Last calibrated: {calibrationBadge.ts.toLocaleDateString()} {calibrationBadge.ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </p>
+              <p className={`text-xs mt-2 ${calibrationBadge.rerunRecommended ? 'text-accent-yellow' : 'text-text-secondary'}`}>
+                {calibrationBadge.rerunRecommended
+                  ? 'Recalibration recommended to improve precision.'
+                  : `Calibration is stable (${calibrationBadge.ageDays} day${calibrationBadge.ageDays === 1 ? '' : 's'} old).`}
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-text-muted mt-2">Run the stride calibration wizard in Settings to improve distance and calorie precision.</p>
+          )}
         </div>
       </div>
 

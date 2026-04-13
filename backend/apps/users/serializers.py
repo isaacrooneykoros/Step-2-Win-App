@@ -72,8 +72,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'available_balance', 'device_bound', 'total_steps',
             'challenges_won', 'challenges_joined', 'total_earned',
             'current_streak', 'best_streak', 'best_day_steps',
-            'daily_goal', 'win_rate', 'avg_payout_kes',
-            'player_rank', 'member_since',
+            'daily_goal', 'stride_length_cm', 'weight_kg',
+            'calibration_quality', 'calibration_variance_pct', 'last_calibrated_at',
+            'win_rate', 'avg_payout_kes', 'player_rank', 'member_since',
             'trust_score', 'trust_status', 'created_at'
         ]
         read_only_fields = [

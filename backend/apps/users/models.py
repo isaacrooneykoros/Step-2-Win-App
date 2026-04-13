@@ -81,6 +81,31 @@ class User(AbstractUser):
                   'Separate from challenge milestone. '
                   'Used for home screen progress bar.'
     )
+    stride_length_cm = models.FloatField(
+        default=78.0,
+        help_text='User-calibrated stride length in centimeters for distance precision.'
+    )
+    weight_kg = models.FloatField(
+        default=70.0,
+        help_text='User body weight in kilograms for calorie estimation precision.'
+    )
+    calibration_quality = models.CharField(
+        max_length=16,
+        choices=[('excellent', 'Excellent'), ('good', 'Good'), ('noisy', 'Noisy')],
+        null=True,
+        blank=True,
+        help_text='Last stride calibration quality from two-pass variance check.'
+    )
+    calibration_variance_pct = models.FloatField(
+        null=True,
+        blank=True,
+        help_text='Pass-to-pass stride variance percentage from last calibration.'
+    )
+    last_calibrated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='Timestamp of the most recent stride calibration.'
+    )
     privacy_policy_accepted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

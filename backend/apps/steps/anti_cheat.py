@@ -14,6 +14,10 @@ from .models import HealthRecord
 
 DAILY_STEP_CAP = 60_000
 MAX_STEPS_PER_MINUTE = 175
+CADENCE_SOFT_CAP_SPM = 200
+CADENCE_HARD_CAP_SPM = 230
+BURST_5S_SOFT_CAP = 18
+BURST_5S_HARD_CAP = 25
 WEEKLY_HARD_CAP = 420_000
 
 SPIKE_MULTIPLIER = 5.0
@@ -52,7 +56,17 @@ class CheckResult:
         return len(self.flags) == 0
 
 
-def run_anti_cheat(user, steps: int, date, distance_km=None, calories=None, active_minutes=None, submitted_at=None) -> CheckResult:
+def run_anti_cheat(
+    user,
+    steps: int,
+    date,
+    distance_km=None,
+    calories=None,
+    active_minutes=None,
+    cadence_spm=None,
+    burst_steps_5s=None,
+    submitted_at=None,
+) -> CheckResult:
     result = CheckResult()
     result.approved_steps = steps
     submitted_at = submitted_at or timezone.now()
@@ -60,6 +74,8 @@ def run_anti_cheat(user, steps: int, date, distance_km=None, calories=None, acti
 
     _check_daily_cap(result, steps)
     _check_impossible_rate(result, steps, active_minutes)
+    _check_cadence_window(result, cadence_spm)
+    _check_burst_window(result, burst_steps_5s)
     _check_backdating(result, date, today)
     _check_weekly_cap(result, user, steps, date)
 
@@ -106,6 +122,42 @@ def _check_impossible_rate(result, steps, active_minutes):
                 f'Human max is {MAX_STEPS_PER_MINUTE} steps/min. '
                 'Mechanical manipulation suspected.'
             ),
+        })
+
+
+def _check_cadence_window(result, cadence_spm):
+    if cadence_spm is None:
+        return
+    cadence_spm = float(cadence_spm)
+    if cadence_spm > CADENCE_HARD_CAP_SPM:
+        result.flag('cadence_hard_cap', 'high', {
+            'cadence_spm': round(cadence_spm, 1),
+            'hard_cap_spm': CADENCE_HARD_CAP_SPM,
+            'note': 'Cadence exceeds realistic sustained walking/running limits.',
+        })
+    elif cadence_spm > CADENCE_SOFT_CAP_SPM:
+        result.flag('cadence_soft_cap', 'medium', {
+            'cadence_spm': round(cadence_spm, 1),
+            'soft_cap_spm': CADENCE_SOFT_CAP_SPM,
+            'note': 'Cadence unusually high for human gait.',
+        })
+
+
+def _check_burst_window(result, burst_steps_5s):
+    if burst_steps_5s is None:
+        return
+    burst_steps_5s = int(burst_steps_5s)
+    if burst_steps_5s > BURST_5S_HARD_CAP:
+        result.flag('burst_hard_cap', 'high', {
+            'burst_steps_5s': burst_steps_5s,
+            'hard_cap': BURST_5S_HARD_CAP,
+            'note': '5-second burst exceeds plausible human step acceleration.',
+        })
+    elif burst_steps_5s > BURST_5S_SOFT_CAP:
+        result.flag('burst_soft_cap', 'medium', {
+            'burst_steps_5s': burst_steps_5s,
+            'soft_cap': BURST_5S_SOFT_CAP,
+            'note': '5-second burst is suspiciously high.',
         })
 
 
