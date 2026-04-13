@@ -14,14 +14,30 @@ interface CheckResult {
 const PREFLIGHT_SESSION_KEY = 'preflight_checked_v1';
 
 async function checkApi(baseUrl: string): Promise<CheckResult> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 8000);
+  const attempt = async (timeoutMs: number) => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(`${baseUrl}/api/health/`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      return response;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  };
 
   try {
-    const response = await fetch(`${baseUrl}/api/health/`, {
-      method: 'GET',
-      signal: controller.signal,
-    });
+    let response: Response;
+    try {
+      // Render and similar hosts can cold start; allow a generous first timeout.
+      response = await attempt(20000);
+    } catch {
+      // Quick retry for transient startup/network hiccups.
+      response = await attempt(12000);
+    }
 
     if (!response.ok) {
       return {
@@ -44,8 +60,6 @@ async function checkApi(baseUrl: string): Promise<CheckResult> {
       state: 'fail',
       detail: `Request failed: ${error instanceof Error ? error.message : 'unknown error'}`,
     };
-  } finally {
-    window.clearTimeout(timer);
   }
 }
 
