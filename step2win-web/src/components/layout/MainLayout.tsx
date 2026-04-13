@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
-import { Home, Footprints, Trophy, Wallet, User, BellRing, Sparkles } from 'lucide-react';
+import { Home, Footprints, Trophy, Wallet, User, BellRing, Sparkles, AlertCircle } from 'lucide-react';
 import { useStepsWebSocket } from '../../hooks/useStepsWebSocket';
 import { useHealthSync } from '../../hooks/useHealthSync';
+import { usePermissionStatus } from '../../hooks/usePermissionStatus';
 import { BaseModal } from '../ui/BaseModal';
 import {
   checkNotificationPermission,
@@ -54,6 +55,7 @@ export default function MainLayout() {
   const location = useLocation();
   useStepsWebSocket();
   const { syncHealthSilent, connectDevice, isConnectingDevice, permissionStatus } = useHealthSync();
+  const { permissionStatus: globalPermissionStatus } = usePermissionStatus();
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<'prompt' | 'prompt-with-rationale' | 'granted' | 'denied' | 'unavailable'>('prompt');
 
@@ -165,6 +167,20 @@ export default function MainLayout() {
         className="pointer-events-none fixed inset-x-0 top-0 h-24"
         style={{ background: `linear-gradient(180deg, ${activeAccent}18, transparent 72%)` }}
       />
+
+      {/* Permission Status Header Indicator */}
+      {isNative && globalPermissionStatus.activityRecognition !== 'granted' && (
+        <div className="sticky top-0 z-40 px-4 pt-2 pb-2 bg-yellow-50 border-b border-yellow-200">
+          <div className="flex items-center gap-2 max-w-md mx-auto">
+            <AlertCircle size={16} className="text-yellow-600 flex-shrink-0" />
+            <p className="text-xs text-yellow-800 flex-1">
+              {globalPermissionStatus.activityRecognition === 'denied'
+                ? 'Step tracking disabled. Enable in Settings → Permissions.'
+                : 'Enable step tracking to start counting your steps.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto pb-24">
         <Outlet />

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GoogleOAuthProvider } from '@react-oauth/google';
@@ -61,30 +61,28 @@ function AuthLoadRedirect({
   const location = useLocation();
   const launchSeen = sessionStorage.getItem('launch_seen_v1') === 'true';
 
+  // Still loading auth state - don't redirect yet
   if (loading) {
     return null;
   }
 
-  if (!launchSeen && location.pathname !== '/launch' && location.pathname !== '/login' && location.pathname !== '/register') {
+  // Not authenticated paths that are allowed
+  const publicPaths = ['/launch', '/login', '/register'];
+  const isPublicPath = publicPaths.includes(location.pathname);
+
+  // First visit - show launch screen
+  if (!launchSeen && location.pathname !== '/launch' && !isPublicPath) {
     return <Navigate to="/launch" replace />;
   }
 
-  if (
-    !isAuthenticated &&
-    location.pathname !== '/launch' &&
-    location.pathname !== '/login' &&
-    location.pathname !== '/register'
-  ) {
-    return <Navigate to="/launch" replace />;
-  }
-
-  if (
-    !isAuthenticated &&
-    location.pathname !== '/login' &&
-    location.pathname !== '/register' &&
-    location.pathname !== '/launch'
-  ) {
+  // If not authenticated and trying to access protected route, redirect to login
+  if (!isAuthenticated && !isPublicPath) {
     return <Navigate to="/login" replace />;
+  }
+
+  // If authenticated and trying to access auth screens, redirect to home
+  if (isAuthenticated && location.pathname === '/launch') {
+    return <Navigate to="/" replace />;
   }
 
   return null;
@@ -93,6 +91,8 @@ function AuthLoadRedirect({
 function NativeBackButtonGuard() {
   const navigate = useNavigate();
   const location = useLocation();
+  const lastBackPressRef = useRef(0);
+  const backPressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
@@ -100,22 +100,57 @@ function NativeBackButtonGuard() {
     }
 
     const listener = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      const now = Date.now();
+      const timeSinceLastPress = now - lastBackPressRef.current;
+      const DOUBLE_TAP_THRESHOLD = 2000; // 2 seconds
+
+      // If we're not on home, go back or navigate to home
       if (canGoBack) {
         window.history.back();
+        lastBackPressRef.current = 0;
+        if (backPressTimeoutRef.current) {
+          clearTimeout(backPressTimeoutRef.current);
+        }
         return;
       }
 
+      // We're on home: check for double-tap to exit
       if (location.pathname !== '/') {
         navigate('/', { replace: true });
+        lastBackPressRef.current = 0;
+        if (backPressTimeoutRef.current) {
+          clearTimeout(backPressTimeoutRef.current);
+        }
         return;
       }
 
-      // Avoid accidental hard exits: keep app alive in background on home.
-      CapacitorApp.minimizeApp().catch(() => null);
+      // On home screen: double-tap to exit
+      if (timeSinceLastPress < DOUBLE_TAP_THRESHOLD && lastBackPressRef.current !== 0) {
+        // Double tap detected - exit app
+        CapacitorApp.exitApp().catch(() => null);
+        return;
+      }
+
+      // First tap - show message
+      lastBackPressRef.current = now;
+
+      // Clear the previous message timeout and set a new one
+      if (backPressTimeoutRef.current) {
+        clearTimeout(backPressTimeoutRef.current);
+      }
+
+      // Show toast notification about double-tap (optional - requires useToast context)
+      // For now, we'll just set the timeout to reset the press counter
+      backPressTimeoutRef.current = setTimeout(() => {
+        lastBackPressRef.current = 0;
+      }, DOUBLE_TAP_THRESHOLD);
     });
 
     return () => {
       listener.then((handle) => handle.remove()).catch(() => null);
+      if (backPressTimeoutRef.current) {
+        clearTimeout(backPressTimeoutRef.current);
+      }
     };
   }, [location.pathname, navigate]);
 
