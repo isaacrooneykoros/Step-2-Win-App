@@ -70,9 +70,10 @@ async function checkApi(baseUrl: string): Promise<CheckResult> {
 
 async function checkWebSocket(wsBase: string): Promise<CheckResult> {
   return new Promise((resolve) => {
-    const wsUrl = `${wsBase}/ws/steps/sync/?token=preflight`;
+    const wsUrl = `${wsBase}/ws/health/`;
     let settled = false;
     let opened = false;
+    let sawTransportError = false;
     // Give the WebSocket long enough for the backend to finish its cold-start
     // and complete the TLS + HTTP-upgrade handshake.
     const timeout = window.setTimeout(() => {
@@ -97,19 +98,15 @@ async function checkWebSocket(wsBase: string): Promise<CheckResult> {
         resolve({
           label: 'Realtime WebSocket',
           state: 'pass',
-          detail: 'WebSocket connection established.',
+          detail: 'WebSocket transport reachable.',
         });
       };
 
       socket.onerror = () => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timeout);
-        resolve({
-          label: 'Realtime WebSocket',
-          state: 'fail',
-          detail: 'WebSocket transport failed — backend may be unreachable or still waking up. Tap Retry.',
-        });
+        // Some runtimes fire `error` before a normal `close` event carrying
+        // the real close code (e.g. 4001 for unauthenticated but reachable).
+        // Defer final decision to onclose unless we time out.
+        sawTransportError = true;
       };
 
       socket.onclose = (event) => {
@@ -117,13 +114,11 @@ async function checkWebSocket(wsBase: string): Promise<CheckResult> {
         settled = true;
         window.clearTimeout(timeout);
 
-        if (opened || [4001, 4403, 4404, 1008].includes(event.code)) {
+        if (opened || event.code === 1000) {
           resolve({
             label: 'Realtime WebSocket',
             state: 'pass',
-            detail: opened
-              ? 'WebSocket opened and closed cleanly.'
-              : `Backend reachable (auth rejected with code ${event.code}).`,
+            detail: 'WebSocket opened and closed cleanly.',
           });
           return;
         }
@@ -131,7 +126,9 @@ async function checkWebSocket(wsBase: string): Promise<CheckResult> {
         resolve({
           label: 'Realtime WebSocket',
           state: 'fail',
-          detail: `Closed before open (code ${event.code || 0}).`,
+          detail: sawTransportError
+            ? `WebSocket transport failed (close code ${event.code || 0}).`
+            : `Closed before open (code ${event.code || 0}).`,
         });
       };
     } catch (error) {
@@ -249,7 +246,7 @@ export default function PreflightScreen() {
           <button
             type="button"
             onClick={continueToLogin}
-            disabled={!checksDone}
+            disabled={!allPassed}
             className="btn-primary px-4 py-2 rounded-xl disabled:opacity-60"
           >
             Continue to Login
