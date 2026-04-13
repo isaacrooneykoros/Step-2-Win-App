@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { DeviceStepCounter, type PermissionState } from '../plugins/deviceStepCounter';
 import { useToast } from '../components/ui/Toast';
@@ -20,33 +20,40 @@ export function usePermissionStatus() {
   const [isAndroid, setIsAndroid] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [isRequesting, setIsRequesting] = useState(false);
-  const [lastCheckTime, setLastCheckTime] = useState(0);
+  const lastCheckTimeRef = useRef(0);
+  const permissionStatusRef = useRef(permissionStatus);
   const { showToast } = useToast();
 
-  // Initialize platform check
+  useEffect(() => {
+    permissionStatusRef.current = permissionStatus;
+  }, [permissionStatus]);
+
   useEffect(() => {
     const platform = Capacitor.getPlatform();
     setIsAndroid(platform === 'android');
   }, []);
 
-  // Check current permissions
   const checkPermissions = useCallback(async (skipCache = false) => {
-    if (!isAndroid) {
+    const platform = Capacitor.getPlatform();
+    if (platform !== 'android') {
+      setIsAndroid(false);
       setPermissionStatus({ activityRecognition: 'unavailable' });
       return { activityRecognition: 'unavailable' };
     }
 
+    setIsAndroid(true);
+
     // Skip frequent checks (cache for 5 seconds)
     const now = Date.now();
-    if (!skipCache && now - lastCheckTime < 5000) {
-      return permissionStatus;
+    if (!skipCache && now - lastCheckTimeRef.current < 5000) {
+      return permissionStatusRef.current;
     }
 
     setIsChecking(true);
     try {
       const status = await DeviceStepCounter.checkPermissions();
       setPermissionStatus(status);
-      setLastCheckTime(now);
+      lastCheckTimeRef.current = now;
       return status;
     } catch (error) {
       console.error('Failed to check permissions:', error);
@@ -54,11 +61,23 @@ export function usePermissionStatus() {
     } finally {
       setIsChecking(false);
     }
-  }, [isAndroid, lastCheckTime, permissionStatus]);
+  }, []);
 
-  // Request permissions
+  useEffect(() => {
+    void checkPermissions(true);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void checkPermissions(true);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [checkPermissions]);
+
   const requestPermissions = useCallback(async () => {
-    if (!isAndroid) {
+    if (Capacitor.getPlatform() !== 'android') {
       return { activityRecognition: 'unavailable' };
     }
 
@@ -66,7 +85,7 @@ export function usePermissionStatus() {
     try {
       const status = await DeviceStepCounter.requestPermissions();
       setPermissionStatus(status);
-      setLastCheckTime(Date.now());
+      lastCheckTimeRef.current = Date.now();
 
       // Check result
       if (status.activityRecognition === 'granted') {
@@ -94,12 +113,10 @@ export function usePermissionStatus() {
     }
   }, [isAndroid, showToast]);
 
-  // Check if permission is granted
   const isGranted = useCallback(() => {
     return permissionStatus.activityRecognition === 'granted';
   }, [permissionStatus]);
 
-  // Check if permission is not available on this platform
   const isUnavailable = useCallback(() => {
     return permissionStatus.activityRecognition === 'unavailable';
   }, [permissionStatus]);

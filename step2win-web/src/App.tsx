@@ -81,7 +81,7 @@ function AuthLoadRedirect({
   }
 
   // If authenticated and trying to access auth screens, redirect to home
-  if (isAuthenticated && location.pathname === '/launch') {
+  if (isAuthenticated && ['/launch', '/login', '/register'].includes(location.pathname)) {
     return <Navigate to="/" replace />;
   }
 

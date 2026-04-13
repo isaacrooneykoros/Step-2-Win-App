@@ -28,7 +28,7 @@ export function PermissionStatusIndicator({ compact = true }: Props) {
       bgColor = 'bg-green-100';
       textColor = 'text-green-700';
       label = 'Enabled';
-      tooltipText = 'Step tracking is enabled';
+      tooltipText = 'Physical activity permission is enabled';
       isGranted = true;
       break;
     case 'denied':
@@ -36,7 +36,7 @@ export function PermissionStatusIndicator({ compact = true }: Props) {
       bgColor = 'bg-red-100';
       textColor = 'text-red-700';
       label = 'Disabled';
-      tooltipText = 'Step tracking is disabled. Tap to enable in Settings.';
+      tooltipText = 'Physical activity permission is disabled. Tap to enable in Settings.';
       isDenied = true;
       break;
     case 'prompt':
@@ -45,14 +45,14 @@ export function PermissionStatusIndicator({ compact = true }: Props) {
       bgColor = 'bg-yellow-100';
       textColor = 'text-yellow-700';
       label = 'Not set';
-      tooltipText = 'Tap to enable step tracking';
+      tooltipText = 'Tap to enable physical activity permission';
       break;
     case 'unavailable':
       icon = <AlertCircle size={16} />;
       bgColor = 'bg-gray-100';
       textColor = 'text-gray-600';
       label = 'Unavailable';
-      tooltipText = 'Step tracking is not available on this device';
+        tooltipText = 'Physical activity permission is not available on this device';
       break;
   }
 
