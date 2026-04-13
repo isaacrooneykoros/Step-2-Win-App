@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, RefreshCw, Wifi, Radio } from 'lucide-react';
 import { resolveApiBaseUrl, resolveWsBaseUrl } from '../config/network';
@@ -62,7 +62,7 @@ async function checkApi(baseUrl: string): Promise<CheckResult> {
       label: 'API health',
       state: 'fail',
       detail: isColdStart
-        ? 'Request timed out — the backend may still be waking up. Tap Retry in a moment.'
+        ? 'Request timed out  the backend may still be waking up. Tap Retry in a moment.'
         : `Request failed: ${msg}. Check your network connection and tap Retry. If the problem persists, the backend URL or CORS config on Render may need updating.`,
     };
   }
@@ -82,7 +82,7 @@ async function checkWebSocket(wsBase: string): Promise<CheckResult> {
       resolve({
         label: 'Realtime WebSocket',
         state: 'fail',
-        detail: 'Connection timed out — backend may still be starting. Tap Retry.',
+        detail: 'Connection timed out  backend may still be starting. Tap Retry.',
       });
     }, 20000);
 
@@ -208,7 +208,7 @@ export default function PreflightScreen() {
 
         <p className="text-sm text-text-muted mb-6">
           Network checks run before login to confirm your phone can reach both API and realtime services.
-          On Render's free tier the backend sleeps when idle — <strong>first launch may take up to 70 s</strong> to wake up. Tap <em>Retry Checks</em> if checks fail on the first attempt.
+          On Render's free tier the backend sleeps when idle  <strong>first launch may take up to 70 s</strong> to wake up. Tap <em>Retry Checks</em> if checks fail on the first attempt.
         </p>
 
         <div className="space-y-3 mb-5">
@@ -256,3 +256,4 @@ export default function PreflightScreen() {
     </div>
   );
 }
+

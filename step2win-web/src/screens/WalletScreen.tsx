@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, ArrowUpRight, Wallet, DollarSign, Building2, Trophy, Gift, Settings, TrendingUp } from 'lucide-react';
 import { walletService, paymentsService } from '../services/api';
@@ -136,7 +136,7 @@ export default function WalletScreen() {
     return (
       <div className="screen-enter pb-nav pt-4 px-4">
         <div className="skeleton h-40 rounded-4xl mb-4" />
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
           <div className="skeleton h-14 rounded-2xl" />
           <div className="skeleton h-14 rounded-2xl" />
         </div>
@@ -147,7 +147,7 @@ export default function WalletScreen() {
 
   return (
     <div className="screen-enter pb-nav bg-bg-page">
-      {/* ── WALLET HERO CARD ────────────────────────── */}
+      {/*  WALLET HERO CARD  */}
       <div className="pt-safe px-4 pt-4 pb-4">
         <div className="bg-white rounded-3xl p-6 shadow-sm">
           <div className="mb-3">
@@ -164,9 +164,9 @@ export default function WalletScreen() {
         </div>
       </div>
 
-      {/* ── ACTION BUTTONS ────────────────────────── */}
+      {/*  ACTION BUTTONS  */}
       <div className="px-4 pb-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             onClick={() => setShowDepositModal(true)}
             className="bg-accent-blue text-white py-4 rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold shadow-sm"
@@ -184,7 +184,7 @@ export default function WalletScreen() {
         </div>
       </div>
 
-      {/* ── TAB SELECTOR ────────────────────────── */}
+      {/*  TAB SELECTOR  */}
       <div className="px-4 pb-4">
         <div className="flex bg-bg-input rounded-2xl p-1.5">
           {(['Transactions', 'Withdrawals'] as const).map((tab) => (
@@ -251,7 +251,7 @@ export default function WalletScreen() {
         </div>
       )}
 
-      {/* ── WITHDRAWALS LIST ────────────────────────── */}
+      {/*  WITHDRAWALS LIST  */}
       {activeTab === 'Withdrawals' && (
         <div className="px-4 pb-4">
           <div className="bg-white rounded-3xl overflow-hidden shadow-sm">
@@ -294,7 +294,7 @@ export default function WalletScreen() {
         </div>
       )}
 
-      {/* ── WITHDRAW MODAL ────────────────────────── */}
+      {/*  WITHDRAW MODAL  */}
       <BaseModal open={showWithdrawModal} onClose={handleWithdrawModalClose}>
         <h2 className="text-2xl font-black text-text-primary mb-2">Withdraw via M-Pesa</h2>
         <p className="text-sm text-text-muted mb-6">Request funds to be sent to your M-Pesa number</p>
@@ -345,7 +345,7 @@ export default function WalletScreen() {
 
             <div className="bg-bg-input rounded-2xl p-3 mb-6">
               <p className="text-xs text-text-muted">
-                ℹ️ Withdrawals are reviewed within 24 hours. Your balance will be held until processing is complete.
+                 Withdrawals are reviewed within 24 hours. Your balance will be held until processing is complete.
               </p>
             </div>
 
@@ -378,7 +378,7 @@ export default function WalletScreen() {
         {withdrawState === 'success' && (
           <div className="py-8 text-center">
             <div className="w-20 h-20 rounded-full bg-tint-green flex items-center justify-center mx-auto mb-4">
-              <span className="text-4xl">✓</span>
+              <span className="text-4xl"></span>
             </div>
             <p className="text-text-primary text-lg font-bold mb-2">Withdrawal requested!</p>
             <p className="text-text-muted text-sm mb-6">Your request is being reviewed. Funds will be sent to your M-Pesa number within 24 hours.</p>
@@ -394,7 +394,7 @@ export default function WalletScreen() {
         {withdrawState === 'error' && (
           <div className="py-8 text-center">
             <div className="w-20 h-20 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4">
-              <span className="text-4xl">❌</span>
+              <span className="text-4xl"></span>
             </div>
             <p className="text-text-primary text-lg font-bold mb-2">Request failed</p>
             <p className="text-red-500 text-sm mb-6">{withdrawError || 'Please try again'}</p>
@@ -408,7 +408,7 @@ export default function WalletScreen() {
         )}
       </BaseModal>
 
-      {/* ── DEPOSIT MODAL ────────────────────────── */}
+      {/*  DEPOSIT MODAL  */}
       <BaseModal open={showDepositModal} onClose={handleDepositModalClose}>
         <h2 className="text-2xl font-black text-text-primary mb-2">Deposit via M-Pesa</h2>
         <p className="text-sm text-text-muted mb-6">Add money to your wallet using M-Pesa STK Push</p>
@@ -486,7 +486,7 @@ export default function WalletScreen() {
         {depositState === 'waiting' && (
           <div className="py-8 text-center">
             <div className="w-20 h-20 rounded-full bg-tint-yellow flex items-center justify-center mx-auto mb-4">
-              <span className="text-4xl">📱</span>
+              <span className="text-4xl"></span>
             </div>
             <p className="text-text-primary text-lg font-bold mb-2">Check your phone</p>
             <p className="text-text-muted text-sm mb-4">Enter your M-Pesa PIN to complete the payment</p>
@@ -499,7 +499,7 @@ export default function WalletScreen() {
         {depositState === 'success' && (
           <div className="py-8 text-center">
             <div className="w-20 h-20 rounded-full bg-tint-green flex items-center justify-center mx-auto mb-4">
-              <span className="text-4xl">✓</span>
+              <span className="text-4xl"></span>
             </div>
             <p className="text-text-primary text-lg font-bold mb-2">Deposit successful!</p>
             <p className="text-text-muted text-sm mb-6">KES {depositAmount} has been added to your wallet</p>
@@ -515,7 +515,7 @@ export default function WalletScreen() {
         {depositState === 'failed' && (
           <div className="py-8 text-center">
             <div className="w-20 h-20 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4">
-              <span className="text-4xl">❌</span>
+              <span className="text-4xl"></span>
             </div>
             <p className="text-text-primary text-lg font-bold mb-2">Payment not completed</p>
             <p className="text-red-500 text-sm mb-6">{depositError || 'Please try again'}</p>
@@ -529,7 +529,7 @@ export default function WalletScreen() {
         )}
       </BaseModal>
 
-      {/* ── WITHDRAW MODAL ────────────────────────── */}
+      {/*  WITHDRAW MODAL  */}
       <BaseModal open={showWithdrawModal} onClose={handleWithdrawModalClose}>
         <h2 className="text-2xl font-black text-text-primary mb-2">Withdraw via M-Pesa</h2>
         <p className="text-sm text-text-muted mb-6">Request funds to be sent to your M-Pesa number</p>
@@ -580,7 +580,7 @@ export default function WalletScreen() {
 
             <div className="bg-bg-input rounded-2xl p-3 mb-6">
               <p className="text-xs text-text-muted">
-                ℹ️ Withdrawals are reviewed within 24 hours. Your balance will be held until processing is complete.
+                 Withdrawals are reviewed within 24 hours. Your balance will be held until processing is complete.
               </p>
             </div>
 
@@ -613,7 +613,7 @@ export default function WalletScreen() {
         {withdrawState === 'success' && (
           <div className="py-8 text-center">
             <div className="w-20 h-20 rounded-full bg-tint-green flex items-center justify-center mx-auto mb-4">
-              <span className="text-4xl">✓</span>
+              <span className="text-4xl"></span>
             </div>
             <p className="text-text-primary text-lg font-bold mb-2">Withdrawal requested!</p>
             <p className="text-text-muted text-sm mb-6">Your request is being reviewed. Funds will be sent to your M-Pesa number within 24 hours.</p>
@@ -629,7 +629,7 @@ export default function WalletScreen() {
         {withdrawState === 'error' && (
           <div className="py-8 text-center">
             <div className="w-20 h-20 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4">
-              <span className="text-4xl">❌</span>
+              <span className="text-4xl"></span>
             </div>
             <p className="text-text-primary text-lg font-bold mb-2">Request failed</p>
             <p className="text-red-500 text-sm mb-6">{withdrawError || 'Please try again'}</p>
@@ -646,3 +646,5 @@ export default function WalletScreen() {
     </div>
   );
 }
+
+

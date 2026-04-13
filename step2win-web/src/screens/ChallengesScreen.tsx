@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+﻿import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Edit3, LogIn, QrCode, Copy, Download, X } from 'lucide-react';
@@ -40,7 +40,7 @@ export default function ChallengesScreen() {
     is_public: true,
     duration: '7',
     win_condition: 'proportional',
-    theme_emoji: '🔥',
+    theme_emoji: '',
   });
   const [createdChallenge, setCreatedChallenge] = useState<any>(null);
   const scannerRef = useRef<QrScanner | null>(null);
@@ -77,7 +77,7 @@ export default function ChallengesScreen() {
         is_public: true,
         duration: '7',
         win_condition: 'proportional',
-        theme_emoji: '🔥',
+        theme_emoji: '',
       });
       showToast({ message: 'Challenge created successfully!', type: 'success' });
     },
@@ -279,7 +279,7 @@ export default function ChallengesScreen() {
 
   return (
     <div className="screen-enter pb-nav bg-bg-page">
-      {/* ── HEADER ────────────────────────── */}
+      {/*  HEADER  */}
       <div className="pt-safe px-4 pt-6 pb-4">
         <h1 className="text-text-primary text-2xl font-bold mb-1">Challenges</h1>
         <p className="text-text-muted text-sm">Compete and win prizes</p>
@@ -289,7 +289,7 @@ export default function ChallengesScreen() {
         <div className="flex rounded-2xl p-1" style={{ background: '#F3F4F6' }}>
           {[
             { key: 'mine', label: 'My Challenges' },
-            { key: 'discover', label: '🔍 Discover' },
+            { key: 'discover', label: ' Discover' },
           ].map((section) => (
             <button
               key={section.key}
@@ -329,7 +329,7 @@ export default function ChallengesScreen() {
         </Suspense>
       )}
 
-      {/* ── ACTION MENU MODAL ────────────────────────── */}
+      {/*  ACTION MENU MODAL  */}
       <BaseModal open={showActionMenu} onClose={() => setShowActionMenu(false)}>
         <h2 className="text-2xl font-black text-text-primary mb-1">Choose Action</h2>
         <p className="text-sm text-text-muted mb-6">What would you like to do?</p>
@@ -371,7 +371,7 @@ export default function ChallengesScreen() {
         </div>
       </BaseModal>
 
-      {/* ── JOIN MODAL ────────────────────────── */}
+      {/*  JOIN MODAL  */}
       <BaseModal open={showJoinModal} onClose={() => {
         setShowJoinModal(false);
         setJoinTab('manual');
@@ -468,7 +468,7 @@ export default function ChallengesScreen() {
         )}
       </BaseModal>
 
-      {/* ── CREATE SUCCESS MODAL (with QR code) ────────────────────────── */}
+      {/*  CREATE SUCCESS MODAL (with QR code)  */}
       {createdChallenge && (
         <BaseModal
           open={true}
@@ -478,7 +478,7 @@ export default function ChallengesScreen() {
           }}
         >
           <div className="text-center">
-            <h2 className="text-2xl font-black text-text-primary mb-2">Challenge Created! 🎉</h2>
+            <h2 className="text-2xl font-black text-text-primary mb-2">Challenge Created! </h2>
             <p className="text-sm text-text-muted mb-8">{createdChallenge.name}</p>
 
             {/* QR Code Box */}
@@ -527,7 +527,7 @@ export default function ChallengesScreen() {
         </BaseModal>
       )}
 
-      {/* ── CREATE MODAL ────────────────────────── */}
+      {/*  CREATE MODAL  */}
       <BaseModal open={showCreateModal && !createdChallenge} onClose={() => setShowCreateModal(false)}>
         <h2 className="text-2xl font-black text-text-primary mb-2">Create Challenge</h2>
         <p className="text-sm text-text-muted mb-4">Set up a new competition</p>
@@ -565,7 +565,7 @@ export default function ChallengesScreen() {
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-semibold text-text-secondary mb-2">Entry Fee (KSh)</label>
               <input
@@ -657,8 +657,8 @@ export default function ChallengesScreen() {
 
               <div>
                 <label className="block text-sm font-semibold text-text-secondary mb-2">Theme Emoji</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {['🔥', '👑', '🌍', '⚡'].map((emoji) => (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {['', '', '', ''].map((emoji) => (
                     <button
                       key={emoji}
                       type="button"
@@ -693,3 +693,5 @@ export default function ChallengesScreen() {
     </div>
   );
 }
+
+

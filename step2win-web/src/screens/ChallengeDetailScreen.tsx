@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+﻿import { useEffect, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChevronLeft, Copy, Trophy, Download, Lock, Globe } from 'lucide-react';
@@ -64,7 +64,7 @@ export default function ChallengeDetailScreen() {
     const theme = challenge.theme || 'blue';
     const themeColors = THEME_COLORS[theme];
     const milestoneK = challenge.milestone / 1000;
-    const emoji = challenge.theme_emoji || '🔥';
+    const emoji = challenge.theme_emoji || '';
     
     return {
       name: `${emoji} ${milestoneK}K`,
@@ -126,7 +126,7 @@ export default function ChallengeDetailScreen() {
       xpEarned: userParticipant.qualified ? 50 : 10,
       prizeEarned: Number.parseFloat(userParticipant.payout || '0') || 0,
       rank: (userParticipant.rank || 0) <= 1 ? 'Gold' : (userParticipant.rank || 0) <= 3 ? 'Silver' : 'Bronze',
-      rankEmoji: (userParticipant.rank || 0) <= 1 ? '🏆' : (userParticipant.rank || 0) <= 3 ? '🥈' : '🥉',
+      rankEmoji: (userParticipant.rank || 0) <= 1 ? '' : (userParticipant.rank || 0) <= 3 ? '' : '',
       position: userParticipant.rank || undefined,
       totalParticipants: leaderboard?.length || challenge.current_participants || 0,
       levelUp: false,
@@ -153,7 +153,7 @@ export default function ChallengeDetailScreen() {
       <div className="p-4 space-y-4 pb-nav">
         <div className="skeleton h-12 rounded-2xl" />
         <div className="skeleton h-32 rounded-3xl" />
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="skeleton h-24 rounded-3xl" />
           <div className="skeleton h-24 rounded-3xl" />
         </div>
@@ -165,7 +165,7 @@ export default function ChallengeDetailScreen() {
   if (!challenge) {
     return (
       <div className="p-6 text-center pt-20">
-        <div className="text-6xl mb-3 animate-float">💔</div>
+        <div className="text-6xl mb-3 animate-float"></div>
         <p className="text-text-muted text-lg mb-6">Challenge not found</p>
         <button onClick={() => navigate(-1)} className="btn-primary px-6 py-3 rounded-2xl">
           Go Back
@@ -178,7 +178,7 @@ export default function ChallengeDetailScreen() {
 
   return (
     <div className="screen-enter pb-nav bg-bg-page">
-      {/* ── HEADER ────────────────────────── */}
+      {/*  HEADER  */}
       <div className="pt-safe px-4 pt-4 pb-4">
         <button
           onClick={() => navigate(-1)}
@@ -267,9 +267,9 @@ export default function ChallengeDetailScreen() {
         )}
       </div>
 
-      {/* ── STATS BENTO GRID ────────────────────────── */}
+      {/*  STATS BENTO GRID  */}
       <div className="px-4 pb-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="card rounded-3xl p-4">
             <div className="text-[10px] font-bold text-text-muted mb-1">PRIZE POOL</div>
             <div className="text-2xl font-black font-mono text-text-primary">
@@ -297,7 +297,7 @@ export default function ChallengeDetailScreen() {
         </div>
       </div>
 
-      {/* ── YOUR PROGRESS CARD ────────────────────────── */}
+      {/*  YOUR PROGRESS CARD  */}
       {userParticipant && (
         <div className="px-4 pb-4">
           <div className="card rounded-4xl p-5">
@@ -319,7 +319,7 @@ export default function ChallengeDetailScreen() {
                   color: isQualified ? '#34D399' : '#F59E0B'
                 }}
               >
-                {isQualified ? '✓ QUALIFIED' : 'NOT QUALIFIED'}
+                {isQualified ? ' QUALIFIED' : 'NOT QUALIFIED'}
               </span>
             </div>
 
@@ -349,7 +349,7 @@ export default function ChallengeDetailScreen() {
         </div>
       )}
 
-      {/* ── LEADERBOARD ────────────────────────── */}
+      {/*  LEADERBOARD  */}
       <div className="px-4 pb-4">
         <div className="card rounded-4xl p-5">
           <h3 className="text-lg font-black text-text-primary mb-4 flex items-center gap-2">
@@ -371,11 +371,11 @@ export default function ChallengeDetailScreen() {
                     {/* Rank */}
                     <div className="w-10 h-10 flex items-center justify-center flex-shrink-0">
                       {index === 0 ? (
-                        <div className="text-2xl animate-float">🥇</div>
+                        <div className="text-2xl animate-float"></div>
                       ) : index === 1 ? (
-                        <div className="text-2xl animate-float">🥈</div>
+                        <div className="text-2xl animate-float"></div>
                       ) : index === 2 ? (
-                        <div className="text-2xl animate-float">🥉</div>
+                        <div className="text-2xl animate-float"></div>
                       ) : (
                         <span className="text-lg font-black text-text-muted">
                           {index + 1}
@@ -411,7 +411,7 @@ export default function ChallengeDetailScreen() {
                             background: '#ECFDF5',
                             color: '#34D399'
                           }}>
-                            ✓ QUAL
+                             QUAL
                           </span>
                           {participant.payout && (
                             <div className="text-sm font-bold font-mono text-text-primary">
@@ -420,7 +420,7 @@ export default function ChallengeDetailScreen() {
                           )}
                         </>
                       ) : (
-                        <span className="text-xs text-text-muted">—</span>
+                        <span className="text-xs text-text-muted"></span>
                       )}
                     </div>
                   </div>
@@ -428,7 +428,7 @@ export default function ChallengeDetailScreen() {
               })
             ) : (
               <div className="text-center py-10">
-                <div className="text-5xl mb-3 animate-float">🎮</div>
+                <div className="text-5xl mb-3 animate-float"></div>
                 <p className="text-text-secondary text-sm">No participants yet</p>
               </div>
             )}
@@ -436,7 +436,7 @@ export default function ChallengeDetailScreen() {
         </div>
       </div>
 
-      {/* ── PARTICIPANT FEATURES ────────────────────────── */}
+      {/*  PARTICIPANT FEATURES  */}
       {userParticipant && challenge.is_private && (
         <>
           {/* Social Badges */}
@@ -451,7 +451,7 @@ export default function ChallengeDetailScreen() {
         </>
       )}
 
-      {/* ── INVITE CODE ────────────────────────── */}
+      {/*  INVITE CODE  */}
       {challenge.invite_code && (
         <div className="px-4 pb-4">
           <div className="card rounded-4xl p-5">
@@ -517,7 +517,7 @@ export default function ChallengeDetailScreen() {
               color: meta.color
             }}
           >
-            {rematchMutation.isPending ? 'Creating rematch...' : '🔁 Run This Challenge Again'}
+            {rematchMutation.isPending ? 'Creating rematch...' : ' Run This Challenge Again'}
           </button>
         </div>
       )}
@@ -530,3 +530,5 @@ export default function ChallengeDetailScreen() {
     </div>
   );
 }
+
+

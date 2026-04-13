@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from 'react-router-dom';
+﻿import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, Trophy, Users, Clock, Zap } from 'lucide-react';
 import { challengesService } from '../services/api/challenges';
@@ -12,7 +12,7 @@ const THEME = {
   pink: '#F472B6',
 };
 
-const RANK_MEDALS = ['🥇', '🥈', '🥉'];
+const RANK_MEDALS = ['', '', ''];
 
 export default function SpectatorScreen() {
   const { id } = useParams<{ id: string }>();
@@ -44,7 +44,7 @@ export default function SpectatorScreen() {
           <button
             onClick={() => navigate(-1)}
             className="w-9 h-9 rounded-xl flex items-center justify-center"
-            style={{ background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+            style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
           >
             <ChevronLeft size={20} color="#111827" />
           </button>
@@ -60,7 +60,7 @@ export default function SpectatorScreen() {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {[
             { icon: <Users size={12} />, label: 'Participants', value: String(total_participants) },
             { icon: <Trophy size={12} />, label: 'Qualified', value: `${qualified_count}/${total_participants}` },
@@ -70,7 +70,7 @@ export default function SpectatorScreen() {
               value: `${new Date(challenge.end_date) > new Date() ? Math.ceil((new Date(challenge.end_date).getTime() - Date.now()) / 86400000) : 0}d`,
             },
           ].map((stat) => (
-            <div key={stat.label} className="rounded-xl p-2.5 text-center" style={{ background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+            <div key={stat.label} className="rounded-xl p-2.5 text-center" style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
               <div className="flex justify-center mb-1" style={{ color: accent }}>
                 {stat.icon}
               </div>
@@ -94,8 +94,8 @@ export default function SpectatorScreen() {
         </div>
       </div>
 
-      <div className="mx-4 rounded-2xl overflow-hidden" style={{ background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-        <div className="px-4 py-3" style={{ borderBottom: '1px solid #F3F4F6' }}>
+      <div className="mx-4 rounded-2xl overflow-hidden" style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+        <div className="px-4 py-3" style={{ borderBottom: '1px solid hsl(var(--border-light))' }}>
           <p className="text-[#111827] text-sm font-bold">Rankings</p>
           <p className="text-[#9CA3AF] text-xs">Top {qualified_count} participants qualify for payout</p>
         </div>
@@ -123,7 +123,7 @@ export default function SpectatorScreen() {
             style={{ background: accent }}
           >
             <Zap size={14} />
-            Join Challenge — KES {Number(challenge.entry_fee).toLocaleString()}
+            Join Challenge  KES {Number(challenge.entry_fee).toLocaleString()}
           </button>
         </div>
       )}
@@ -169,7 +169,7 @@ function LeaderboardRow({
               <p className="text-[#111827] text-sm font-bold truncate">{participant.username}</p>
               {isQualified && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full text-white" style={{ background: accent }}>
-                  ✓ QLD
+                   QLD
                 </span>
               )}
             </div>
@@ -196,3 +196,5 @@ function LeaderboardRow({
     </div>
   );
 }
+
+

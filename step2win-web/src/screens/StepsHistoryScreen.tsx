@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Footprints, Smartphone, Apple, PenLine, MapPin, Flame, Zap, AlertTriangle } from 'lucide-react';
@@ -30,7 +30,7 @@ export default function StepsHistoryScreen() {
 
   return (
     <div className="min-h-screen bg-bg-page pb-8">
-      {/* ── HEADER ────────────────────── */}
+      {/*  HEADER  */}
       <div className="flex items-center gap-3 px-5 pt-6 pb-4">
         <button
           onClick={() => navigate(-1)}
@@ -44,7 +44,7 @@ export default function StepsHistoryScreen() {
         </div>
       </div>
 
-      {/* ── FILTER BAR ────────────────────── */}
+      {/*  FILTER BAR  */}
       <div className="px-4 mb-4">
         <div className="bg-bg-input rounded-2xl p-1 flex gap-1">
           {PERIODS.map(({ key, label }) => (
@@ -64,7 +64,7 @@ export default function StepsHistoryScreen() {
         </div>
       </div>
 
-      {/* ── LOADING STATE ────────────────────── */}
+      {/*  LOADING STATE  */}
       {isLoading && (
         <div className="px-4">
           <div className="card p-4">
@@ -75,7 +75,7 @@ export default function StepsHistoryScreen() {
         </div>
       )}
 
-      {/* ── GROUPED HISTORY LIST ────────────────────── */}
+      {/*  GROUPED HISTORY LIST  */}
       {!isLoading &&
         Object.keys(groupedByDate).length > 0 &&
         Object.entries(groupedByDate).map(([date, records]) => (
@@ -114,7 +114,7 @@ export default function StepsHistoryScreen() {
 
                     {/* Main info */}
                     <div className="flex-1 min-w-0">
-                      {/* Step count — bold and prominent */}
+                      {/* Step count  bold and prominent */}
                       <div className="flex items-baseline gap-1">
                         <span className="text-text-primary text-base font-bold">
                           {record.steps.toLocaleString()}
@@ -148,10 +148,10 @@ export default function StepsHistoryScreen() {
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-xs font-medium text-accent-blue">
                           {record.steps >= goalForDate
-                            ? '✅ Goal reached!'
+                            ? ' Goal reached!'
                             : `${(goalForDate - record.steps).toLocaleString()} steps to goal`}
                         </span>
-                        <span className="text-text-muted text-xs">·</span>
+                        <span className="text-text-muted text-xs"></span>
                         <span className="text-text-muted text-xs">
                           {new Date(record.synced_at).toLocaleTimeString('en-US', {
                             hour: 'numeric',
@@ -171,7 +171,7 @@ export default function StepsHistoryScreen() {
           </div>
         ))}
 
-      {/* ── EMPTY STATE ────────────────────── */}
+      {/*  EMPTY STATE  */}
       {!isLoading && Object.keys(groupedByDate).length === 0 && (
         <div className="flex flex-col items-center py-20 px-8">
           <div className="w-16 h-16 rounded-3xl bg-tint-blue flex items-center justify-center mb-4">
@@ -215,3 +215,4 @@ function formatDateHeader(dateStr: string): string {
     day: 'numeric',
   });
 }
+

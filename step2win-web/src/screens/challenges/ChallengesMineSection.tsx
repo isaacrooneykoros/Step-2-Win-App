@@ -1,4 +1,4 @@
-import { Globe, Lock, Plus } from 'lucide-react';
+﻿import { Globe, Lock, Plus } from 'lucide-react';
 import type { Challenge } from '../../types';
 import { formatKES } from '../../utils/currency';
 
@@ -129,7 +129,7 @@ export default function ChallengesMineSection({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2 mb-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
                     <div className="bg-[#FEF3C7] rounded-xl p-2.5">
                       <div className="text-[10px] text-text-muted mb-0.5">Entry Fee</div>
                       <div className="text-sm font-bold font-mono text-text-primary">
@@ -183,7 +183,7 @@ export default function ChallengesMineSection({
                         : 'bg-accent-blue text-white shadow-card hover:shadow-lg'
                     }`}
                   >
-                    {activeTab === 'Mine' || activeTab === 'Active' ? 'View Details →' : `Join — ${formatKES(challenge.entry_fee)} entry`}
+                    {activeTab === 'Mine' || activeTab === 'Active' ? 'View Details ' : `Join  ${formatKES(challenge.entry_fee)} entry`}
                   </button>
                 </div>
               );
@@ -201,3 +201,5 @@ export default function ChallengesMineSection({
     </>
   );
 }
+
+

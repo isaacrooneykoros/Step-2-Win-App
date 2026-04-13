@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from 'react-router-dom';
+﻿import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, Users, Clock, Trophy, Eye, Zap } from 'lucide-react';
 import { challengesService } from '../services/api/challenges';
@@ -53,7 +53,7 @@ export default function ChallengePreviewScreen() {
 
         {challenge.is_featured && (
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full mb-2" style={{ background: '#FEF3C7' }}>
-            <span style={{ color: '#D97706', fontSize: '11px', fontWeight: 700 }}>⭐ Featured Challenge</span>
+            <span style={{ color: '#D97706', fontSize: '11px', fontWeight: 700 }}> Featured Challenge</span>
           </div>
         )}
 
@@ -69,7 +69,7 @@ export default function ChallengePreviewScreen() {
         </div>
       </div>
 
-      <div className="mx-4 -mt-4 rounded-2xl p-4 mb-4" style={{ background: '#FFFFFF', boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
+      <div className="mx-4 -mt-4 rounded-2xl p-4 mb-4" style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
         <div className="text-center mb-3">
           <p className="text-[#9CA3AF] text-xs mb-1">Total Prize Pool</p>
           <p className="text-[#111827] font-bold" style={{ fontSize: '36px', lineHeight: 1 }}>
@@ -82,7 +82,7 @@ export default function ChallengePreviewScreen() {
           )}
         </div>
 
-        <div className="grid grid-cols-3 gap-3 pt-3" style={{ borderTop: '1px solid #F3F4F6' }}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-3" style={{ borderTop: '1px solid #F3F4F6' }}>
           {[
             { icon: <Trophy size={14} />, label: 'Entry Fee', value: `KES ${Number(challenge.entry_fee).toLocaleString()}` },
             { icon: <Users size={14} />, label: 'Participants', value: `${challenge.participant_count}/${challenge.max_participants}` },
@@ -99,7 +99,7 @@ export default function ChallengePreviewScreen() {
         </div>
       </div>
 
-      <div className="mx-4 mb-4 rounded-2xl p-4" style={{ background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+      <div className="mx-4 mb-4 rounded-2xl p-4" style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
         <div className="flex justify-between items-center mb-2">
           <p className="text-[#111827] text-sm font-bold">Spots Filling</p>
           <p className="text-xs font-semibold" style={{ color: challenge.is_almost_full ? '#EF4444' : theme.accent }}>
@@ -116,11 +116,11 @@ export default function ChallengePreviewScreen() {
           />
         </div>
         {challenge.is_almost_full && (
-          <p className="text-[#EF4444] text-xs font-semibold mt-2 text-center">🔥 Almost full — join before it's too late!</p>
+          <p className="text-[#EF4444] text-xs font-semibold mt-2 text-center"> Almost full  join before it's too late!</p>
         )}
       </div>
 
-      <div className="mx-4 mb-4 rounded-2xl p-4" style={{ background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+      <div className="mx-4 mb-4 rounded-2xl p-4" style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
         <p className="text-[#111827] text-sm font-bold mb-3">How Payouts Work</p>
         {[
           { step: '1', text: `Walk ${(challenge.milestone / 1000).toFixed(0)}K steps in 7 days to qualify` },
@@ -147,7 +147,7 @@ export default function ChallengePreviewScreen() {
         {challenge.user_is_joined ? (
           <div className="flex flex-col gap-2">
             <div className="w-full py-3.5 rounded-xl text-center text-sm font-bold" style={{ background: '#ECFDF5', color: '#34D399' }}>
-              ✓ You're participating in this challenge
+               You're participating in this challenge
             </div>
             <button
               onClick={handleSpectate}
@@ -200,3 +200,5 @@ export default function ChallengePreviewScreen() {
     </div>
   );
 }
+
+

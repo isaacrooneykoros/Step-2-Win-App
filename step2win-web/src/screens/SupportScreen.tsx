@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LifeBuoy, MessageCircle, Plus, Send, User, Clock } from 'lucide-react';
 import { Preferences } from '@capacitor/preferences';
@@ -324,7 +324,7 @@ export default function SupportScreen() {
 
       <BaseModal open={showCreateModal} onClose={() => setShowCreateModal(false)}>
         <h2 className="text-2xl font-black text-text-primary mb-2">New Support Ticket</h2>
-        <p className="text-sm text-text-muted mb-6">Tell us your issue and we’ll respond in-app.</p>
+        <p className="text-sm text-text-muted mb-6">Tell us your issue and well respond in-app.</p>
 
         <div className="space-y-4 mb-6">
           <div>
@@ -338,7 +338,7 @@ export default function SupportScreen() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-semibold text-text-secondary mb-2">Category</label>
               <select
@@ -401,7 +401,7 @@ export default function SupportScreen() {
 
       <BaseModal open={selectedTicketId !== null} onClose={() => setSelectedTicketId(null)}>
         {detailQuery.isLoading || !selectedTicket ? (
-          <div className="py-8 text-center text-text-muted">Loading ticket…</div>
+          <div className="py-8 text-center text-text-muted">Loading ticket</div>
         ) : (
           <>
             <h2 className="text-xl font-black text-text-primary mb-2">#{selectedTicket.id} {selectedTicket.subject}</h2>
@@ -493,3 +493,5 @@ export default function SupportScreen() {
     </div>
   );
 }
+
+

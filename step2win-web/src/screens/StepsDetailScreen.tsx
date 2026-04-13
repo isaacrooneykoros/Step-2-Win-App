@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, History, Footprints, MapPin, Flame, PartyPopper } from 'lucide-react';
@@ -48,7 +48,7 @@ export default function StepsDetailScreen() {
 
   return (
     <div className="min-h-screen bg-bg-page pb-8">
-      {/* ── HEADER ────────────────────── */}
+      {/*  HEADER  */}
       <div className="flex items-center justify-between px-5 pt-6 pb-2">
         {/* Back button */}
         <button
@@ -60,7 +60,7 @@ export default function StepsDetailScreen() {
 
         <h1 className="text-text-primary font-bold text-base">Steps</h1>
 
-        {/* History button — navigates to /steps/history */}
+        {/* History button  navigates to /steps/history */}
         <button
           onClick={() => navigate('/steps/history')}
           className="w-9 h-9 rounded-xl bg-bg-input flex items-center justify-center"
@@ -69,14 +69,14 @@ export default function StepsDetailScreen() {
         </button>
       </div>
 
-      {/* ── HERO STEP COUNT ────────────────────── */}
+      {/*  HERO STEP COUNT  */}
       <div className="flex flex-col items-center py-6 px-5">
-        {/* Shoe/footprint icon — use the accent blue tint */}
+        {/* Shoe/footprint icon  use the accent blue tint */}
         <div className="w-14 h-14 rounded-2xl bg-tint-blue flex items-center justify-center mb-4">
           <Footprints size={28} className="text-accent-blue" />
         </div>
 
-        {/* Big step count — DM Serif Display font */}
+        {/* Big step count  DM Serif Display font */}
         <div className="flex items-baseline gap-2 mb-1">
           <span className="font-display text-6xl text-text-primary leading-none">
             {summary.today_steps.toLocaleString()}
@@ -84,7 +84,7 @@ export default function StepsDetailScreen() {
           <span className="text-text-secondary text-lg font-medium">steps</span>
         </div>
 
-        {/* Motivational message — changes based on progress */}
+        {/* Motivational message  changes based on progress */}
         <p className="text-text-muted text-sm text-center mt-2 flex items-center justify-center gap-1.5">
           {summary.percent_complete >= 100 ? (
             <>
@@ -94,7 +94,7 @@ export default function StepsDetailScreen() {
           ) : summary.percent_complete >= 75
               ? `Almost there! ${summary.remaining_today.toLocaleString()} more steps to go!`
               : summary.percent_complete >= 50
-                ? `Halfway there! Keep pushing — ${summary.remaining_today.toLocaleString()} left!`
+                ? `Halfway there! Keep pushing  ${summary.remaining_today.toLocaleString()} left!`
                 : `Take ${summary.remaining_today.toLocaleString()} more steps to hit your goal!`}
         </p>
 
@@ -119,7 +119,7 @@ export default function StepsDetailScreen() {
         />
       </div>
 
-      {/* ── PERIOD FILTER + BAR CHART ────────────────────── */}
+      {/*  PERIOD FILTER + BAR CHART  */}
       {/* Period selector tabs */}
       <div className="px-4 mb-4">
         <div className="bg-bg-input rounded-2xl p-1 flex gap-1">
@@ -163,7 +163,7 @@ export default function StepsDetailScreen() {
 
               return (
                 <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                  {/* Step count label on top of bar — only for highest bar */}
+                  {/* Step count label on top of bar  only for highest bar */}
                   {isHighest && (
                     <span className="text-accent-blue text-xs font-bold">
                       {day.steps >= 1000
@@ -184,7 +184,7 @@ export default function StepsDetailScreen() {
                       minHeight: '4px',
                     }}
                   />
-                  {/* Date label — show every Nth label to avoid crowding */}
+                  {/* Date label  show every Nth label to avoid crowding */}
                   {(i % Math.ceil(chartData.length / 7) === 0 || isToday) && (
                     <span
                       className={`text-xs font-medium ${
@@ -201,8 +201,8 @@ export default function StepsDetailScreen() {
         )}
       </div>
 
-      {/* ── SUMMARY STATS ROW ────────────────────── */}
-      <div className="px-4 mb-4 grid grid-cols-3 gap-3">
+      {/*  SUMMARY STATS ROW  */}
+      <div className="px-4 mb-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
         {[
           {
             label: 'Week Steps',
@@ -260,3 +260,5 @@ function formatChartLabel(dateStr: string, period: StepsPeriod): string {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   return date.toLocaleDateString('en-US', { month: 'short' });
 }
+
+
