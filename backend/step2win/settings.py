@@ -240,7 +240,12 @@ SPECTACULAR_SETTINGS = {
 
 # Mobile app origins that must always be allowed so Capacitor Android/iOS can reach
 # the backend regardless of what CORS_ALLOWED_ORIGINS is set to in the environment.
-_CORS_REQUIRED_NATIVE = ['https://localhost', 'capacitor://localhost']
+_CORS_REQUIRED_NATIVE = [
+    'http://localhost',
+    'https://localhost',
+    'capacitor://localhost',
+    'ionic://localhost',
+]
 _CORS_DEFAULT_DEV = [
     'http://localhost:5173', 'http://127.0.0.1:5173',
     'http://localhost:5174', 'http://127.0.0.1:5174',
