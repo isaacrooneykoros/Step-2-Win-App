@@ -13,22 +13,22 @@ export default {
       colors: {
         // Backgrounds
         bg: {
-          page: '#F8F9FB',      // Very light gray page background
-          card: '#FFFFFF',      // White cards on the gray page
-          input: '#F3F4F6',     // Input fields
-          elevated: '#FFFFFF',  // Modals, bottom sheets
+          page: 'hsl(var(--bg-page) / <alpha-value>)',
+          card: 'hsl(var(--bg-card) / <alpha-value>)',
+          input: 'hsl(var(--bg-input) / <alpha-value>)',
+          elevated: 'hsl(var(--bg-elevated) / <alpha-value>)',
         },
         // Text
         text: {
-          primary: '#111827',   // Near-black for headings and important numbers
-          secondary: '#6B7280', // Gray for labels and descriptions
-          muted: '#9CA3AF',     // Very light gray for captions, nav labels
-          inverse: '#FFFFFF',   // White text on colored backgrounds
+          primary: 'hsl(var(--text-primary) / <alpha-value>)',
+          secondary: 'hsl(var(--text-secondary) / <alpha-value>)',
+          muted: 'hsl(var(--text-muted) / <alpha-value>)',
+          inverse: 'hsl(var(--text-inverse) / <alpha-value>)',
         },
         // Borders
         border: {
-          DEFAULT: '#E5E7EB',   // Subtle card borders
-          light: '#F3F4F6',     // Even subtler dividers
+          DEFAULT: 'hsl(var(--border-default) / <alpha-value>)',
+          light: 'hsl(var(--border-light) / <alpha-value>)',
         },
         // Accent colors — used ONLY on icons, progress bars, and badges
         accent: {

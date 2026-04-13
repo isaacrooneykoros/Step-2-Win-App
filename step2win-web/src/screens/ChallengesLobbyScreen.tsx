@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -94,7 +94,7 @@ export default function ChallengesLobbyScreen({ embedded = false }: ChallengesLo
       <div className="px-4 mb-3">
         <div
           className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
-          style={{ background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', border: '1px solid #F3F4F6' }}
+          style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', border: '1px solid #F3F4F6' }}
         >
           <Search size={15} color="#9CA3AF" />
           <input
@@ -140,7 +140,7 @@ export default function ChallengesLobbyScreen({ embedded = false }: ChallengesLo
       {showFilters && (
         <div
           className="mx-4 mb-4 p-4 rounded-2xl"
-          style={{ background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
+          style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
         >
           <p className="text-[#111827] text-xs font-bold mb-2">Difficulty</p>
           <div className="flex gap-2">
@@ -234,7 +234,7 @@ function LobbyCard({
       onClick={onTap}
       className="w-full text-left rounded-2xl overflow-hidden active:scale-[0.98] transition-transform"
       style={{
-        background: '#FFFFFF',
+        background: 'hsl(var(--bg-card))',
         boxShadow: '0 1px 6px rgba(0,0,0,0.07)',
         border: c.is_featured ? `1.5px solid ${theme.accent}` : '1px solid #F3F4F6',
       }}
@@ -252,12 +252,12 @@ function LobbyCard({
               )}
               {c.is_platform_challenge && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: theme.badge, color: theme.accent }}>
-                  ✅ Official
+                   Official
                 </span>
               )}
               {urgency && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: '#FEE2E2', color: urgency.color }}>
-                  🔥 {urgency.text}
+                   {urgency.text}
                 </span>
               )}
             </div>
@@ -327,11 +327,11 @@ function LobbyCard({
         <div className="mt-3">
           {c.user_is_joined ? (
             <div className="w-full py-2.5 rounded-xl text-center text-sm font-bold" style={{ background: '#ECFDF5', color: '#34D399' }}>
-              ✓ You're In
+               You're In
             </div>
           ) : c.status === 'active' && c.spots_remaining === 0 ? (
             <div className="w-full py-2.5 rounded-xl text-center text-sm font-bold" style={{ background: '#F9FAFB', color: '#9CA3AF' }}>
-              Full — Watch Leaderboard →
+              Full  Watch Leaderboard 
             </div>
           ) : (
             <div className="w-full py-2.5 rounded-xl text-center text-sm font-bold text-white" style={{ background: theme.accent, boxShadow: `0 4px 12px ${theme.accent}40` }}>
@@ -343,3 +343,5 @@ function LobbyCard({
     </button>
   );
 }
+
+

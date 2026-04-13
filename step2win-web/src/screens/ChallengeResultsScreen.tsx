@@ -1,13 +1,13 @@
-import { useParams, useNavigate } from 'react-router-dom'
+﻿import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery }    from '@tanstack/react-query'
 import { ChevronLeft, Info } from 'lucide-react'
 import { challengesService } from '../services/api/challenges'
 
-const MEDALS = ['🥇', '🥈', '🥉']
+const MEDALS = ['', '', '']
 
 const METHOD_LABELS: Record<string, string> = {
   proportional:    'Proportional split',
-  dead_heat:       'Tie — prize split',
+  dead_heat:       'Tie  prize split',
   tiebreaker:      'Tiebreaker win',
   refund:          'Full refund',
   no_payout:       'Did not qualify',
@@ -37,7 +37,7 @@ export default function ChallengeResultsScreen() {
   return (
     <div className="min-h-screen pb-12" style={{ background: '#F8F9FB' }}>
 
-      {/* ── Header ── */}
+      {/*  Header  */}
       <div className="px-4 pt-6 pb-4 flex items-center gap-3">
         <button onClick={() => navigate(-1)}
           className="w-9 h-9 rounded-xl flex items-center justify-center"
@@ -50,7 +50,7 @@ export default function ChallengeResultsScreen() {
         </div>
       </div>
 
-      {/* ── My result hero card ── */}
+      {/*  My result hero card  */}
       {my_result && (
         <div className="mx-4 mb-4 rounded-2xl p-4"
           style={{
@@ -70,7 +70,7 @@ export default function ChallengeResultsScreen() {
           </p>
           <p className="text-white text-sm opacity-80 mt-1">
             {my_result.final_steps.toLocaleString()} steps
-            {my_result.final_rank ? ` · Rank #${my_result.final_rank}` : ''}
+            {my_result.final_rank ? `  Rank #${my_result.final_rank}` : ''}
           </p>
 
           {/* Tie explanation */}
@@ -101,8 +101,8 @@ export default function ChallengeResultsScreen() {
         </div>
       )}
 
-      {/* ── Summary stats ── */}
-      <div className="grid grid-cols-3 gap-2 mx-4 mb-4">
+      {/*  Summary stats  */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mx-4 mb-4">
         {[
           { label: 'Participants', value: summary.total_participants },
           { label: 'Qualified',    value: summary.qualified_count },
@@ -116,10 +116,10 @@ export default function ChallengeResultsScreen() {
         ))}
       </div>
 
-      {/* ── Leaderboard ── */}
+      {/*  Leaderboard  */}
       <div className="mx-4 rounded-2xl overflow-hidden"
         style={{ background: '#FFF', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-        <div className="px-4 py-3" style={{ borderBottom: '1px solid #F3F4F6' }}>
+        <div className="px-4 py-3" style={{ borderBottom: '1px solid hsl(var(--border-light))' }}>
           <p className="text-[#111827] text-sm font-bold">Final Leaderboard</p>
         </div>
 
@@ -138,7 +138,7 @@ export default function ChallengeResultsScreen() {
                 {result.final_rank && result.final_rank <= 3
                   ? <span className="text-xl">{MEDALS[result.final_rank - 1]}</span>
                   : <span className="text-[#9CA3AF] text-sm font-bold">
-                      {result.final_rank || '—'}
+                      {result.final_rank || ''}
                     </span>
                 }
               </div>
@@ -162,7 +162,7 @@ export default function ChallengeResultsScreen() {
                   {result.qualified && (
                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full
                                      text-white bg-[#34D399] flex-shrink-0">
-                      ✓ QLD
+                       QLD
                     </span>
                   )}
                 </div>
@@ -170,7 +170,7 @@ export default function ChallengeResultsScreen() {
                   {result.final_steps.toLocaleString()} steps
                   {result.tied_with_count > 0 && (
                     <span className="text-[#FBBF24]">
-                      {' '}· tied ×{result.tied_with_count + 1}
+                      {' '} tied {result.tied_with_count + 1}
                     </span>
                   )}
                 </p>
@@ -193,7 +193,7 @@ export default function ChallengeResultsScreen() {
                     ? 'Refunded'
                     : result.payout_kes > '0'
                     ? `KES ${Number(result.payout_kes).toLocaleString()}`
-                    : '—'
+                    : ''
                   }
                 </p>
                 <p className="text-[#9CA3AF] text-xs">
@@ -208,3 +208,5 @@ export default function ChallengeResultsScreen() {
     </div>
   )
 }
+
+

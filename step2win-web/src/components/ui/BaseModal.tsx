@@ -16,7 +16,7 @@ export const BaseModal: React.FC<BaseModalProps> = ({ open, onClose, title, chil
       onClick={onClose}
     >
       <div 
-        className="w-full max-w-lg mx-auto rounded-t-4xl p-6 pb-10 bg-white shadow-modal screen-enter"
+        className="w-full max-w-lg mx-auto rounded-t-4xl p-6 pb-10 bg-bg-elevated border border-border shadow-modal screen-enter"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Handle */}

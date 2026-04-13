@@ -2,18 +2,16 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GoogleOAuthProvider } from '@react-oauth/google';
-import { Capacitor } from '@capacitor/core';
 import { useAuthStore } from './store/authStore';
 import { GOOGLE_CLIENT_ID, isGoogleClientIdConfigured } from './config/googleAuth';
+import { applyThemeMode, loadThemeMode, ThemeMode } from './config/theme';
 import MainLayout from './components/layout/MainLayout';
 import { PageLoader } from './components/ui/LoadingSpinner';
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
-import PreflightScreen from './screens/PreflightScreen';
+import LaunchSplashScreen from './screens/LaunchSplashScreen';
 import type { ReactNode } from 'react';
 import { OnboardingScreen } from './components/screens/OnboardingScreen';
-
-const PREFLIGHT_SESSION_KEY = 'preflight_checked_v1';
 
 const HomeScreen = lazy(() => import('./screens/HomeScreen'));
 const ChallengesScreen = lazy(() => import('./screens/ChallengesScreen'));
@@ -24,6 +22,7 @@ const ChallengePreviewScreen = lazy(() => import('./screens/ChallengePreviewScre
 const SpectatorScreen = lazy(() => import('./screens/SpectatorScreen'));
 const WalletScreen = lazy(() => import('./screens/WalletScreen'));
 const ProfileScreen = lazy(() => import('./screens/ProfileScreen'));
+const SettingsScreen = lazy(() => import('./screens/SettingsScreen'));
 const StepsDetailScreen = lazy(() => import('./screens/StepsDetailScreen'));
 const StepsHistoryScreen = lazy(() => import('./screens/StepsHistoryScreen'));
 const StepsDayDetailScreen = lazy(() => import('./screens/StepsDayDetailScreen'));
@@ -58,36 +57,30 @@ function AuthLoadRedirect({
   isAuthenticated: boolean;
 }) {
   const location = useLocation();
-  const isNative = Capacitor.isNativePlatform();
-  const preflightChecked = sessionStorage.getItem(PREFLIGHT_SESSION_KEY) === 'true';
+  const launchSeen = sessionStorage.getItem('launch_seen_v1') === 'true';
 
   if (loading) {
     return null;
   }
 
-  if (
-    !isAuthenticated &&
-    isNative &&
-    !preflightChecked &&
-    location.pathname !== '/preflight'
-  ) {
-    return <Navigate to="/preflight" replace />;
+  if (!launchSeen && location.pathname !== '/launch' && location.pathname !== '/login' && location.pathname !== '/register') {
+    return <Navigate to="/launch" replace />;
   }
 
   if (
     !isAuthenticated &&
-    isNative &&
-    preflightChecked &&
-    location.pathname === '/preflight'
+    location.pathname !== '/launch' &&
+    location.pathname !== '/login' &&
+    location.pathname !== '/register'
   ) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/launch" replace />;
   }
 
   if (
     !isAuthenticated &&
     location.pathname !== '/login' &&
     location.pathname !== '/register' &&
-    location.pathname !== '/preflight'
+    location.pathname !== '/launch'
   ) {
     return <Navigate to="/login" replace />;
   }
@@ -98,12 +91,36 @@ function AuthLoadRedirect({
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
   const init = useAuthStore((state) => state.init);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
 
   useEffect(() => {
     init().finally(() => setLoading(false));
   }, [init]);
+
+  useEffect(() => {
+    applyThemeMode(themeMode);
+
+    const handleThemeModeChange = (event: Event) => {
+      const detail = (event as CustomEvent<ThemeMode>).detail;
+      if (detail === 'light' || detail === 'dark' || detail === 'system') {
+        setThemeMode(detail);
+      }
+    };
+
+    const handleStorageChange = () => {
+      setThemeMode(loadThemeMode());
+    };
+
+    window.addEventListener('theme-mode-change', handleThemeModeChange as EventListener);
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('theme-mode-change', handleThemeModeChange as EventListener);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [themeMode]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -129,7 +146,7 @@ export default function App() {
           <AuthLoadRedirect loading={loading} isAuthenticated={isAuthenticated} />
           <Routes>
             {/* Public routes */}
-            <Route path="/preflight" element={<PreflightScreen />} />
+            <Route path="/launch" element={<LaunchSplashScreen />} />
             <Route path="/login" element={<LoginScreen />} />
             <Route path="/register" element={<RegisterScreen />} />
 
@@ -153,6 +170,7 @@ export default function App() {
               <Route path="/challenges/:id" element={withSuspense(<ChallengeDetailScreen />)} />
               <Route path="/wallet" element={withSuspense(<WalletScreen />)} />
               <Route path="/profile" element={withSuspense(<ProfileScreen />)} />
+              <Route path="/settings" element={withSuspense(<SettingsScreen />)} />
               <Route path="/profile/sessions" element={withSuspense(<ActiveSessionsScreen />)} />
               <Route path="/support" element={withSuspense(<SupportScreen />)} />
               <Route path="/legal/:slug" element={withSuspense(<LegalDocumentScreen />)} />

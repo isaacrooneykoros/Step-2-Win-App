@@ -3,6 +3,7 @@ import { Preferences } from '@capacitor/preferences';
 
 const DEFAULT_WEB_API_BASE = 'http://localhost:8000';
 const DEFAULT_NATIVE_API_BASE = 'https://step-2-win-app.onrender.com';
+const DEFAULT_HOSTED_API_BASE = 'https://step-2-win-app.onrender.com';
 
 function isLocalHost(hostname: string): boolean {
   return ['localhost', '127.0.0.1', '10.0.2.2'].includes(hostname);
@@ -16,6 +17,10 @@ function resolveBaseCandidate(): string {
   const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
   if (envBase?.trim()) {
     return trimTrailingSlash(envBase.trim());
+  }
+
+  if (typeof window !== 'undefined' && !isLocalHost(window.location.hostname)) {
+    return DEFAULT_HOSTED_API_BASE;
   }
 
   return Capacitor.isNativePlatform() ? DEFAULT_NATIVE_API_BASE : DEFAULT_WEB_API_BASE;

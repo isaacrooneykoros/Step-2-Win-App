@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+﻿import { useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { ArrowLeft, Download, RefreshCw, AlertCircle } from 'lucide-react';
@@ -49,7 +49,7 @@ export default function LegalDocumentScreen() {
           </h1>
           {doc && (
             <p className="text-[#9CA3AF] text-xs">
-              Version {doc.version_label} · {' '}
+              Version {doc.version_label}  {' '}
               {doc.published_at
                 ? new Date(doc.published_at).toLocaleDateString('en-KE', {
                     day: 'numeric', month: 'short', year: 'numeric'
@@ -131,7 +131,7 @@ export default function LegalDocumentScreen() {
             {hasScrolled && (
               <div className="flex items-center justify-center gap-2 py-6 mt-4
                               rounded-2xl" style={{ background: '#ECFDF5' }}>
-                <span style={{ fontSize: '16px' }}>✅</span>
+                <span style={{ fontSize: '16px' }}></span>
                 <p className="text-[#059669] text-sm font-semibold">
                   Document read and acknowledged
                 </p>
@@ -143,3 +143,4 @@ export default function LegalDocumentScreen() {
     </div>
   );
 }
+

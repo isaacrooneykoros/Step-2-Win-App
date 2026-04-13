@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Smartphone, Monitor, AlertTriangle } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -196,7 +196,7 @@ export default function ActiveSessionsScreen() {
                       )}
                     </div>
                     <p className="text-gray-400 text-xs mt-0.5">
-                      {session.ip_address} · {formatDate(session.last_active_at)}
+                      {session.ip_address}  {formatDate(session.last_active_at)}
                     </p>
                   </div>
 
@@ -227,3 +227,4 @@ export default function ActiveSessionsScreen() {
     </div>
   );
 }
+

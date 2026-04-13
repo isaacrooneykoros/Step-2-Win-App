@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { Footprints, Trophy, Wallet, Flame, ChevronRight, Zap, Compass, Target, X, CheckCircle } from 'lucide-react';
@@ -154,8 +154,8 @@ export default function HomeScreen() {
 
   return (
     <div className="screen-enter pb-nav bg-bg-page">
-      {/* ── HEADER ────────────────────────────── */}
-      <div className="pt-safe px-5 pt-4 pb-3 flex items-center justify-between">
+      {/*  HEADER  */}
+      <div className="pt-safe px-6 pt-4 pb-4 flex items-center justify-between gap-4">
         <div>
           <p className="text-text-muted text-xs font-medium">
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
@@ -163,7 +163,7 @@ export default function HomeScreen() {
           <h1 className="text-text-primary text-2xl font-bold leading-tight mt-1">
             {getGreeting()}, {user?.username}
           </h1>
-          <div className="mt-2 inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-bg-input">
+          <div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-bg-input border border-border">
             <span className={`w-2 h-2 rounded-full ${isStepsSocketConnected ? 'bg-accent-green' : 'bg-accent-red'}`} />
             <span className={`text-[11px] font-semibold ${isStepsSocketConnected ? 'text-accent-green' : 'text-accent-red'}`}>
               {isStepsSocketConnected ? 'Live Sync Connected' : 'Live Sync Disconnected'}
@@ -183,10 +183,10 @@ export default function HomeScreen() {
         </div>
       </div>
 
-      {/* ── 2x2 STATS GRID ────────────────────── */}
-      <div className="px-4 mb-4 grid grid-cols-2 gap-3">
+      {/*  2x2 STATS GRID  */}
+      <div className="px-4 mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* Steps Card */}
-        <Link to="/steps" className="card rounded-3xl p-4 shadow-sm block active:scale-98 transition-transform">
+        <Link to="/steps" className="card rounded-3xl p-5 shadow-sm block active:scale-98 transition-transform">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-10 h-10 rounded-full bg-accent-blue/10 flex items-center justify-center">
               <Footprints size={20} className="text-accent-blue" />
@@ -196,16 +196,16 @@ export default function HomeScreen() {
           <p className="text-3xl font-black text-text-primary mb-1">
             {steps.toLocaleString()}
           </p>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-2">
+          <div className="h-2 bg-bg-input rounded-full overflow-hidden mb-2">
             <div 
               className="h-full bg-accent-blue rounded-full transition-all duration-700"
               style={{ width: `${pct}%` }}
             />
           </div>
-          <p className="text-text-muted text-xs">
-            {steps >= stepGoal
-              ? '✅ Goal reached!'
-              : `${Math.max(stepGoal - steps, 0).toLocaleString()} steps to go`}
+              <p className="text-text-muted text-xs">
+                {steps >= stepGoal
+                  ? 'Goal reached!'
+                  : `${Math.max(stepGoal - steps, 0).toLocaleString()} steps to go`}
           </p>
           <StepStatChips
             distance={todayData?.distance_km}
@@ -283,7 +283,7 @@ export default function HomeScreen() {
         </div>
       </div>
 
-      {/* ── WEEKLY CHART ───────────────────────── */}
+      {/*  WEEKLY CHART  */}
       <div className="px-4 mb-4">
         <div className="card rounded-3xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-4">
@@ -329,14 +329,14 @@ export default function HomeScreen() {
         </div>
       </div>
 
-      {/* ── Quick Actions ── */}
+      {/*  Quick Actions  */}
       <div className="px-4 mb-6">
-        <h2 className="text-[#111827] font-bold text-base mb-3">Quick Actions</h2>
+        <h2 className="text-text-primary font-bold text-base mb-3">Quick Actions</h2>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <button
             onClick={() => navigate('/challenges')}
-            className="flex flex-col items-center gap-2 p-3.5 rounded-2xl active:scale-95 transition-transform"
+            className="flex flex-col items-center gap-2 p-4 rounded-2xl active:scale-95 transition-transform"
             style={{ background: '#4F9CF9', boxShadow: '0 4px 14px rgba(79,156,249,0.35)' }}
           >
             <div
@@ -350,17 +350,15 @@ export default function HomeScreen() {
 
           <button
             onClick={() => navigate('/challenges/lobby')}
-            className="flex flex-col items-center gap-2 p-3.5 rounded-2xl active:scale-95 transition-transform"
+            className="card flex flex-col items-center gap-2 p-4 rounded-2xl active:scale-95 transition-transform"
             style={{
-              background: '#FFFFFF',
               boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
-              border: '1px solid #F3F4F6',
             }}
           >
             <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: '#F5F3FF' }}>
               <Compass size={20} color="#A78BFA" />
             </div>
-            <p className="text-[#111827] text-xs font-bold text-center leading-tight">Discover{'\n'}Lobby</p>
+            <p className="text-text-primary text-xs font-bold text-center leading-tight">Discover{'\n'}Lobby</p>
           </button>
 
           <button
@@ -371,11 +369,9 @@ export default function HomeScreen() {
                 navigate('/challenges');
               }
             }}
-            className="flex flex-col items-center gap-2 p-3.5 rounded-2xl active:scale-95 transition-transform relative"
+            className="card flex flex-col items-center gap-2 p-4 rounded-2xl active:scale-95 transition-transform relative"
             style={{
-              background: '#FFFFFF',
               boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
-              border: '1px solid #F3F4F6',
             }}
           >
             {myResults?.has_results && myResults?.my_result?.payout_kes && Number(myResults.my_result.payout_kes) > 0 && (
@@ -383,36 +379,34 @@ export default function HomeScreen() {
                 className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center text-white"
                 style={{ background: '#34D399', fontSize: '8px', fontWeight: 700 }}
               >
-                ✓
+                
               </div>
             )}
             <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: '#FDF2F8' }}>
               <Trophy size={20} color="#F472B6" />
             </div>
-            <p className="text-[#111827] text-xs font-bold text-center leading-tight">My{'\n'}Results</p>
+            <p className="text-text-primary text-xs font-bold text-center leading-tight">My{'\n'}Results</p>
           </button>
 
           <button
             onClick={openGoalModal}
-            className="flex flex-col items-center gap-2 p-3.5 rounded-2xl active:scale-95 transition-transform"
+            className="card flex flex-col items-center gap-2 p-4 rounded-2xl active:scale-95 transition-transform"
             style={{
-              background: '#FFFFFF',
               boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
-              border: '1px solid #F3F4F6',
             }}
           >
             <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: '#FFFBEB' }}>
               <Target size={20} color="#FBBF24" />
             </div>
-            <p className="text-[#111827] text-xs font-bold text-center leading-tight">Daily{'\n'}Goal</p>
-            <p className="text-[#9CA3AF]" style={{ fontSize: '9px', marginTop: '-4px' }}>
+            <p className="text-text-primary text-xs font-bold text-center leading-tight">Daily{'\n'}Goal</p>
+            <p className="text-text-muted" style={{ fontSize: '9px', marginTop: '-4px' }}>
               {((user?.daily_goal || 10000) / 1000).toFixed(0)}K steps
             </p>
           </button>
         </div>
       </div>
 
-      {/* ── EARNED BADGES ──────────────────────── */}
+      {/*  EARNED BADGES  */}
       {myBadges.length > 0 && (
         <div className="px-4 mb-4">
           <div className="flex items-center justify-between mb-3">
@@ -445,7 +439,7 @@ export default function HomeScreen() {
         </div>
       )}
 
-      {/* ── Daily Goal Modal ── */}
+      {/*  Daily Goal Modal  */}
       {goalModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center"
@@ -454,14 +448,14 @@ export default function HomeScreen() {
             if (e.target === e.currentTarget) setGoalModalOpen(false);
           }}
         >
-          <div className="w-full rounded-t-3xl p-6 modal-enter" style={{ background: '#FFFFFF', maxWidth: '480px' }}>
+          <div className="w-full rounded-t-3xl p-6 modal-enter" style={{ background: 'hsl(var(--bg-card))', maxWidth: '480px' }}>
             <div className="w-10 h-1 rounded-full mx-auto mb-5" style={{ background: '#E5E7EB' }} />
 
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 className="text-[#111827] text-lg font-bold">Daily Step Goal</h3>
                 <p className="text-[#9CA3AF] text-xs mt-0.5">
-                  Sets your personal target — separate from challenge milestones
+                  Sets your personal target  separate from challenge milestones
                 </p>
               </div>
               <button
@@ -517,7 +511,7 @@ export default function HomeScreen() {
             </div>
 
             <p className="text-[#9CA3AF] text-xs mb-5">
-              Range: 1,000 — 60,000 steps · Current: {(user?.daily_goal || 10000).toLocaleString()} steps
+              Range: 1,000  60,000 steps  Current: {(user?.daily_goal || 10000).toLocaleString()} steps
             </p>
 
             {goalSuccess ? (
@@ -547,7 +541,7 @@ export default function HomeScreen() {
                 ) : (
                   <>
                     <Target size={16} />
-                    Set Goal to {parseInt(goalInput || '0', 10).toLocaleString() || '—'} steps
+                    Set Goal to {parseInt(goalInput || '0', 10).toLocaleString() || ''} steps
                   </>
                 )}
               </button>
@@ -556,7 +550,7 @@ export default function HomeScreen() {
         </div>
       )}
 
-      {/* ── My Results Bottom Sheet ── */}
+      {/*  My Results Bottom Sheet  */}
       {resultsOpen && myResults?.has_results && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center"
@@ -567,7 +561,7 @@ export default function HomeScreen() {
         >
           <div
             className="w-full rounded-t-3xl modal-enter overflow-hidden"
-            style={{ background: '#FFFFFF', maxWidth: '480px', maxHeight: '85vh' }}
+            style={{ background: 'hsl(var(--bg-card))', maxWidth: '480px', maxHeight: '85vh' }}
           >
             <div className="w-10 h-1 rounded-full mx-auto mt-4 mb-1" style={{ background: '#E5E7EB' }} />
 
@@ -591,7 +585,7 @@ export default function HomeScreen() {
                   const r = myResults.my_result;
                   const won = Number(r.payout_kes) > 0;
                   const isRefund = r.payout_method === 'refund';
-                  const medals = ['🥇', '🥈', '🥉'];
+                  const medals = ['', '', ''];
 
                   return (
                     <div
@@ -606,7 +600,7 @@ export default function HomeScreen() {
                       }}
                     >
                       <p className="text-xs font-bold mb-1" style={{ color: won || isRefund ? 'rgba(255,255,255,0.8)' : '#9CA3AF' }}>
-                        {isRefund ? 'REFUNDED' : won ? 'YOU WON 🎉' : 'DID NOT QUALIFY'}
+                        {isRefund ? 'REFUNDED' : won ? 'YOU WON ' : 'DID NOT QUALIFY'}
                       </p>
 
                       <p
@@ -624,7 +618,7 @@ export default function HomeScreen() {
                       <p className="text-sm" style={{ color: won || isRefund ? 'rgba(255,255,255,0.8)' : '#6B7280' }}>
                         {r.final_steps.toLocaleString()} steps
                         {r.final_rank
-                          ? ` · ${r.final_rank <= 3 ? medals[r.final_rank - 1] : `Rank #${r.final_rank}`}`
+                          ? `  ${r.final_rank <= 3 ? medals[r.final_rank - 1] : `Rank #${r.final_rank}`}`
                           : ''}
                       </p>
 
@@ -632,8 +626,8 @@ export default function HomeScreen() {
                         <div className="mt-2.5 rounded-xl p-2.5" style={{ background: 'rgba(255,255,255,0.2)' }}>
                           <p className="text-white text-xs leading-relaxed">
                             {r.payout_method === 'dead_heat'
-                              ? `Tied with ${r.tied_with_count} other(s) — prize pool split equally`
-                              : `Tied — broken by: ${r.tiebreaker_label}`}
+                              ? `Tied with ${r.tied_with_count} other(s)  prize pool split equally`
+                              : `Tied  broken by: ${r.tiebreaker_label}`}
                           </p>
                         </div>
                       )}
@@ -642,7 +636,7 @@ export default function HomeScreen() {
                 })()}
 
                 {myResults.summary && (
-                  <div className="grid grid-cols-3 gap-2 mb-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
                     {[
                       { label: 'Players', value: String(myResults.summary.total_participants) },
                       { label: 'Qualified', value: String(myResults.summary.qualified_count) },
@@ -658,11 +652,11 @@ export default function HomeScreen() {
 
                 {myResults.leaderboard && myResults.leaderboard.length > 0 && (
                   <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid #F3F4F6' }}>
-                    <p className="text-[#111827] text-xs font-bold px-4 py-2.5" style={{ borderBottom: '1px solid #F3F4F6', background: '#F9FAFB' }}>
+                    <p className="text-[#111827] text-xs font-bold px-4 py-2.5" style={{ borderBottom: '1px solid hsl(var(--border-light))', background: '#F9FAFB' }}>
                       Leaderboard
                     </p>
                     {myResults.leaderboard.slice(0, 5).map((r, i) => {
-                      const medals = ['🥇', '🥈', '🥉'];
+                      const medals = ['', '', ''];
                       const won = Number(r.payout_kes) > 0;
                       return (
                         <div
@@ -675,7 +669,7 @@ export default function HomeScreen() {
                             {r.final_rank && r.final_rank <= 3 ? (
                               medals[r.final_rank - 1]
                             ) : (
-                              <span className="text-[#9CA3AF] text-xs font-bold">{r.final_rank || '—'}</span>
+                              <span className="text-[#9CA3AF] text-xs font-bold">{r.final_rank || ''}</span>
                             )}
                           </span>
                           <div
@@ -686,14 +680,14 @@ export default function HomeScreen() {
                           </div>
                           <p className="flex-1 text-[#111827] text-sm font-semibold truncate">
                             {r.username}
-                            {r.tied_with_count > 0 && <span className="text-[#FBBF24] text-xs"> ·tie</span>}
+                            {r.tied_with_count > 0 && <span className="text-[#FBBF24] text-xs"> tie</span>}
                           </p>
                           <p className="text-xs font-bold flex-shrink-0" style={{ color: won ? '#34D399' : '#9CA3AF' }}>
                             {r.payout_method === 'refund'
                               ? 'Refund'
                               : won
                                 ? `KES ${Number(r.payout_kes).toLocaleString()}`
-                                : '—'}
+                                : ''}
                           </p>
                         </div>
                       );
@@ -722,3 +716,5 @@ export default function HomeScreen() {
     </div>
   );
 }
+
+

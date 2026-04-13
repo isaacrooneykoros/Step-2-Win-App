@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, Share2, MapPin, Flame, Footprints, Timer } from 'lucide-react';
@@ -20,7 +20,7 @@ export default function StepsDayDetailScreen() {
     enabled: !!date,
   });
 
-  // ── Header ──────────────────────────────────────────────────────────────
+  //  Header 
   const formattedDate = date
     ? new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
         weekday: 'long',
@@ -34,12 +34,12 @@ export default function StepsDayDetailScreen() {
     if (navigator.share) {
       navigator.share({
         title: `My steps on ${formattedDate}`,
-        text: `I walked ${data.total_steps.toLocaleString()} steps (${data.total_km} km) on ${formattedDate}! 🚶‍♂️ #Step2Win`,
+        text: `I walked ${data.total_steps.toLocaleString()} steps (${data.total_km} km) on ${formattedDate}!  #Step2Win`,
       });
     }
   };
 
-  // ── Loading ──────────────────────────────────────────────────────────────
+  //  Loading 
   if (isLoading)
     return (
       <div className="min-h-screen flex flex-col" style={{ background: '#F8F9FB' }}>
@@ -68,16 +68,16 @@ export default function StepsDayDetailScreen() {
 
   return (
     <div className="min-h-screen pb-10" style={{ background: '#F8F9FB' }}>
-      {/* ── Header ── */}
+      {/*  Header  */}
       <DayDetailHeader date={formattedDate} onBack={() => navigate(-1)} onShare={handleShare} />
 
-      {/* ── Goal Banner ── */}
+      {/*  Goal Banner  */}
       {data.goal_achieved && (
         <div
           className="mx-4 mb-4 rounded-2xl px-4 py-3 flex items-center gap-3"
           style={{ background: 'linear-gradient(135deg, #34D399 0%, #10B981 100%)' }}
         >
-          <span className="text-2xl">🏆</span>
+          <span className="text-2xl"></span>
           <div>
             <p className="text-white text-sm font-bold">Daily Goal Achieved!</p>
             <p className="text-green-100 text-xs">
@@ -87,27 +87,27 @@ export default function StepsDayDetailScreen() {
         </div>
       )}
 
-      {/* ── Stat Chips ── */}
+      {/*  Stat Chips  */}
       <StatChips data={data} />
 
-      {/* ── Hourly Chart ── */}
+      {/*  Hourly Chart  */}
       <SectionCard
         title="Hourly Breakdown"
         subtitle={
           data.peak_hour !== null
-            ? `Peak at ${formatHour(data.peak_hour)} · ${data.peak_steps.toLocaleString()} steps`
+            ? `Peak at ${formatHour(data.peak_hour)}  ${data.peak_steps.toLocaleString()} steps`
             : 'No activity recorded'
         }
       >
         <HourlyBarChart hourly={data.hourly} peakHour={data.peak_hour} />
       </SectionCard>
 
-      {/* ── Hour-by-Hour List ── */}
+      {/*  Hour-by-Hour List  */}
       <SectionCard title="Hour by Hour" subtitle="Active hours only">
         <HourList hourly={data.hourly} peakHour={data.peak_hour} />
       </SectionCard>
 
-      {/* ── Location Map ── */}
+      {/*  Location Map  */}
       <SectionCard
         title="Movement Map"
         subtitle={
@@ -122,7 +122,7 @@ export default function StepsDayDetailScreen() {
   );
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+//  Sub-components 
 
 function DayDetailHeader({
   date,
@@ -138,7 +138,7 @@ function DayDetailHeader({
       <button
         onClick={onBack}
         className="w-9 h-9 rounded-xl flex items-center justify-center"
-        style={{ background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+        style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
       >
         <ChevronLeft size={20} color="#111827" />
       </button>
@@ -149,7 +149,7 @@ function DayDetailHeader({
       <button
         onClick={onShare}
         className="w-9 h-9 rounded-xl flex items-center justify-center"
-        style={{ background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+        style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
       >
         <Share2 size={16} color="#111827" />
       </button>
@@ -190,12 +190,12 @@ function StatChips({ data }: { data: DayDetail }) {
   ];
 
   return (
-    <div className="grid grid-cols-4 gap-2 px-4 mb-4">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-4 mb-4">
       {chips.map((chip) => (
         <div
           key={chip.label}
           className="rounded-2xl p-3 flex flex-col items-center gap-1"
-          style={{ background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
+          style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
         >
           <div
             className="w-7 h-7 rounded-lg flex items-center justify-center"
@@ -223,7 +223,7 @@ function SectionCard({
   return (
     <div
       className="mx-4 mb-4 rounded-2xl overflow-hidden"
-      style={{ background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
+      style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
     >
       <div className="px-4 pt-4 pb-3">
         <p className="text-[#111827] text-sm font-bold">{title}</p>
@@ -234,17 +234,17 @@ function SectionCard({
   );
 }
 
-// ── Hourly Bar Chart ──────────────────────────────────────────────────────────
+//  Hourly Bar Chart 
 
 function HourlyBarChart({ hourly, peakHour }: { hourly: HourlyStep[]; peakHour: number | null }) {
-  // Build a map of hour → steps for all 24 hours
+  // Build a map of hour  steps for all 24 hours
   const stepsByHour: Record<number, number> = {};
   hourly.forEach((h) => {
     stepsByHour[h.hour] = h.steps;
   });
   const maxSteps = Math.max(...hourly.map((h) => h.steps), 1);
 
-  // Show hours 5AM–11PM (hours 5–23) — typical waking hours
+  // Show hours 5AM11PM (hours 523)  typical waking hours
   const displayHours = Array.from({ length: 19 }, (_, i) => i + 5);
 
   const [selectedHour, setSelectedHour] = useState<number | null>(peakHour);
@@ -305,7 +305,7 @@ function HourlyBarChart({ hourly, peakHour }: { hourly: HourlyStep[]; peakHour: 
         })}
       </div>
 
-      {/* X-axis labels — show every 3 hours */}
+      {/* X-axis labels  show every 3 hours */}
       <div className="flex items-end gap-0.5 mt-1">
         {displayHours.map((hour) => (
           <div key={hour} className="flex-1 flex justify-center" style={{ minWidth: 0 }}>
@@ -321,7 +321,7 @@ function HourlyBarChart({ hourly, peakHour }: { hourly: HourlyStep[]; peakHour: 
   );
 }
 
-// ── Hour-by-Hour List ─────────────────────────────────────────────────────────
+//  Hour-by-Hour List 
 
 function HourList({ hourly, peakHour }: { hourly: HourlyStep[]; peakHour: number | null }) {
   const activeHours = hourly.filter((h) => h.steps > 0).sort((a, b) => a.hour - b.hour);
@@ -385,7 +385,7 @@ function HourList({ hourly, peakHour }: { hourly: HourlyStep[]; peakHour: number
   );
 }
 
-// ── No Map State ──────────────────────────────────────────────────────────────
+//  No Map State 
 
 function NoMapState() {
   return (
@@ -404,7 +404,7 @@ function NoMapState() {
   );
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+//  Helpers 
 
 function formatHour(hour: number): string {
   if (hour === 0) return '12AM';
@@ -412,3 +412,5 @@ function formatHour(hour: number): string {
   if (hour < 12) return `${hour}AM`;
   return `${hour - 12}PM`;
 }
+
+

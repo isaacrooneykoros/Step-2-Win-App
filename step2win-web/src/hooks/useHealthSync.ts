@@ -113,7 +113,10 @@ export function useHealthSync() {
       const shouldAutoEnable = !hasAttemptedAutoEnableRef.current || permissionStatus !== 'granted';
       if (shouldAutoEnable) {
         hasAttemptedAutoEnableRef.current = true;
-        const enabled = await connectDevice({ silent: true });
+        if (options?.silent) {
+          return;
+        }
+        const enabled = await connectDevice();
         if (!enabled) {
           return;
         }
