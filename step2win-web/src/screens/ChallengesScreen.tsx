@@ -6,6 +6,7 @@ import { challengesService } from '../services/api';
 import { useToast } from '../components/ui/Toast';
 import { useAuthStore } from '../store/authStore';
 import { BaseModal } from '../components/ui/BaseModal';
+import { checkCameraPermission, requestCameraPermission, type CameraPermissionState } from '../services/cameraPermissions';
 import type { Challenge } from '../types';
 import { formatKES } from '../utils/currency';
 
@@ -32,6 +33,8 @@ export default function ChallengesScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [joinTab, setJoinTab] = useState<'manual' | 'qr'>('manual');
   const [inviteCode, setInviteCode] = useState('');
+  const [cameraPermission, setCameraPermission] = useState<CameraPermissionState>('prompt');
+  const [isRequestingCamera, setIsRequestingCamera] = useState(false);
   const [createForm, setCreateForm] = useState({
     name: '',
     milestone: '50000',
@@ -166,6 +169,41 @@ export default function ChallengesScreen() {
     }
   };
 
+  const clearScanner = () => {
+    if (scannerRef.current) {
+      try {
+        scannerRef.current.clear();
+      } catch (error) {
+        console.warn('Error clearing scanner:', error);
+      } finally {
+        scannerRef.current = null;
+      }
+    }
+  };
+
+  const ensureCameraAccess = async () => {
+    setIsRequestingCamera(true);
+    try {
+      const initial = await checkCameraPermission();
+      if (initial === 'granted') {
+        setCameraPermission('granted');
+        return true;
+      }
+
+      const granted = await requestCameraPermission();
+      const next = granted ? 'granted' : 'denied';
+      setCameraPermission(next);
+
+      if (!granted) {
+        showToast({ message: 'Camera permission is required to scan QR codes.', type: 'error' });
+      }
+
+      return granted;
+    } finally {
+      setIsRequestingCamera(false);
+    }
+  };
+
   const downloadQRCode = () => {
     const canvas = document.getElementById('challenge-qr-canvas') as HTMLCanvasElement;
     if (canvas) {
@@ -199,6 +237,12 @@ export default function ChallengesScreen() {
     if (joinTab === 'qr' && showJoinModal) {
       const initScanner = async () => {
         try {
+          const canScan = await ensureCameraAccess();
+          if (!canScan) {
+            clearScanner();
+            return;
+          }
+
           if (!scannerRef.current) {
             const { Html5QrcodeScanner } = await import('html5-qrcode');
 
@@ -232,12 +276,8 @@ export default function ChallengesScreen() {
     }
 
     return () => {
-      if (scannerRef.current && !showJoinModal) {
-        try {
-          scannerRef.current.clear();
-        } catch (error) {
-          console.warn('Error clearing scanner:', error);
-        }
+      if (!showJoinModal || joinTab !== 'qr') {
+        clearScanner();
       }
     };
   }, [joinTab, showJoinModal]);
@@ -375,7 +415,7 @@ export default function ChallengesScreen() {
       <BaseModal open={showJoinModal} onClose={() => {
         setShowJoinModal(false);
         setJoinTab('manual');
-        if (scannerRef.current) scannerRef.current.clear();
+        clearScanner();
       }}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-2xl font-black text-text-primary">Join Challenge</h2>
@@ -383,7 +423,7 @@ export default function ChallengesScreen() {
             onClick={() => {
               setShowJoinModal(false);
               setJoinTab('manual');
-              if (scannerRef.current) scannerRef.current.clear();
+              clearScanner();
             }}
             className="text-text-muted hover:text-text-primary"
           >
@@ -446,6 +486,11 @@ export default function ChallengesScreen() {
         ) : (
           <>
             <p className="text-sm text-text-muted mb-4">Point your camera at the QR code</p>
+            {cameraPermission === 'denied' && (
+              <div className="mb-4 rounded-xl border border-red-200 bg-tint-red px-3 py-2 text-xs text-accent-red">
+                Camera permission is blocked. Tap retry below and allow camera access to continue.
+              </div>
+            )}
             <div id="qr-scanner" className="mb-6 rounded-2xl overflow-hidden bg-black" style={{ height: '300px' }} />
             <div className="flex gap-3">
               <button
@@ -453,6 +498,15 @@ export default function ChallengesScreen() {
                 className="flex-1 btn-secondary py-3 rounded-2xl"
               >
                 Cancel
+              </button>
+              <button
+                onClick={() => {
+                  void ensureCameraAccess();
+                }}
+                disabled={isRequestingCamera}
+                className="flex-1 btn-secondary py-3 rounded-2xl disabled:opacity-40"
+              >
+                {isRequestingCamera ? 'Requesting...' : 'Retry Camera'}
               </button>
               {inviteCode && (
                 <button

@@ -34,7 +34,7 @@ export default function StepsDetailScreen() {
 
   // Prepare chart data
   const todayStr = new Date().toISOString().split('T')[0];
-  const chartData = history || [];
+  const chartData = [...(history || [])].sort((a, b) => a.date.localeCompare(b.date));
 
   if (isLoadingSummary) {
     return (
@@ -251,11 +251,9 @@ export default function StepsDetailScreen() {
 // Helper function for chart labels
 function formatChartLabel(dateStr: string, period: StepsPeriod): string {
   const date = new Date(dateStr);
-  if (period === '1d')
-    return date.toLocaleTimeString('en-US', { hour: 'numeric' });
-  if (period === '1w')
-    return ['M', 'T', 'W', 'T', 'F', 'S', 'S'][date.getDay()];
-  if (period === '1m') return date.getDate().toString();
+  if (period === '1d') return 'Today';
+  if (period === '1w') return date.toLocaleDateString('en-US', { weekday: 'short' });
+  if (period === '1m') return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   if (period === '3m')
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   return date.toLocaleDateString('en-US', { month: 'short' });

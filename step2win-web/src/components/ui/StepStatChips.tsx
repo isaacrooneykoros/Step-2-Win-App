@@ -10,17 +10,17 @@ export function StepStatChips({ distance, calories, activeMins }: Props) {
   const stats = [
     {
       Icon: MapPin,
-      value: distance ? `${distance.toFixed(1)} km` : '— km',
+      value: distance !== null && distance !== undefined ? `${distance.toFixed(1)} km` : '— km',
       label: 'Distance',
     },
     {
       Icon: Flame,
-      value: calories ? `${calories.toLocaleString()} kcal` : '— kcal',
+      value: calories !== null && calories !== undefined ? `${calories.toLocaleString()} kcal` : '— kcal',
       label: 'Calories',
     },
     {
       Icon: Zap,
-      value: activeMins ? `${activeMins} min` : '— min',
+      value: activeMins !== null && activeMins !== undefined ? `${activeMins} min` : '— min',
       label: 'Active',
     },
   ];

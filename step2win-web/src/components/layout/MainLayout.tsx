@@ -175,8 +175,8 @@ export default function MainLayout() {
             <AlertCircle size={16} className="text-yellow-600 flex-shrink-0" />
             <p className="text-xs text-yellow-800 flex-1">
               {globalPermissionStatus.activityRecognition === 'denied'
-                ? 'Step tracking disabled. Enable in Settings → Permissions.'
-                : 'Enable step tracking to start counting your steps.'}
+                ? 'Physical activity permission is disabled. Enable it in Settings → Permissions.'
+                : 'Enable physical activity permission to start counting your steps.'}
             </p>
           </div>
         </div>

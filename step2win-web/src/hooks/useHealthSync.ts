@@ -10,6 +10,7 @@ import { DeviceStepCounter } from '../plugins/deviceStepCounter';
 import type { User } from '../types';
 
 const APP_SIGNING_SECRET = import.meta.env.VITE_APP_SIGNING_SECRET || '';
+const HOURLY_SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
 function buildSignedHeaders(userId: string, body: object): Record<string, string> {
   const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -55,9 +56,41 @@ export function useHealthSync() {
   const hasAttemptedAutoEnableRef = useRef(false);
   const syncInFlightRef = useRef(false);
   const lastSyncedFingerprintRef = useRef('');
+  const lastHourlySyncAtRef = useRef(0);
+  const hourlyBaselineRef = useRef<{ key: string; baselineSteps: number }>({ key: '', baselineSteps: 0 });
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const userId = useAuthStore((state) => state.user?.id);
+
+  const refreshPermissionStatus = useCallback(async () => {
+    const platform = Capacitor.getPlatform();
+    if (platform !== 'android') {
+      setPermissionStatus('unavailable');
+      return 'unavailable' as const;
+    }
+
+    try {
+      const status = await DeviceStepCounter.checkPermissions();
+      setPermissionStatus(status.activityRecognition === 'granted' ? 'granted' : 'denied');
+      return status.activityRecognition;
+    } catch {
+      setPermissionStatus('denied');
+      return 'denied' as const;
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshPermissionStatus();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshPermissionStatus();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [refreshPermissionStatus]);
 
   const connectDevice = useCallback(async (options?: { silent?: boolean }) => {
     const platform = Capacitor.getPlatform();
@@ -79,9 +112,9 @@ export function useHealthSync() {
       await DeviceStepCounter.startBackgroundCapture().catch(() => ({ running: false }));
       await DeviceStepCounter.getTodaySteps();
 
-      setPermissionStatus('granted');
+      await refreshPermissionStatus();
       if (!options?.silent) {
-        showToast({ message: 'Step sensor access enabled.', type: 'success' });
+        showToast({ message: 'Physical activity permission enabled. Step tracking is ready.', type: 'success' });
       }
       return true;
     } catch (error) {
@@ -93,7 +126,7 @@ export function useHealthSync() {
     } finally {
       setIsConnectingDevice(false);
     }
-  }, [showToast]);
+  }, [refreshPermissionStatus, showToast]);
 
   const runSyncHealth = useCallback(async (options?: { silent?: boolean }) => {
     if (syncInFlightRef.current) {
@@ -148,6 +181,50 @@ export function useHealthSync() {
       await stepsService.syncHealth(data, buildSignedHeaders(String(userId ?? ''), data));
       lastSyncedFingerprintRef.current = fingerprint;
 
+      const now = Date.now();
+      const shouldSyncHourly = !options?.silent || now - lastHourlySyncAtRef.current >= HOURLY_SYNC_MIN_INTERVAL_MS;
+      if (shouldSyncHourly) {
+        try {
+          const pendingWaypoints = await DeviceStepCounter.getPendingWaypoints().catch(() => ({
+            date: data.date,
+            waypoints: [],
+          }));
+          const hourlySnapshot = buildHourlySnapshot(data, hourlyBaselineRef.current);
+          hourlyBaselineRef.current = {
+            key: `${data.date}:${hourlySnapshot.hour}`,
+            baselineSteps: hourlySnapshot.baselineSteps,
+          };
+
+          if (pendingWaypoints.waypoints.length > 0 && pendingWaypoints.date !== data.date) {
+            await stepsService.syncHourly({
+              date: pendingWaypoints.date,
+              hourly: [],
+              waypoints: pendingWaypoints.waypoints,
+            });
+            await DeviceStepCounter.clearPendingWaypoints().catch(() => ({ cleared: false }));
+          }
+
+          await stepsService.syncHourly({
+            date: data.date,
+            hourly: [{
+              hour: hourlySnapshot.hour,
+              steps: hourlySnapshot.steps,
+              distance_km: hourlySnapshot.distance_km,
+              calories: hourlySnapshot.calories,
+            }],
+            waypoints: pendingWaypoints.date === data.date ? pendingWaypoints.waypoints : [],
+          });
+
+          if (pendingWaypoints.waypoints.length > 0 && pendingWaypoints.date === data.date) {
+            await DeviceStepCounter.clearPendingWaypoints().catch(() => ({ cleared: false }));
+          }
+
+          lastHourlySyncAtRef.current = now;
+        } catch (hourlyError) {
+          console.warn('Hourly/waypoint sync skipped:', hourlyError);
+        }
+      }
+
       await queryClient.invalidateQueries({ queryKey: ['health'] });
       await queryClient.invalidateQueries({ queryKey: ['steps'] });
       await queryClient.invalidateQueries({ queryKey: ['challenges'] });
@@ -174,7 +251,7 @@ export function useHealthSync() {
   const syncHealth = useCallback(() => runSyncHealth(), [runSyncHealth]);
   const syncHealthSilent = useCallback(() => runSyncHealth({ silent: true }), [runSyncHealth]);
 
-  return { syncHealth, syncHealthSilent, connectDevice, isSyncing, isConnectingDevice, permissionStatus };
+  return { syncHealth, syncHealthSilent, connectDevice, isSyncing, isConnectingDevice, permissionStatus, refreshPermissionStatus };
 }
 
 export function useAutoHealthSync(intervalMs: number = 1000) {
@@ -250,6 +327,35 @@ async function ensureAndroidStepPermissions() {
 
   const requested = await DeviceStepCounter.requestPermissions();
   if (requested.activityRecognition !== 'granted') {
-    throw new Error('Activity recognition permission is required to count your steps.');
+    throw new Error('Physical activity permission is required to count your steps.');
   }
+}
+
+function buildHourlySnapshot(data: {
+  date: string;
+  steps: number;
+  distance_km?: number | null;
+  calories_active?: number | null;
+}, state: { key: string; baselineSteps: number }) {
+  const hour = new Date().getHours();
+  const key = `${data.date}:${hour}`;
+  const totalSteps = Math.max(0, Math.round(Number(data.steps) || 0));
+
+  let baselineSteps = state.baselineSteps;
+  if (state.key !== key) {
+    baselineSteps = totalSteps;
+  }
+
+  const hourlySteps = Math.max(0, totalSteps - baselineSteps);
+  const ratio = totalSteps > 0 ? hourlySteps / totalSteps : 0;
+  const totalDistance = Math.max(0, Number(data.distance_km) || 0);
+  const totalCalories = Math.max(0, Number(data.calories_active) || 0);
+
+  return {
+    hour: Number.isFinite(hour) ? hour : 0,
+    steps: hourlySteps,
+    distance_km: Number((totalDistance * ratio).toFixed(3)),
+    calories: Number((totalCalories * ratio).toFixed(1)),
+    baselineSteps,
+  };
 }

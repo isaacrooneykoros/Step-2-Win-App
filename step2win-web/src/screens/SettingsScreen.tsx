@@ -28,6 +28,14 @@ import { useHealthSync } from '../hooks/useHealthSync';
 import type { User } from '../types';
 import { applyThemeMode, loadThemeMode, saveThemeMode, type ThemeMode } from '../config/theme';
 import { checkNotificationPermission, requestNotificationPermission, syncReminderNotifications } from '../services/notifications';
+import { checkCameraPermission, requestCameraPermission, type CameraPermissionState } from '../services/cameraPermissions';
+import {
+  checkAdvancedPermissionSnapshot,
+  openExactAlarmPermissionSettings,
+  requestBackgroundLocationPermission,
+  requestForegroundLocationPermission,
+  type LocationPermissionState,
+} from '../services/locationPermissions';
 import { DeviceStepCounter } from '../plugins/deviceStepCounter';
 
 type PreferencesState = {
@@ -77,6 +85,10 @@ export default function SettingsScreen() {
   const [preferences, setPreferences] = useState<PreferencesState>(() => loadPreferences());
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
   const [notificationPermission, setNotificationPermission] = useState<'prompt' | 'prompt-with-rationale' | 'granted' | 'denied' | 'unavailable'>('prompt');
+  const [cameraPermission, setCameraPermission] = useState<CameraPermissionState>('prompt');
+  const [locationPermission, setLocationPermission] = useState<LocationPermissionState>('prompt');
+  const [backgroundLocationPermission, setBackgroundLocationPermission] = useState<LocationPermissionState>('prompt');
+  const [exactAlarmPermission, setExactAlarmPermission] = useState<'granted' | 'denied' | 'unavailable'>('unavailable');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showStrideWizard, setShowStrideWizard] = useState(false);
@@ -145,14 +157,23 @@ export default function SettingsScreen() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadPermission = async () => {
-      const status = await checkNotificationPermission();
+    const loadPermissions = async () => {
+      const [notificationStatus, cameraStatus, advancedStatus] = await Promise.all([
+        checkNotificationPermission(),
+        checkCameraPermission(),
+        checkAdvancedPermissionSnapshot(),
+      ]);
+
       if (!cancelled) {
-        setNotificationPermission(status);
+        setNotificationPermission(notificationStatus);
+        setCameraPermission(cameraStatus);
+        setLocationPermission(advancedStatus.location);
+        setBackgroundLocationPermission(advancedStatus.backgroundLocation);
+        setExactAlarmPermission(advancedStatus.exactAlarm);
       }
     };
 
-    loadPermission();
+    loadPermissions();
 
     return () => {
       cancelled = true;
@@ -207,8 +228,8 @@ export default function SettingsScreen() {
   });
 
   const deviceStatus = useMemo(() => {
-    if (permissionStatus === 'granted') return { label: 'Connected', dot: 'bg-accent-green' };
-    if (permissionStatus === 'denied') return { label: 'Permission Required', dot: 'bg-accent-red' };
+    if (permissionStatus === 'granted') return { label: 'Physical activity enabled', dot: 'bg-accent-green' };
+    if (permissionStatus === 'denied') return { label: 'Physical activity required', dot: 'bg-accent-red' };
     if (permissionStatus === 'unavailable') return { label: 'Mobile app required', dot: 'bg-text-muted' };
     return { label: 'Initializing', dot: 'bg-accent-yellow' };
   }, [permissionStatus]);
@@ -238,6 +259,61 @@ export default function SettingsScreen() {
     }
 
     showToast({ message: 'Notification permission was not granted.', type: 'error' });
+  };
+
+  const onRequestCameraPermission = async () => {
+    const granted = await requestCameraPermission();
+    const status = granted ? 'granted' : 'denied';
+    setCameraPermission(status);
+
+    if (granted) {
+      showToast({ message: 'Camera permission enabled for QR scanning.', type: 'success' });
+      return;
+    }
+
+    showToast({ message: 'Camera permission was not granted.', type: 'error' });
+  };
+
+  const onRequestForegroundLocation = async () => {
+    const granted = await requestForegroundLocationPermission();
+    const updated = await checkAdvancedPermissionSnapshot();
+    setLocationPermission(updated.location);
+    setBackgroundLocationPermission(updated.backgroundLocation);
+    setExactAlarmPermission(updated.exactAlarm);
+
+    if (granted) {
+      showToast({ message: 'Location access enabled.', type: 'success' });
+      return;
+    }
+    showToast({ message: 'Location permission was not granted.', type: 'error' });
+  };
+
+  const onRequestBackgroundLocation = async () => {
+    const granted = await requestBackgroundLocationPermission();
+    const updated = await checkAdvancedPermissionSnapshot();
+    setLocationPermission(updated.location);
+    setBackgroundLocationPermission(updated.backgroundLocation);
+    setExactAlarmPermission(updated.exactAlarm);
+
+    if (granted) {
+      showToast({ message: 'Background location access enabled.', type: 'success' });
+      return;
+    }
+    showToast({ message: 'Background location permission was not granted.', type: 'error' });
+  };
+
+  const onOpenExactAlarmSettings = async () => {
+    const opened = await openExactAlarmPermissionSettings();
+    if (!opened) {
+      showToast({ message: 'Exact alarm settings are not available on this device.', type: 'warning' });
+      return;
+    }
+
+    showToast({ message: 'Opened exact alarm settings. Enable precise alarms then return.', type: 'success' });
+    window.setTimeout(async () => {
+      const updated = await checkAdvancedPermissionSnapshot();
+      setExactAlarmPermission(updated.exactAlarm);
+    }, 1200);
   };
 
   const onSavePassword = () => {
@@ -497,7 +573,7 @@ export default function SettingsScreen() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <p className="text-text-primary text-sm font-semibold">Step tracking</p>
-              <p className="text-text-muted text-xs">Uses motion sensor + activity recognition permission to measure steps directly on your device.</p>
+              <p className="text-text-muted text-xs">Uses the physical activity permission and motion sensors to measure steps directly on your device.</p>
             </div>
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${deviceStatus.dot}`} />
@@ -509,7 +585,85 @@ export default function SettingsScreen() {
             disabled={isConnectingDevice || permissionStatus === 'granted'}
             className="w-full btn-primary py-3 rounded-2xl disabled:opacity-50"
           >
-            {permissionStatus === 'granted' ? 'Step sensor connected' : isConnectingDevice ? 'Requesting...' : 'Enable step sensor'}
+            {permissionStatus === 'granted' ? 'Physical activity enabled' : isConnectingDevice ? 'Requesting...' : 'Enable physical activity'}
+          </button>
+
+          <div className="flex items-center justify-between mt-4 mb-3">
+            <div>
+              <p className="text-text-primary text-sm font-semibold">QR camera access</p>
+              <p className="text-text-muted text-xs">Required to scan challenge invite QR codes.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${cameraPermission === 'granted' ? 'bg-accent-green' : cameraPermission === 'denied' ? 'bg-accent-red' : 'bg-accent-yellow'}`} />
+              <span className="text-xs text-text-secondary">
+                {cameraPermission === 'granted' ? 'Enabled' : cameraPermission === 'denied' ? 'Permission required' : 'Available'}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={onRequestCameraPermission}
+            className="w-full btn-secondary py-3 rounded-2xl"
+          >
+            {cameraPermission === 'granted' ? 'Refresh camera access' : 'Enable QR camera'}
+          </button>
+
+          <div className="flex items-center justify-between mt-4 mb-3">
+            <div>
+              <p className="text-text-primary text-sm font-semibold">Route location (fine/coarse)</p>
+              <p className="text-text-muted text-xs">Used to capture route waypoints for step map visualization.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${locationPermission === 'granted' ? 'bg-accent-green' : locationPermission === 'denied' ? 'bg-accent-red' : 'bg-accent-yellow'}`} />
+              <span className="text-xs text-text-secondary">
+                {locationPermission === 'granted' ? 'Enabled' : locationPermission === 'denied' ? 'Permission required' : 'Available'}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={onRequestForegroundLocation}
+            className="w-full btn-secondary py-3 rounded-2xl"
+          >
+            {locationPermission === 'granted' ? 'Refresh location access' : 'Enable route location'}
+          </button>
+
+          <div className="flex items-center justify-between mt-4 mb-3">
+            <div>
+              <p className="text-text-primary text-sm font-semibold">Background location</p>
+              <p className="text-text-muted text-xs">Allows route updates while the app is not in the foreground.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${backgroundLocationPermission === 'granted' ? 'bg-accent-green' : backgroundLocationPermission === 'denied' ? 'bg-accent-red' : 'bg-accent-yellow'}`} />
+              <span className="text-xs text-text-secondary">
+                {backgroundLocationPermission === 'granted' ? 'Enabled' : backgroundLocationPermission === 'denied' ? 'Permission required' : 'Available'}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={onRequestBackgroundLocation}
+            disabled={locationPermission !== 'granted'}
+            className="w-full btn-secondary py-3 rounded-2xl disabled:opacity-50"
+          >
+            {backgroundLocationPermission === 'granted' ? 'Refresh background location' : 'Enable background location'}
+          </button>
+
+          <div className="flex items-center justify-between mt-4 mb-3">
+            <div>
+              <p className="text-text-primary text-sm font-semibold">Exact alarm scheduling</p>
+              <p className="text-text-muted text-xs">Required for precise reminder delivery on Android 12+.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${exactAlarmPermission === 'granted' ? 'bg-accent-green' : exactAlarmPermission === 'denied' ? 'bg-accent-red' : 'bg-text-muted'}`} />
+              <span className="text-xs text-text-secondary">
+                {exactAlarmPermission === 'granted' ? 'Enabled' : exactAlarmPermission === 'denied' ? 'Permission required' : 'Unavailable'}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={onOpenExactAlarmSettings}
+            disabled={exactAlarmPermission === 'unavailable'}
+            className="w-full btn-secondary py-3 rounded-2xl disabled:opacity-50"
+          >
+            {exactAlarmPermission === 'granted' ? 'Open exact alarm settings' : 'Enable exact alarms'}
           </button>
         </div>
       </div>
