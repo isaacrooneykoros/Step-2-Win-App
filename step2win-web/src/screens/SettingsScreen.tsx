@@ -18,6 +18,11 @@ import {
   LogOut,
   Activity,
   Monitor,
+  BarChart3,
+  Footprints,
+  Wallet,
+  Trophy,
+  ChevronRight,
 } from 'lucide-react';
 import { authService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
@@ -46,6 +51,8 @@ type PreferencesState = {
   reduceMotion: boolean;
   dataSaver: boolean;
 };
+
+type SettingsSection = 'account' | 'permissions' | 'theme' | 'notifications' | 'preferences' | 'help-legal';
 
 const PREFS_KEY = 'app_preferences_v1';
 
@@ -83,6 +90,7 @@ export default function SettingsScreen() {
   const { connectDevice, isConnectingDevice, permissionStatus } = useHealthSync();
 
   const [preferences, setPreferences] = useState<PreferencesState>(() => loadPreferences());
+  const [activeSection, setActiveSection] = useState<SettingsSection>('account');
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
   const [notificationPermission, setNotificationPermission] = useState<'prompt' | 'prompt-with-rationale' | 'granted' | 'denied' | 'unavailable'>('prompt');
   const [cameraPermission, setCameraPermission] = useState<CameraPermissionState>('prompt');
@@ -542,6 +550,107 @@ export default function SettingsScreen() {
       </div>
 
       <div className="px-4 pb-4">
+        <div className="card rounded-3xl p-4 overflow-hidden relative">
+          <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-r from-accent-blue/10 via-accent-purple/10 to-accent-yellow/10 pointer-events-none" />
+          <div className="relative">
+            <p className="text-xs uppercase tracking-widest text-text-muted mb-2">Dashboard</p>
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-text-primary text-lg font-bold">Control Center</h2>
+                <p className="text-xs text-text-muted mt-1 max-w-sm">
+                  Jump straight to your main areas or open the detailed settings panels below.
+                </p>
+              </div>
+              <button
+                onClick={() => navigate('/profile/analytics')}
+                className="shrink-0 rounded-full px-3 py-2 text-xs font-semibold bg-bg-input text-text-primary border border-border"
+              >
+                Analytics
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <DashboardTile
+                icon={<BarChart3 size={18} className="text-accent-blue" />}
+                title="Analytics"
+                subtitle="Steps, earnings, and standing"
+                onClick={() => navigate('/profile/analytics')}
+                accent="from-accent-blue/15 to-accent-blue/5"
+              />
+              <DashboardTile
+                icon={<Footprints size={18} className="text-accent-green" />}
+                title="Step Details"
+                subtitle="History and charts"
+                onClick={() => navigate('/steps')}
+                accent="from-accent-green/15 to-accent-green/5"
+              />
+              <DashboardTile
+                icon={<Wallet size={18} className="text-accent-yellow" />}
+                title="Wallet"
+                subtitle="Balance and payouts"
+                onClick={() => navigate('/wallet')}
+                accent="from-accent-yellow/15 to-accent-yellow/5"
+              />
+              <DashboardTile
+                icon={<Trophy size={18} className="text-accent-pink" />}
+                title="Challenges"
+                subtitle="Join and compete"
+                onClick={() => navigate('/challenges')}
+                accent="from-accent-pink/15 to-accent-pink/5"
+              />
+            </div>
+
+            <p className="text-xs uppercase tracking-widest text-text-muted mb-3">Settings Sections</p>
+            <div className="space-y-2">
+              <SectionNavButton
+                icon={<Mail size={16} />}
+                label="Account"
+                subtitle="Profile, passwords, and sessions"
+                active={activeSection === 'account'}
+                onClick={() => setActiveSection('account')}
+              />
+              <SectionNavButton
+                icon={<Shield size={16} />}
+                label="Permissions"
+                subtitle="Sensor, camera, location, alarms"
+                active={activeSection === 'permissions'}
+                onClick={() => setActiveSection('permissions')}
+              />
+              <SectionNavButton
+                icon={<Moon size={16} />}
+                label="Theme"
+                subtitle="Appearance and visual mode"
+                active={activeSection === 'theme'}
+                onClick={() => setActiveSection('theme')}
+              />
+              <SectionNavButton
+                icon={<Bell size={16} />}
+                label="Notifications"
+                subtitle="Reminder and payout alerts"
+                active={activeSection === 'notifications'}
+                onClick={() => setActiveSection('notifications')}
+              />
+              <SectionNavButton
+                icon={<Activity size={16} />}
+                label="App Preferences"
+                subtitle="Biometrics, motion, data saver"
+                active={activeSection === 'preferences'}
+                onClick={() => setActiveSection('preferences')}
+              />
+              <SectionNavButton
+                icon={<LifeBuoy size={16} />}
+                label="Help & Legal"
+                subtitle="Support and policy documents"
+                active={activeSection === 'help-legal'}
+                onClick={() => setActiveSection('help-legal')}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {activeSection === 'account' && (
+      <div className="px-4 pb-4">
         <div className="card rounded-3xl p-4">
           <p className="text-xs uppercase tracking-widest text-text-muted mb-3">Account</p>
           <div className="space-y-2">
@@ -560,7 +669,9 @@ export default function SettingsScreen() {
           </div>
         </div>
       </div>
+      )}
 
+      {activeSection === 'permissions' && (
       <div className="px-4 pb-4">
         <div className="card rounded-3xl p-4">
           <p className="text-xs uppercase tracking-widest text-text-muted mb-3">Permissions</p>
@@ -667,7 +778,9 @@ export default function SettingsScreen() {
           </button>
         </div>
       </div>
+      )}
 
+      {activeSection === 'theme' && (
       <div className="px-4 pb-4">
         <div className="card rounded-3xl p-4">
           <p className="text-xs uppercase tracking-widest text-text-muted mb-3">Theme</p>
@@ -691,7 +804,13 @@ export default function SettingsScreen() {
               onClick={() => onSelectTheme('dark')}
             />
           </div>
+        </div>
+      </div>
+      )}
 
+      {activeSection === 'notifications' && (
+      <div className="px-4 pb-4">
+        <div className="card rounded-3xl p-4">
           <p className="text-xs uppercase tracking-widest text-text-muted mb-3">Notifications</p>
           <div className="space-y-3">
             <PreferenceToggle
@@ -728,10 +847,15 @@ export default function SettingsScreen() {
             <button onClick={onRequestNotifications} className="w-full btn-secondary py-3 rounded-2xl">
               {notificationPermission === 'granted' ? 'Refresh notification access' : 'Request notification access'}
             </button>
-
           </div>
+        </div>
+      </div>
+      )}
 
-          <p className="text-xs uppercase tracking-widest text-text-muted mt-5 mb-3">App Preferences</p>
+      {activeSection === 'preferences' && (
+      <div className="px-4 pb-4">
+        <div className="card rounded-3xl p-4">
+          <p className="text-xs uppercase tracking-widest text-text-muted mb-3">App Preferences</p>
           <div className="space-y-3">
             <PreferenceToggle
               icon={<Shield size={16} className="text-accent-purple" />}
@@ -747,10 +871,19 @@ export default function SettingsScreen() {
               checked={preferences.reduceMotion}
               onChange={() => onTogglePreference('reduceMotion')}
             />
+            <PreferenceToggle
+              icon={<Activity size={16} className="text-accent-blue" />}
+              title="Data saver"
+              subtitle="Reduce sync frequency on limited data plans"
+              checked={preferences.dataSaver}
+              onChange={() => onTogglePreference('dataSaver')}
+            />
           </div>
         </div>
       </div>
+      )}
 
+      {activeSection === 'help-legal' && (
       <div className="px-4 pb-4">
         <div className="card rounded-3xl p-4">
           <p className="text-xs uppercase tracking-widest text-text-muted mb-3">Help & Legal</p>
@@ -770,6 +903,7 @@ export default function SettingsScreen() {
           </div>
         </div>
       </div>
+      )}
 
       <div className="px-4 pb-8">
         <button onClick={onLogout} className="w-full py-3 rounded-2xl bg-tint-red text-accent-red font-semibold flex items-center justify-center gap-2">
@@ -1009,6 +1143,74 @@ function ThemeButton({
       <div className="flex items-center gap-2">
         <span className={active ? 'text-white' : 'text-text-muted'}>{icon}</span>
         <span className="text-sm font-semibold">{label}</span>
+      </div>
+    </button>
+  );
+}
+
+function SectionNavButton({
+  icon,
+  label,
+  subtitle,
+  active,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  subtitle: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full rounded-2xl border px-3 py-3 text-left transition-all ${active ? 'border-transparent bg-accent-blue text-white shadow-soft' : 'border-border bg-bg-input text-text-secondary'}`}
+    >
+      <div className="flex items-start gap-3">
+        <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-white/15' : 'bg-bg-page border border-border'}`}>
+          <span className={active ? 'text-white' : 'text-text-muted'}>{icon}</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-semibold">{label}</span>
+            <ChevronRight size={16} className={active ? 'text-white/80' : 'text-text-muted'} />
+          </div>
+          <p className={`text-xs mt-0.5 leading-snug ${active ? 'text-white/80' : 'text-text-muted'}`}>
+            {subtitle}
+          </p>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function DashboardTile({
+  icon,
+  title,
+  subtitle,
+  accent,
+  onClick,
+}: {
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+  accent: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-3xl border border-border bg-gradient-to-br ${accent} p-3 text-left transition-transform active:scale-[0.99]`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-bg-page/80 border border-border">
+            {icon}
+          </div>
+          <p className="text-sm font-semibold text-text-primary">{title}</p>
+          <p className="text-xs text-text-muted mt-0.5 leading-snug">{subtitle}</p>
+        </div>
+        <ChevronRight size={16} className="text-text-muted" />
       </div>
     </button>
   );

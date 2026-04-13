@@ -27,9 +27,15 @@ export function StepsDayMap({ waypoints }: StepsDayMapProps) {
         leafletRef.current.remove();
       }
 
+      const orderedWaypoints = waypoints
+        .slice()
+        .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
+      const filteredWaypoints = selectHighConfidenceWaypoints(orderedWaypoints);
+      const routeWaypoints = filteredWaypoints.length >= 2 ? filteredWaypoints : orderedWaypoints;
+
       // Calculate map center and bounds
-      const lats = waypoints.map((w) => w.latitude);
-      const lngs = waypoints.map((w) => w.longitude);
+      const lats = routeWaypoints.map((w) => w.latitude);
+      const lngs = routeWaypoints.map((w) => w.longitude);
       const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
       const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
 
@@ -49,9 +55,7 @@ export function StepsDayMap({ waypoints }: StepsDayMapProps) {
       }).addTo(map);
 
       // Build ordered coordinate array for the route polyline
-      const coords: [number, number][] = waypoints
-        .slice()
-        .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime())
+      const coords: [number, number][] = routeWaypoints
         .map((w) => [w.latitude, w.longitude]);
 
       // Draw the route line — blue, matches app accent color
@@ -102,7 +106,7 @@ export function StepsDayMap({ waypoints }: StepsDayMapProps) {
       // Activity cluster dots — one per active hour
       // Group waypoints by hour and show a subtle dot at each zone's center
       const hourGroups: Record<number, [number, number][]> = {};
-      waypoints.forEach((w) => {
+      routeWaypoints.forEach((w) => {
         if (!hourGroups[w.hour]) hourGroups[w.hour] = [];
         hourGroups[w.hour].push([w.latitude, w.longitude]);
       });
@@ -182,6 +186,28 @@ export function StepsDayMap({ waypoints }: StepsDayMapProps) {
       </div>
     </div>
   );
+}
+
+function selectHighConfidenceWaypoints(waypoints: LocationWaypoint[]): LocationWaypoint[] {
+  if (waypoints.length <= 2) {
+    return waypoints;
+  }
+
+  const strongPoints = waypoints.filter((point) => point.accuracy_m <= 35);
+  if (strongPoints.length >= 2) {
+    return strongPoints;
+  }
+
+  const midPoints = waypoints.filter((point) => point.accuracy_m <= 60);
+  if (midPoints.length >= 2) {
+    return midPoints;
+  }
+
+  return waypoints
+    .slice()
+    .sort((a, b) => a.accuracy_m - b.accuracy_m)
+    .slice(0, Math.min(waypoints.length, 12))
+    .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
 }
 
 function formatHourLabel(hour: number): string {

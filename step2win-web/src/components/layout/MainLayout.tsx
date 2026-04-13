@@ -80,7 +80,7 @@ export default function MainLayout() {
       if (document.visibilityState === 'visible') {
         syncHealthSilent();
       }
-    }, 1500);
+    }, 30000);
 
     return () => window.clearInterval(interval);
   }, [syncHealthSilent]);

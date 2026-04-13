@@ -6,7 +6,7 @@ import { challengesService } from '../services/api';
 import { useToast } from '../components/ui/Toast';
 import { useAuthStore } from '../store/authStore';
 import { BaseModal } from '../components/ui/BaseModal';
-import { checkCameraPermission, requestCameraPermission, type CameraPermissionState } from '../services/cameraPermissions';
+import { checkCameraPermission, requestCameraPermission } from '../services/cameraPermissions';
 import type { Challenge } from '../types';
 import { formatKES } from '../utils/currency';
 
@@ -14,8 +14,14 @@ const ChallengesLobbyScreen = lazy(() => import('./ChallengesLobbyScreen'));
 const ChallengesMineSection = lazy(() => import('./challenges/ChallengesMineSection'));
 
 type QrScanner = {
-  render: (onSuccess: (decodedText: string) => void, onError?: (error: unknown) => void) => void;
-  clear: () => Promise<void> | void;
+  start: (
+    cameraIdOrConfig: string | MediaTrackConstraints,
+    configuration: { fps: number; qrbox: { width: number; height: number }; aspectRatio: number; disableFlip: boolean },
+    onSuccess: (decodedText: string) => void,
+    onError?: (error: unknown) => void,
+  ) => Promise<null>;
+  stop: () => Promise<void>;
+  clear: () => void;
 };
 
 type Tab = 'Active' | 'Mine' | 'Completed';
@@ -33,8 +39,6 @@ export default function ChallengesScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [joinTab, setJoinTab] = useState<'manual' | 'qr'>('manual');
   const [inviteCode, setInviteCode] = useState('');
-  const [cameraPermission, setCameraPermission] = useState<CameraPermissionState>('prompt');
-  const [isRequestingCamera, setIsRequestingCamera] = useState(false);
   const [createForm, setCreateForm] = useState({
     name: '',
     milestone: '50000',
@@ -161,11 +165,7 @@ export default function ChallengesScreen() {
     
     if (code.length === 8) {
       setInviteCode(code);
-      setJoinTab('manual');
-      // Stop the scanner
-      if (scannerRef.current) {
-        scannerRef.current.clear();
-      }
+      void joinWithCode(code);
     }
   };
 
@@ -182,25 +182,33 @@ export default function ChallengesScreen() {
   };
 
   const ensureCameraAccess = async () => {
-    setIsRequestingCamera(true);
     try {
       const initial = await checkCameraPermission();
-      if (initial === 'granted') {
-        setCameraPermission('granted');
-        return true;
-      }
+      if (initial === 'granted') return true;
 
       const granted = await requestCameraPermission();
-      const next = granted ? 'granted' : 'denied';
-      setCameraPermission(next);
 
       if (!granted) {
         showToast({ message: 'Camera permission is required to scan QR codes.', type: 'error' });
       }
 
       return granted;
-    } finally {
-      setIsRequestingCamera(false);
+    } catch (error) {
+      console.error('Camera permission check failed:', error);
+      showToast({ message: 'Unable to access the camera for QR scanning.', type: 'error' });
+      return false;
+    }
+  };
+
+  const joinWithCode = async (code: string) => {
+    try {
+      const result = await joinMutation.mutateAsync(code.toUpperCase());
+      clearScanner();
+      setShowJoinModal(false);
+      setInviteCode('');
+      navigate(`/challenges/${result.challenge.id}`);
+    } catch {
+      // joinMutation already surfaces the error toast
     }
   };
 
@@ -244,25 +252,25 @@ export default function ChallengesScreen() {
           }
 
           if (!scannerRef.current) {
-            const { Html5QrcodeScanner } = await import('html5-qrcode');
+            const { Html5Qrcode } = await import('html5-qrcode');
 
-            scannerRef.current = new Html5QrcodeScanner(
+            scannerRef.current = new Html5Qrcode(
               'qr-scanner',
+            );
+
+            await scannerRef.current.start(
+              { facingMode: { exact: 'environment' } },
               {
                 fps: 10,
                 qrbox: { width: 250, height: 250 },
-                rememberLastUsedCamera: true,
                 aspectRatio: 1,
+                disableFlip: true,
               },
-              false
-            );
-
-            scannerRef.current.render(
               (decodedText: string) => {
                 handleQRSuccess(decodedText);
               },
               () => {
-                // Error callback - do nothing on continue reading
+                // Keep scanning until a valid QR is found.
               }
             );
           }
@@ -486,11 +494,6 @@ export default function ChallengesScreen() {
         ) : (
           <>
             <p className="text-sm text-text-muted mb-4">Point your camera at the QR code</p>
-            {cameraPermission === 'denied' && (
-              <div className="mb-4 rounded-xl border border-red-200 bg-tint-red px-3 py-2 text-xs text-accent-red">
-                Camera permission is blocked. Tap retry below and allow camera access to continue.
-              </div>
-            )}
             <div id="qr-scanner" className="mb-6 rounded-2xl overflow-hidden bg-black" style={{ height: '300px' }} />
             <div className="flex gap-3">
               <button
@@ -499,18 +502,9 @@ export default function ChallengesScreen() {
               >
                 Cancel
               </button>
-              <button
-                onClick={() => {
-                  void ensureCameraAccess();
-                }}
-                disabled={isRequestingCamera}
-                className="flex-1 btn-secondary py-3 rounded-2xl disabled:opacity-40"
-              >
-                {isRequestingCamera ? 'Requesting...' : 'Retry Camera'}
-              </button>
               {inviteCode && (
                 <button
-                  onClick={handleJoin}
+                  onClick={() => void joinWithCode(inviteCode)}
                   disabled={joinMutation.isPending}
                   className="flex-1 btn-primary py-3 rounded-2xl disabled:opacity-40"
                 >
