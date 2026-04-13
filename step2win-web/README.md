@@ -63,7 +63,8 @@ VITE_API_BASE_URL=http://10.0.2.2:8000
 For production (`.env.production`):
 
 ```env
-VITE_API_BASE_URL=https://your-backend-url.com
+VITE_API_BASE_URL=https://step-2-win-app.onrender.com
+VITE_WS_URL=wss://step-2-win-app.onrender.com
 ```
 
 ## Project Structure
