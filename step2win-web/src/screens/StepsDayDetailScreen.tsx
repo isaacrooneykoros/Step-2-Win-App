@@ -42,12 +42,12 @@ export default function StepsDayDetailScreen() {
   //  Loading 
   if (isLoading)
     return (
-      <div className="min-h-screen flex flex-col" style={{ background: '#F8F9FB' }}>
+      <div className="min-h-screen flex flex-col bg-bg-page">
         <DayDetailHeader date={formattedDate} onBack={() => navigate(-1)} onShare={handleShare} />
         <div className="flex-1 flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
             <div className="w-8 h-8 rounded-full border-2 border-[#4F9CF9] border-t-transparent animate-spin" />
-            <p className="text-[#6B7280] text-sm">Loading your day...</p>
+            <p className="text-text-secondary text-sm">Loading your day...</p>
           </div>
         </div>
       </div>
@@ -55,19 +55,19 @@ export default function StepsDayDetailScreen() {
 
   if (isError || !data)
     return (
-      <div className="min-h-screen flex flex-col" style={{ background: '#F8F9FB' }}>
+      <div className="min-h-screen flex flex-col bg-bg-page">
         <DayDetailHeader date={formattedDate} onBack={() => navigate(-1)} onShare={handleShare} />
         <div className="flex-1 flex items-center justify-center px-8">
           <div className="text-center">
-            <p className="text-[#111827] font-bold mb-2">No data for this day</p>
-            <p className="text-[#6B7280] text-sm">No steps were recorded on {formattedDate}.</p>
+            <p className="text-text-primary font-bold mb-2">No data for this day</p>
+            <p className="text-text-secondary text-sm">No steps were recorded on {formattedDate}.</p>
           </div>
         </div>
       </div>
     );
 
   return (
-    <div className="min-h-screen pb-10" style={{ background: '#F8F9FB' }}>
+    <div className="min-h-screen pb-10 bg-bg-page">
       {/*  Header  */}
       <DayDetailHeader date={formattedDate} onBack={() => navigate(-1)} onShare={handleShare} />
 
@@ -138,20 +138,20 @@ function DayDetailHeader({
       <button
         onClick={onBack}
         className="w-9 h-9 rounded-xl flex items-center justify-center"
-        style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+        style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', border: '1px solid hsl(var(--border-light))' }}
       >
-        <ChevronLeft size={20} color="#111827" />
+        <ChevronLeft size={20} color="hsl(var(--text-primary))" />
       </button>
       <div className="text-center">
-        <h1 className="text-[#111827] text-base font-bold">{date}</h1>
-        <p className="text-[#9CA3AF] text-xs">Step Activity</p>
+        <h1 className="text-text-primary text-base font-bold">{date}</h1>
+        <p className="text-text-muted text-xs">Step Activity</p>
       </div>
       <button
         onClick={onShare}
         className="w-9 h-9 rounded-xl flex items-center justify-center"
-        style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+        style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', border: '1px solid hsl(var(--border-light))' }}
       >
-        <Share2 size={16} color="#111827" />
+        <Share2 size={16} color="hsl(var(--text-primary))" />
       </button>
     </div>
   );
@@ -195,7 +195,7 @@ function StatChips({ data }: { data: DayDetail }) {
         <div
           key={chip.label}
           className="rounded-2xl p-3 flex flex-col items-center gap-1"
-          style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
+          style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', border: '1px solid hsl(var(--border-light))' }}
         >
           <div
             className="w-7 h-7 rounded-lg flex items-center justify-center"
@@ -203,8 +203,8 @@ function StatChips({ data }: { data: DayDetail }) {
           >
             {chip.icon}
           </div>
-          <p className="text-[#111827] text-sm font-bold leading-tight">{chip.value}</p>
-          <p className="text-[#9CA3AF] text-xs">{chip.label}</p>
+          <p className="text-text-primary text-sm font-bold leading-tight">{chip.value}</p>
+          <p className="text-text-muted text-xs">{chip.label}</p>
         </div>
       ))}
     </div>
@@ -223,11 +223,11 @@ function SectionCard({
   return (
     <div
       className="mx-4 mb-4 rounded-2xl overflow-hidden"
-      style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
+      style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', border: '1px solid hsl(var(--border-light))' }}
     >
       <div className="px-4 pt-4 pb-3">
-        <p className="text-[#111827] text-sm font-bold">{title}</p>
-        <p className="text-[#9CA3AF] text-xs mt-0.5">{subtitle}</p>
+        <p className="text-text-primary text-sm font-bold">{title}</p>
+        <p className="text-text-muted text-xs mt-0.5">{subtitle}</p>
       </div>
       {children}
     </div>
@@ -256,8 +256,8 @@ function HourlyBarChart({ hourly, peakHour }: { hourly: HourlyStep[]; peakHour: 
       {selectedHour !== null && (
         <div className="flex items-center gap-2 mb-3 px-1">
           <div className="w-2 h-2 rounded-full" style={{ background: '#4F9CF9' }} />
-          <p className="text-[#111827] text-sm font-bold">{formatHour(selectedHour)}</p>
-          <p className="text-[#6B7280] text-sm">{(selectedSteps || 0).toLocaleString()} steps</p>
+          <p className="text-text-primary text-sm font-bold">{formatHour(selectedHour)}</p>
+          <p className="text-text-secondary text-sm">{(selectedSteps || 0).toLocaleString()} steps</p>
           {selectedHour === peakHour && (
             <span
               className="text-xs font-bold px-2 py-0.5 rounded-full"
@@ -295,7 +295,7 @@ function HourlyBarChart({ hourly, peakHour }: { hourly: HourlyStep[]; peakHour: 
                       ? '#93C5FD'
                       : hasSteps
                         ? '#BFDBFE'
-                        : '#F3F4F6',
+                        : 'hsl(var(--bg-input))',
                   transform: isSelected ? 'scaleY(1.03)' : 'scaleY(1)',
                   transformOrigin: 'bottom',
                 }}
@@ -310,7 +310,7 @@ function HourlyBarChart({ hourly, peakHour }: { hourly: HourlyStep[]; peakHour: 
         {displayHours.map((hour) => (
           <div key={hour} className="flex-1 flex justify-center" style={{ minWidth: 0 }}>
             {hour % 3 === 0 && (
-              <span className="text-[#9CA3AF]" style={{ fontSize: '9px' }}>
+              <span className="text-text-muted" style={{ fontSize: '9px' }}>
                 {hour === 12 ? '12P' : hour > 12 ? `${hour - 12}P` : `${hour}A`}
               </span>
             )}
@@ -330,7 +330,7 @@ function HourList({ hourly, peakHour }: { hourly: HourlyStep[]; peakHour: number
   if (activeHours.length === 0) {
     return (
       <div className="px-4 pb-4 text-center">
-        <p className="text-[#9CA3AF] text-sm">No active hours recorded</p>
+        <p className="text-text-muted text-sm">No active hours recorded</p>
       </div>
     );
   }
@@ -345,17 +345,17 @@ function HourList({ hourly, peakHour }: { hourly: HourlyStep[]; peakHour: number
           <div
             key={h.hour}
             className={`flex items-center gap-3 px-4 py-3 ${
-              i < activeHours.length - 1 ? 'border-b border-[#F3F4F6]' : ''
+              i < activeHours.length - 1 ? 'border-b border-border-light' : ''
             }`}
           >
             {/* Hour label */}
             <div className="w-10 flex-shrink-0">
-              <p className="text-[#6B7280] text-xs font-medium text-right">{formatHour(h.hour)}</p>
+              <p className="text-text-secondary text-xs font-medium text-right">{formatHour(h.hour)}</p>
             </div>
 
             {/* Bar */}
             <div className="flex-1 relative h-6 flex items-center">
-              <div className="w-full h-2 rounded-full" style={{ background: '#F3F4F6' }}>
+              <div className="w-full h-2 rounded-full" style={{ background: 'hsl(var(--bg-input))' }}>
                 <div
                   className="h-full rounded-full transition-all duration-500"
                   style={{
@@ -368,7 +368,7 @@ function HourList({ hourly, peakHour }: { hourly: HourlyStep[]; peakHour: number
 
             {/* Steps + peak badge */}
             <div className="w-24 flex-shrink-0 flex items-center gap-1.5 justify-end">
-              <p className="text-[#111827] text-xs font-bold">{h.steps.toLocaleString()}</p>
+              <p className="text-text-primary text-xs font-bold">{h.steps.toLocaleString()}</p>
               {isPeak && (
                 <span
                   className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
@@ -392,12 +392,12 @@ function NoMapState() {
     <div className="px-4 pb-4 pt-2 text-center">
       <div
         className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3"
-        style={{ background: '#EFF6FF' }}
+        style={{ background: 'hsl(var(--bg-input))' }}
       >
         <MapPin size={20} color="#4F9CF9" />
       </div>
-      <p className="text-[#6B7280] text-sm">No location data for this day</p>
-      <p className="text-[#9CA3AF] text-xs mt-1">
+        <p className="text-text-secondary text-sm">No location data for this day</p>
+        <p className="text-text-muted text-xs mt-1">
         Enable location access in settings to track your route
       </p>
     </div>

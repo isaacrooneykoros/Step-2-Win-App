@@ -252,7 +252,7 @@ async function readAndroidHealthConnect() {
   const distance_km = steps > 0 ? parseFloat((steps * 0.0008).toFixed(2)) : null;
   const active_minutes = steps > 0 ? Math.floor(steps / 100) : null;
 
-  return { date: dateStr, source: 'google_fit' as const, steps, distance_km, calories_active, active_minutes };
+  return { date: dateStr, source: 'health_connect' as const, steps, distance_km, calories_active, active_minutes };
 }
 
 async function readAppleHealth() {

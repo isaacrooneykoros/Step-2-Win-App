@@ -449,21 +449,21 @@ export default function HomeScreen() {
           }}
         >
           <div className="w-full rounded-t-3xl p-6 modal-enter" style={{ background: 'hsl(var(--bg-card))', maxWidth: '480px' }}>
-            <div className="w-10 h-1 rounded-full mx-auto mb-5" style={{ background: '#E5E7EB' }} />
+            <div className="w-10 h-1 rounded-full mx-auto mb-5 bg-border" />
 
             <div className="flex items-center justify-between mb-5">
               <div>
-                <h3 className="text-[#111827] text-lg font-bold">Daily Step Goal</h3>
-                <p className="text-[#9CA3AF] text-xs mt-0.5">
+                <h3 className="text-text-primary text-lg font-bold">Daily Step Goal</h3>
+                <p className="text-text-muted text-xs mt-0.5">
                   Sets your personal target  separate from challenge milestones
                 </p>
               </div>
               <button
                 onClick={() => setGoalModalOpen(false)}
                 className="w-8 h-8 rounded-xl flex items-center justify-center"
-                style={{ background: '#F3F4F6' }}
+                style={{ background: 'hsl(var(--bg-input))' }}
               >
-                <X size={16} color="#6B7280" />
+                <X size={16} color="hsl(var(--text-secondary))" />
               </button>
             </div>
 
@@ -474,8 +474,8 @@ export default function HomeScreen() {
                   onClick={() => setGoalInput(String(preset))}
                   className="flex-1 py-2 rounded-xl text-xs font-bold transition-all"
                   style={{
-                    background: goalInput === String(preset) ? '#4F9CF9' : '#F3F4F6',
-                    color: goalInput === String(preset) ? '#FFFFFF' : '#6B7280',
+                    background: goalInput === String(preset) ? '#4F9CF9' : 'hsl(var(--bg-input))',
+                    color: goalInput === String(preset) ? '#FFFFFF' : 'hsl(var(--text-secondary))',
                   }}
                 >
                   {preset >= 1000 ? `${preset / 1000}K` : preset}
@@ -484,15 +484,15 @@ export default function HomeScreen() {
             </div>
 
             <div className="mb-2">
-              <label className="text-[#6B7280] text-xs font-medium mb-1.5 block">Or enter a custom goal</label>
+              <label className="text-text-secondary text-xs font-medium mb-1.5 block">Or enter a custom goal</label>
               <div
                 className="flex items-center gap-3 px-4 py-3 rounded-xl"
                 style={{
-                  background: '#F3F4F6',
+                  background: 'hsl(var(--bg-input))',
                   border: goalError ? '1.5px solid #F87171' : '1.5px solid transparent',
                 }}
               >
-                <Target size={16} color="#9CA3AF" />
+                <Target size={16} color="hsl(var(--text-muted))" />
                 <input
                   type="number"
                   value={goalInput}
@@ -503,14 +503,14 @@ export default function HomeScreen() {
                   placeholder="e.g. 12000"
                   min={1000}
                   max={60000}
-                  className="flex-1 text-[#111827] text-sm font-bold bg-transparent outline-none"
+                  className="flex-1 text-text-primary text-sm font-bold bg-transparent outline-none placeholder:text-text-muted"
                 />
-                <span className="text-[#9CA3AF] text-xs">steps</span>
+                <span className="text-text-muted text-xs">steps</span>
               </div>
-              {goalError && <p className="text-[#F87171] text-xs mt-1.5">{goalError}</p>}
+              {goalError && <p className="text-error text-xs mt-1.5">{goalError}</p>}
             </div>
 
-            <p className="text-[#9CA3AF] text-xs mb-5">
+            <p className="text-text-muted text-xs mb-5">
               Range: 1,000  60,000 steps  Current: {(user?.daily_goal || 10000).toLocaleString()} steps
             </p>
 
@@ -526,11 +526,10 @@ export default function HomeScreen() {
               <button
                 onClick={handleSaveGoal}
                 disabled={goalSaving || !goalInput}
-                className="w-full py-3.5 rounded-xl text-white text-sm font-bold flex items-center justify-center gap-2 transition-opacity"
+                className="w-full py-3.5 rounded-xl text-white text-sm font-bold flex items-center justify-center gap-2 transition-opacity disabled:bg-bg-input disabled:text-text-muted"
                 style={{
                   background: '#4F9CF9',
                   boxShadow: '0 4px 14px rgba(79,156,249,0.3)',
-                  opacity: goalSaving || !goalInput ? 0.6 : 1,
                 }}
               >
                 {goalSaving ? (
@@ -563,21 +562,21 @@ export default function HomeScreen() {
             className="w-full rounded-t-3xl modal-enter overflow-hidden"
             style={{ background: 'hsl(var(--bg-card))', maxWidth: '480px', maxHeight: '85vh' }}
           >
-            <div className="w-10 h-1 rounded-full mx-auto mt-4 mb-1" style={{ background: '#E5E7EB' }} />
+            <div className="w-10 h-1 rounded-full mx-auto mt-4 mb-1 bg-border" />
 
             <div className="overflow-y-auto" style={{ maxHeight: 'calc(85vh - 32px)' }}>
               <div className="p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="text-[#111827] text-lg font-bold">Latest Results</h3>
-                    <p className="text-[#9CA3AF] text-xs">{myResults.challenge?.name}</p>
+                    <h3 className="text-text-primary text-lg font-bold">Latest Results</h3>
+                    <p className="text-text-muted text-xs">{myResults.challenge?.name}</p>
                   </div>
                   <button
                     onClick={() => setResultsOpen(false)}
                     className="w-8 h-8 rounded-xl flex items-center justify-center"
-                    style={{ background: '#F3F4F6' }}
+                    style={{ background: 'hsl(var(--bg-input))' }}
                   >
-                    <X size={16} color="#6B7280" />
+                    <X size={16} color="hsl(var(--text-secondary))" />
                   </button>
                 </div>
 

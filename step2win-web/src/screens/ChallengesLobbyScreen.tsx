@@ -17,11 +17,11 @@ import { challengesService } from '../services/api/challenges';
 import type { LobbyChallenge, LobbyFilter, MilestoneFilter } from '../types';
 
 const THEME: Record<string, { bg: string; accent: string; badge: string }> = {
-  blue: { bg: '#EFF6FF', accent: '#4F9CF9', badge: '#DBEAFE' },
-  green: { bg: '#ECFDF5', accent: '#34D399', badge: '#D1FAE5' },
-  purple: { bg: '#F5F3FF', accent: '#A78BFA', badge: '#EDE9FE' },
-  orange: { bg: '#FFF7ED', accent: '#FB923C', badge: '#FFEDD5' },
-  pink: { bg: '#FDF2F8', accent: '#F472B6', badge: '#FCE7F3' },
+  blue: { bg: 'hsl(var(--bg-input))', accent: '#4F9CF9', badge: 'hsl(var(--bg-elevated))' },
+  green: { bg: 'hsl(var(--bg-input))', accent: '#34D399', badge: 'hsl(var(--bg-elevated))' },
+  purple: { bg: 'hsl(var(--bg-input))', accent: '#A78BFA', badge: 'hsl(var(--bg-elevated))' },
+  orange: { bg: 'hsl(var(--bg-input))', accent: '#FB923C', badge: 'hsl(var(--bg-elevated))' },
+  pink: { bg: 'hsl(var(--bg-input))', accent: '#F472B6', badge: 'hsl(var(--bg-elevated))' },
 };
 
 const FILTERS: { key: LobbyFilter; label: string; icon: React.ReactNode }[] = [
@@ -71,22 +71,23 @@ export default function ChallengesLobbyScreen({ embedded = false }: ChallengesLo
   const regular = filtered.filter((c) => !c.is_featured);
 
   return (
-    <div className={embedded ? '' : 'min-h-screen pb-24'} style={{ background: embedded ? 'transparent' : '#F8F9FB' }}>
+    <div className={embedded ? '' : 'min-h-screen pb-24'} style={{ background: embedded ? 'transparent' : 'hsl(var(--bg-page))' }}>
       <div className="px-4 pt-6 pb-3">
         <div className="flex items-center justify-between mb-1">
           <div>
-            <h1 className="text-[#111827] text-xl font-bold">Discover</h1>
-            <p className="text-[#9CA3AF] text-xs">{challenges.length} public challenges live</p>
+            <h1 className="text-text-primary text-xl font-bold">Discover</h1>
+            <p className="text-text-muted text-xs">{challenges.length} public challenges live</p>
           </div>
           <button
             onClick={() => setShowFilters((v) => !v)}
             className="w-9 h-9 rounded-xl flex items-center justify-center relative"
             style={{
-              background: showFilters ? '#EFF6FF' : '#FFFFFF',
+              background: showFilters ? 'hsl(var(--bg-input))' : 'hsl(var(--bg-elevated))',
               boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+              border: '1px solid hsl(var(--border-default))',
             }}
           >
-            <SlidersHorizontal size={16} color={showFilters ? '#4F9CF9' : '#6B7280'} />
+            <SlidersHorizontal size={16} color={showFilters ? '#4F9CF9' : 'hsl(var(--text-secondary))'} />
           </button>
         </div>
       </div>
@@ -94,14 +95,14 @@ export default function ChallengesLobbyScreen({ embedded = false }: ChallengesLo
       <div className="px-4 mb-3">
         <div
           className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
-          style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', border: '1px solid #F3F4F6' }}
+          style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', border: '1px solid hsl(var(--border-light))' }}
         >
-          <Search size={15} color="#9CA3AF" />
+          <Search size={15} color="hsl(var(--text-muted))" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search challenges..."
-            className="flex-1 text-sm text-[#111827] bg-transparent outline-none placeholder:text-[#9CA3AF]"
+            className="flex-1 text-sm text-text-primary bg-transparent outline-none placeholder:text-text-muted"
           />
         </div>
       </div>
@@ -114,9 +115,10 @@ export default function ChallengesLobbyScreen({ embedded = false }: ChallengesLo
               onClick={() => setFilter(f.key)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all"
               style={{
-                background: filter === f.key ? '#4F9CF9' : '#FFFFFF',
-                color: filter === f.key ? '#FFFFFF' : '#6B7280',
+                background: filter === f.key ? '#4F9CF9' : 'hsl(var(--bg-elevated))',
+                color: filter === f.key ? '#FFFFFF' : 'hsl(var(--text-secondary))',
                 boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+                border: filter === f.key ? 'none' : '1px solid hsl(var(--border-default))',
               }}
             >
               {f.icon}
@@ -142,7 +144,7 @@ export default function ChallengesLobbyScreen({ embedded = false }: ChallengesLo
           className="mx-4 mb-4 p-4 rounded-2xl"
           style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
         >
-          <p className="text-[#111827] text-xs font-bold mb-2">Difficulty</p>
+          <p className="text-text-primary text-xs font-bold mb-2">Difficulty</p>
           <div className="flex gap-2">
             {MILESTONES.map((m) => (
               <button
@@ -151,8 +153,8 @@ export default function ChallengesLobbyScreen({ embedded = false }: ChallengesLo
                 className="flex-1 py-2 rounded-xl text-xs font-semibold transition-all"
                 style={{
                   background: milestone === m.key ? '#EFF6FF' : '#F9FAFB',
-                  color: milestone === m.key ? '#4F9CF9' : '#6B7280',
-                  border: milestone === m.key ? '1px solid #BFDBFE' : '1px solid #F3F4F6',
+                  color: milestone === m.key ? '#4F9CF9' : 'hsl(var(--text-secondary))',
+                  border: milestone === m.key ? '1px solid #BFDBFE' : '1px solid hsl(var(--border-light))',
                 }}
               >
                 {m.label}
@@ -174,7 +176,7 @@ export default function ChallengesLobbyScreen({ embedded = false }: ChallengesLo
         <div className="mb-2">
           <div className="flex items-center gap-2 px-4 mb-3">
             <Star size={14} color="#FBBF24" fill="#FBBF24" />
-            <p className="text-[#111827] text-sm font-bold">Featured</p>
+            <p className="text-text-primary text-sm font-bold">Featured</p>
           </div>
           <div className="px-4 flex flex-col gap-3">
             {featured.map((c) => (
@@ -187,7 +189,7 @@ export default function ChallengesLobbyScreen({ embedded = false }: ChallengesLo
       {!isLoading && (
         <div className="px-4 flex flex-col gap-3">
           {regular.length > 0 && featured.length > 0 && (
-            <p className="text-[#9CA3AF] text-xs font-semibold uppercase tracking-wide mt-1">All Challenges</p>
+            <p className="text-text-muted text-xs font-semibold uppercase tracking-wide mt-1">All Challenges</p>
           )}
           {regular.map((c) => (
             <LobbyCard key={c.id} challenge={c} onTap={() => navigate(`/challenges/lobby/${c.id}`)} />
@@ -197,11 +199,11 @@ export default function ChallengesLobbyScreen({ embedded = false }: ChallengesLo
 
       {!isLoading && filtered.length === 0 && (
         <div className="flex flex-col items-center py-20 px-8 text-center">
-          <div className="w-16 h-16 rounded-3xl flex items-center justify-center mb-4" style={{ background: '#EFF6FF' }}>
+          <div className="w-16 h-16 rounded-3xl flex items-center justify-center mb-4 bg-tint-blue">
             <Trophy size={28} color="#4F9CF9" />
           </div>
-          <p className="text-[#111827] font-bold text-lg mb-2">No challenges found</p>
-          <p className="text-[#9CA3AF] text-sm leading-relaxed">
+          <p className="text-text-primary font-bold text-lg mb-2">No challenges found</p>
+          <p className="text-text-muted text-sm leading-relaxed">
             {search ? `No results for "${search}"` : 'No public challenges match your filters right now.'}
           </p>
         </div>
@@ -236,7 +238,7 @@ function LobbyCard({
       style={{
         background: 'hsl(var(--bg-card))',
         boxShadow: '0 1px 6px rgba(0,0,0,0.07)',
-        border: c.is_featured ? `1.5px solid ${theme.accent}` : '1px solid #F3F4F6',
+        border: c.is_featured ? `1.5px solid ${theme.accent}` : '1px solid hsl(var(--border-light))',
       }}
     >
       <div className="h-1.5 w-full" style={{ background: theme.accent }} />
@@ -261,9 +263,9 @@ function LobbyCard({
                 </span>
               )}
             </div>
-            <h3 className="text-[#111827] text-base font-bold leading-tight truncate">{c.name}</h3>
+            <h3 className="text-text-primary text-base font-bold leading-tight truncate">{c.name}</h3>
           </div>
-          <ChevronRight size={16} color="#9CA3AF" className="flex-shrink-0 mt-1" />
+          <ChevronRight size={16} color="hsl(var(--text-muted))" className="flex-shrink-0 mt-1" />
         </div>
 
         <div className="rounded-xl px-3 py-2.5 mb-3 flex items-center gap-3" style={{ background: theme.bg }}>
@@ -271,7 +273,7 @@ function LobbyCard({
             <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: theme.accent }}>
               Prize Pool
             </p>
-            <p className="text-[#111827] text-lg font-bold leading-tight">KES {Number(c.effective_pool_kes).toLocaleString()}</p>
+            <p className="text-text-primary text-lg font-bold leading-tight">KES {Number(c.effective_pool_kes).toLocaleString()}</p>
             {Number(c.platform_bonus_kes) > 0 && (
               <p className="text-[10px]" style={{ color: theme.accent }}>
                 +KES {Number(c.platform_bonus_kes).toLocaleString()} platform bonus
@@ -279,19 +281,19 @@ function LobbyCard({
             )}
           </div>
           <div className="ml-auto text-right">
-            <p className="text-[10px] text-[#9CA3AF]">Entry fee</p>
-            <p className="text-[#111827] text-sm font-bold">KES {Number(c.entry_fee).toLocaleString()}</p>
+            <p className="text-[10px] text-text-muted">Entry fee</p>
+            <p className="text-text-primary text-sm font-bold">KES {Number(c.entry_fee).toLocaleString()}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-4 mb-3">
           <div className="flex items-center gap-1.5">
-            <TrendingUp size={12} color="#9CA3AF" />
-            <span className="text-[#6B7280] text-xs">{c.milestone_label}</span>
+            <TrendingUp size={12} color="hsl(var(--text-muted))" />
+            <span className="text-text-secondary text-xs">{c.milestone_label}</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <Clock size={12} color="#9CA3AF" />
-            <span className="text-[#6B7280] text-xs">
+            <Clock size={12} color="hsl(var(--text-muted))" />
+            <span className="text-text-secondary text-xs">
               {c.status === 'active'
                 ? `${c.days_remaining}d remaining`
                 : c.is_starting_soon
@@ -304,8 +306,8 @@ function LobbyCard({
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <div className="flex items-center gap-1.5">
-              <Users size={12} color="#9CA3AF" />
-              <span className="text-[#6B7280] text-xs">
+              <Users size={12} color="hsl(var(--text-muted))" />
+              <span className="text-text-secondary text-xs">
                 {c.participant_count} / {c.max_participants} joined
               </span>
             </div>
@@ -313,7 +315,7 @@ function LobbyCard({
               {c.spots_remaining} spots left
             </span>
           </div>
-          <div className="w-full h-1.5 rounded-full" style={{ background: '#F3F4F6' }}>
+          <div className="w-full h-1.5 rounded-full" style={{ background: 'hsl(var(--bg-input))' }}>
             <div
               className="h-full rounded-full transition-all duration-500"
               style={{
@@ -326,11 +328,11 @@ function LobbyCard({
 
         <div className="mt-3">
           {c.user_is_joined ? (
-            <div className="w-full py-2.5 rounded-xl text-center text-sm font-bold" style={{ background: '#ECFDF5', color: '#34D399' }}>
+            <div className="w-full py-2.5 rounded-xl text-center text-sm font-bold bg-tint-green text-accent-green">
                You're In
             </div>
           ) : c.status === 'active' && c.spots_remaining === 0 ? (
-            <div className="w-full py-2.5 rounded-xl text-center text-sm font-bold" style={{ background: '#F9FAFB', color: '#9CA3AF' }}>
+            <div className="w-full py-2.5 rounded-xl text-center text-sm font-bold bg-bg-input text-text-muted border border-border-light">
               Full  Watch Leaderboard 
             </div>
           ) : (

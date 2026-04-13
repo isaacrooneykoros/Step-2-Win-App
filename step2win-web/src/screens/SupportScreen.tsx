@@ -231,7 +231,7 @@ export default function SupportScreen() {
       </div>
 
       <div className="px-4 pb-4">
-        <div className="bg-bg-card rounded-2xl p-1.5 flex">
+        <div className="bg-bg-card rounded-2xl p-1.5 flex border border-border">
           {[
             { label: 'All', value: '' },
             { label: 'Open', value: 'open' },
@@ -246,7 +246,7 @@ export default function SupportScreen() {
                 setOffset(0);
               }}
               className={`flex-1 py-2 rounded-xl text-xs font-semibold ${
-                statusFilter === item.value ? 'bg-white text-text-primary shadow-sm' : 'text-text-muted'
+                statusFilter === item.value ? 'bg-bg-elevated text-text-primary shadow-sm' : 'text-text-muted'
               }`}
             >
               {item.label}
@@ -257,7 +257,7 @@ export default function SupportScreen() {
 
       <div className="px-4 pb-4">
         {ticketsQuery.isLoading ? (
-          <div className="bg-white rounded-3xl overflow-hidden shadow-sm">
+          <div className="bg-bg-card rounded-3xl overflow-hidden shadow-sm border border-border">
             {[1, 2, 3].map((i) => (
               <div key={i} className="p-4 border-b border-border last:border-b-0">
                 <div className="skeleton h-5 rounded mb-2" />
@@ -266,12 +266,12 @@ export default function SupportScreen() {
             ))}
           </div>
         ) : tickets.length === 0 ? (
-          <div className="bg-white rounded-3xl p-10 text-center shadow-sm">
+          <div className="bg-bg-card rounded-3xl p-10 text-center shadow-sm border border-border">
             <MessageCircle size={32} className="mx-auto text-text-muted mb-3" />
             <p className="text-text-secondary text-sm">No support tickets found</p>
           </div>
         ) : (
-          <div className="bg-white rounded-3xl overflow-hidden shadow-sm">
+          <div className="bg-bg-card rounded-3xl overflow-hidden shadow-sm border border-border">
             {tickets.map((ticket: SupportTicket, idx) => (
               <button
                 key={ticket.id}
@@ -444,7 +444,7 @@ export default function SupportScreen() {
                 <div className="space-y-3">
                   {selectedMessages.map((message) => (
                     <div key={message.id} className={`flex ${message.is_admin ? 'justify-start' : 'justify-end'}`}>
-                      <div className={`max-w-[85%] rounded-2xl p-3 ${message.is_admin ? 'bg-tint-blue' : 'bg-white border border-border'}`}>
+                      <div className={`max-w-[85%] rounded-2xl p-3 ${message.is_admin ? 'bg-tint-blue' : 'bg-bg-elevated border border-border'}`}>
                         <div className="flex items-center justify-between mb-1.5 gap-3">
                           <span className="text-xs font-semibold text-text-secondary flex items-center gap-1.5">
                             {message.is_admin ? <User size={13} /> : <Clock size={13} />}

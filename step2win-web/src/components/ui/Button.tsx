@@ -26,7 +26,7 @@ export default function Button({
     primary: 'btn-primary',
     secondary: 'btn-secondary',
     outline: 'btn-outline',
-    ghost: 'hover:bg-bg-tertiary',
+    ghost: 'hover:bg-bg-input',
   };
 
   const sizeClasses = {

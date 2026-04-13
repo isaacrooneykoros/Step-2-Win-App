@@ -291,7 +291,7 @@ export interface WalletSummary {
 
 // ==================== Steps Types ====================
 
-export type StepSource = 'google_fit' | 'apple_health' | 'manual';
+export type StepSource = 'health_connect' | 'google_fit' | 'apple_health' | 'manual';
 export type StepsPeriod = '1d' | '1w' | '1m' | '3m' | '1y' | 'all';
 
 export interface HealthRecord {

@@ -105,7 +105,7 @@ export default function StepsHistoryScreen() {
                   >
                     {/* Source icon */}
                     <div className="w-10 h-10 rounded-xl bg-tint-blue flex items-center justify-center flex-shrink-0">
-                      {record.source === 'google_fit'
+                      {record.source === 'google_fit' || record.source === 'health_connect'
                         ? <Smartphone className="w-5 h-5 text-text-muted" />
                         : record.source === 'apple_health'
                           ? <Apple className="w-5 h-5 text-text-muted" />

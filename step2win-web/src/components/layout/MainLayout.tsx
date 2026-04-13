@@ -172,12 +172,12 @@ export default function MainLayout() {
 
       <nav
         className="app-bottom-nav fixed bottom-0 left-0 right-0 px-3 pb-3 safe-bottom"
-        style={{ boxShadow: '0 -10px 30px rgba(15, 23, 42, 0.08)' }}
+        style={{ boxShadow: '0 -14px 34px rgba(15, 23, 42, 0.14)' }}
       >
         <div
-          className="mx-auto flex items-center justify-around gap-1 rounded-[28px] px-2 py-2 backdrop-blur-xl"
+          className="mx-auto grid grid-cols-5 items-stretch gap-1 rounded-[28px] px-2 py-2 backdrop-blur-xl"
           style={{
-            background: 'rgba(255,255,255,0.72)',
+            background: 'hsl(var(--bg-elevated) / 0.88)',
             border: '1px solid hsl(var(--border-default))',
           }}
         >
@@ -187,28 +187,28 @@ export default function MainLayout() {
               to={to}
               end={to === '/'}
               className={({ isActive }) => `
-                flex flex-1 flex-col items-center gap-2 px-3 py-2 rounded-2xl transition-all
+                flex min-w-0 flex-col items-center justify-center rounded-[20px] px-1 py-2 transition-all
                 ${isActive ? 'text-text-primary' : 'text-text-muted'}
               `}
             >
               {({ isActive }) => (
                 <div
-                  className="flex flex-col items-center gap-1.5 w-full"
+                  className="flex w-full min-w-0 flex-col items-center gap-1"
                   style={{
                     background: isActive ? `${activeAccent}14` : 'transparent',
                     boxShadow: isActive ? `0 8px 20px ${activeAccent}22` : 'none',
                   }}
                 >
                   <div
-                    className="flex h-10 w-10 items-center justify-center rounded-2xl transition-all"
+                    className="flex h-9 w-9 items-center justify-center rounded-2xl transition-all"
                     style={{
                       background: isActive ? `${activeAccent}18` : 'transparent',
                       color: isActive ? activeAccent : 'inherit',
                     }}
                   >
-                    <Icon size={20} strokeWidth={isActive ? 2.4 : 1.9} />
+                    <Icon size={18} strokeWidth={isActive ? 2.4 : 1.9} />
                   </div>
-                  <span className={`text-xs font-semibold ${isActive ? 'text-text-primary' : 'text-text-muted'}`}>
+                  <span className={`text-[10px] sm:text-xs font-semibold leading-none ${isActive ? 'text-text-primary' : 'text-text-muted'}`}>
                     {label}
                   </span>
                 </div>
@@ -225,8 +225,8 @@ export default function MainLayout() {
 
         <div className="space-y-3 mb-5">
           <PermissionCard
-            title="Step tracking"
-            subtitle="Lets Step2Win read Health Connect / Apple Health data."
+            title="Step sync"
+            subtitle="Reads your steps from the phone's own health store: Health Connect on Android, Apple Health on iPhone."
             status={permissionStatus === 'granted' ? 'Granted' : 'Needs permission'}
             accent={activeAccent}
           />

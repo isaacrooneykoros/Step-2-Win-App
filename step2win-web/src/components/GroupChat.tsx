@@ -98,24 +98,25 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
     <div
       className="flex flex-col rounded-2xl overflow-hidden"
       style={{
-        background: '#FFFFFF',
+        background: 'hsl(var(--bg-card))',
         boxShadow: '0 1px 4px rgba(0,0,0,0.07)',
+        border: '1px solid hsl(var(--border-light))',
         height: '420px',
       }}
     >
       {/* ── Chat Header ── */}
       <div
         className="flex items-center justify-between px-4 py-3 flex-shrink-0"
-        style={{ borderBottom: '1px solid #F3F4F6' }}
+        style={{ borderBottom: '1px solid hsl(var(--border-light))' }}
       >
         <div className="flex items-center gap-2">
           <div
             className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ background: '#EFF6FF' }}
+            style={{ background: 'hsl(var(--bg-input))' }}
           >
             <span style={{ fontSize: '14px' }}>💬</span>
           </div>
-          <p className="text-[#111827] text-sm font-bold">Group Chat</p>
+          <p className="text-text-primary text-sm font-bold">Group Chat</p>
         </div>
 
         {/* Connection status pill */}
@@ -129,7 +130,6 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
             <WifiOff size={11} color={statusColor} />
           )}
           <span
-            className="text-xs font-semibold"
             style={{ color: statusColor }}
           >
             {statusText}
@@ -146,7 +146,7 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full">
             <span style={{ fontSize: '32px', marginBottom: '8px' }}>👋</span>
-            <p className="text-[#9CA3AF] text-sm font-medium">
+            <p className="text-text-muted text-sm font-medium">
               No messages yet — say hello!
             </p>
           </div>
@@ -158,14 +158,14 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
             <div className="flex items-center gap-3 my-3">
               <div
                 className="flex-1 h-px"
-                style={{ background: '#F3F4F6' }}
+                style={{ background: 'hsl(var(--border-light))' }}
               />
-              <span className="text-[#9CA3AF] text-xs font-medium flex-shrink-0">
+              <span className="text-text-muted text-xs font-medium flex-shrink-0">
                 {formatDateDivider(group.msgs[0].created_at)}
               </span>
               <div
                 className="flex-1 h-px"
-                style={{ background: '#F3F4F6' }}
+                style={{ background: 'hsl(var(--border-light))' }}
               />
             </div>
 
@@ -229,7 +229,7 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
                   >
                     {/* Sender name — only on first in run */}
                     {showSenderName && (
-                      <p className="text-[#9CA3AF] text-xs font-medium mb-1 px-1">
+                      <p className="text-text-muted text-xs font-medium mb-1 px-1">
                         {msg.sender}
                       </p>
                     )}
@@ -238,8 +238,8 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
                     <div
                       className="px-3 py-2 rounded-2xl"
                       style={{
-                        background: isMe ? '#4F9CF9' : '#F3F4F6',
-                        color: isMe ? '#FFFFFF' : '#111827',
+                        background: isMe ? '#4F9CF9' : 'hsl(var(--bg-input))',
+                        color: isMe ? '#FFFFFF' : 'hsl(var(--text-primary))',
                         borderBottomRightRadius: isMe ? '6px' : '16px',
                         borderBottomLeftRadius: isMe ? '16px' : '6px',
                         maxWidth: '100%',
@@ -251,7 +251,7 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
 
                     {/* Timestamp */}
                     <p
-                      className="text-[#9CA3AF] mt-0.5 px-1"
+                      className="text-text-muted mt-0.5 px-1"
                       style={{ fontSize: '10px' }}
                     >
                       {formatTime(msg.created_at)}
@@ -275,7 +275,7 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
             </div>
             <div
               className="px-3 py-2 rounded-2xl flex items-center gap-1"
-              style={{ background: '#F3F4F6' }}
+              style={{ background: 'hsl(var(--bg-input))' }}
             >
               {[0, 1, 2].map((dot) => (
                 <div
@@ -314,7 +314,7 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
       {/* ── Input row ── */}
       <div
         className="px-3 py-3 flex items-center gap-2 flex-shrink-0"
-        style={{ borderTop: '1px solid #F3F4F6' }}
+        style={{ borderTop: '1px solid hsl(var(--border-light))' }}
       >
         <input
           ref={inputRef}
@@ -323,10 +323,10 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
           onKeyDown={handleKeyDown}
           placeholder="Type a message..."
           maxLength={1000}
-          className="flex-1 px-4 py-2.5 rounded-xl text-sm text-[#111827]
-                     outline-none placeholder:text-[#9CA3AF]"
+          className="flex-1 px-4 py-2.5 rounded-xl text-sm text-text-primary
+                     outline-none placeholder:text-text-muted"
           style={{
-            background: '#F3F4F6',
+            background: 'hsl(var(--bg-input))',
             border: '1.5px solid transparent',
             transition: 'border-color 0.15s',
           }}
@@ -339,7 +339,7 @@ export default function GroupChat({ challengeId }: GroupChatProps) {
           className="w-10 h-10 rounded-xl flex items-center justify-center
                      flex-shrink-0 transition-all active:scale-95"
           style={{
-            background: input.trim() ? '#4F9CF9' : '#F3F4F6',
+            background: input.trim() ? '#4F9CF9' : 'hsl(var(--bg-input))',
             boxShadow: input.trim()
               ? '0 2px 8px rgba(79,156,249,0.3)'
               : 'none',
