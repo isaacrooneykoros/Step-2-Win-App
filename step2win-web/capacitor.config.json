@@ -2,13 +2,19 @@
   "appId": "com.step2win.app",
   "appName": "Step2Win",
   "webDir": "dist",
-  "bundledWebRuntime": false,
   "server": {
     "androidScheme": "https",
-    "hostname": "app.step2win.com",
+    "cleartext": true,
     "allowNavigation": [
-      "*.step2win.com"
+      "*"
     ]
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#0A0E27",
+      "showSpinner": false
+    }
   },
   "android": {
     "buildOptions": {
