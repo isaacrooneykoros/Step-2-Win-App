@@ -23,19 +23,19 @@ if ($branch -ne 'main') {
 Write-Host '1) Backend health check' -ForegroundColor Yellow
 $healthOk = $false
 try {
-  $health = Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:8000/api/health/' -TimeoutSec 5
+  $health = Invoke-RestMethod -Method Get -Uri 'https://step-2-win-app.onrender.com/api/health/' -TimeoutSec 10
   if ($health.status -eq 'ok') {
-    Write-Host '   Backend reachable at http://127.0.0.1:8000/api/health/' -ForegroundColor Green
+    Write-Host '   Backend reachable at https://step-2-win-app.onrender.com/api/health/' -ForegroundColor Green
     $healthOk = $true
   }
 } catch {
-  Write-Warning '   Backend health endpoint not reachable on localhost:8000. If using remote backend, ensure VITE_API_BASE_URL is set.'
+  Write-Warning '   Backend health endpoint not reachable on Render. Ensure the service is running and VITE_API_BASE_URL is correct in .env.staging.'
 }
 
 Write-Host '2) Web app build + Capacitor sync' -ForegroundColor Yellow
 Set-Location $webDir
 if (-not $SkipBuild) {
-  npm run build
+  npm run build -- --mode staging
 } else {
   Write-Host '   Skipping build (--SkipBuild).' -ForegroundColor DarkYellow
 }
