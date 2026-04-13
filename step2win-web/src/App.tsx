@@ -24,6 +24,7 @@ const ChallengePreviewScreen = lazy(() => import('./screens/ChallengePreviewScre
 const SpectatorScreen = lazy(() => import('./screens/SpectatorScreen'));
 const WalletScreen = lazy(() => import('./screens/WalletScreen'));
 const ProfileScreen = lazy(() => import('./screens/ProfileScreen'));
+const ProfileAnalyticsScreen = lazy(() => import('./screens/ProfileAnalyticsScreen'));
 const SettingsScreen = lazy(() => import('./screens/SettingsScreen'));
 const StepsDetailScreen = lazy(() => import('./screens/StepsDetailScreen'));
 const StepsHistoryScreen = lazy(() => import('./screens/StepsHistoryScreen'));
@@ -240,6 +241,7 @@ export default function App() {
               <Route path="/challenges/:id" element={withSuspense(<ChallengeDetailScreen />)} />
               <Route path="/wallet" element={withSuspense(<WalletScreen />)} />
               <Route path="/profile" element={withSuspense(<ProfileScreen />)} />
+              <Route path="/profile/analytics" element={withSuspense(<ProfileAnalyticsScreen />)} />
               <Route path="/settings" element={withSuspense(<SettingsScreen />)} />
               <Route path="/profile/sessions" element={withSuspense(<ActiveSessionsScreen />)} />
               <Route path="/support" element={withSuspense(<SupportScreen />)} />

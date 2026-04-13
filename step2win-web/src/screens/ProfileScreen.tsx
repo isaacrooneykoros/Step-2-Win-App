@@ -1,16 +1,16 @@
 ﻿import { useMemo } from 'react';
-import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronRight,
   Settings,
-  Trophy,
-  Footprints,
   Wallet,
-  Flame,
-  ShieldCheck,
   Activity,
+  UserCircle2,
+  Smartphone,
+  BarChart3,
+  LifeBuoy,
+  ShieldCheck,
 } from 'lucide-react';
 import { authService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
@@ -43,11 +43,10 @@ export default function ProfileScreen() {
   };
 
   const trustScore = currentUser?.trust_score ?? 100;
-
-  const standing = useMemo(() => {
-    if (trustScore >= 85) return { label: 'Good Standing', color: 'text-accent-green', bar: '#34D399' };
-    if (trustScore >= 65) return { label: 'Review Needed', color: 'text-accent-yellow', bar: '#FBBF24' };
-    return { label: 'Restricted', color: 'text-accent-red', bar: '#F87171' };
+  const standingLabel = useMemo(() => {
+    if (trustScore >= 85) return 'Good Standing';
+    if (trustScore >= 65) return 'Review Needed';
+    return 'Restricted';
   }, [trustScore]);
 
   const calibrationBadge = useMemo(() => {
@@ -87,68 +86,89 @@ export default function ProfileScreen() {
   return (
     <div className="screen-enter pb-nav bg-bg-page min-h-screen">
       <div className="pt-safe px-4 pt-5 pb-4">
-        <div className="card rounded-3xl p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
+        <div className="card rounded-[2rem] p-5 overflow-hidden relative">
+          <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-accent-blue/15 via-accent-purple/10 to-transparent pointer-events-none" />
+          <div className="relative flex flex-col items-center text-center">
+            <div className="relative">
               <div
-                className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-black text-white"
+                className="w-24 h-24 rounded-[2rem] flex items-center justify-center text-3xl font-black text-white shadow-soft ring-4 ring-white/70"
                 style={{ background: 'linear-gradient(135deg, #4F9CF9, #A78BFA)' }}
               >
                 {currentUser?.username?.slice(0, 2).toUpperCase() || 'U'}
               </div>
-              <div className="min-w-0">
-                <h1 className="text-text-primary text-xl font-bold truncate">{currentUser?.username || 'Profile'}</h1>
-                <p className="text-text-muted text-sm truncate">{currentUser?.email || 'No email set'}</p>
-                {!!currentUser?.phone_number && <p className="text-text-muted text-xs mt-0.5">{currentUser.phone_number}</p>}
-              </div>
+              <button
+                onClick={() => navigate('/settings')}
+                className="absolute -right-1 -bottom-1 w-10 h-10 rounded-full bg-bg-elevated border border-border flex items-center justify-center shadow-soft"
+                aria-label="Open settings"
+              >
+                <Settings size={18} className="text-text-secondary" />
+              </button>
             </div>
-            <button
-              onClick={() => navigate('/settings')}
-              className="w-10 h-10 rounded-xl bg-bg-input border border-border flex items-center justify-center"
-              aria-label="Open settings"
-            >
-              <Settings size={18} className="text-text-secondary" />
-            </button>
-          </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-bg-input border border-border">
-              <span className={`w-2 h-2 rounded-full ${isStepsSocketConnected ? 'bg-accent-green' : 'bg-accent-red'}`} />
-              <span className={`text-[11px] font-semibold ${isStepsSocketConnected ? 'text-accent-green' : 'text-accent-red'}`}>
-                {isStepsSocketConnected ? 'Live Sync Connected' : 'Live Sync Disconnected'}
-              </span>
+            <div className="mt-4">
+              <h1 className="text-text-primary text-2xl font-bold">{currentUser?.username || 'Profile'}</h1>
+              <p className="text-text-muted text-sm mt-1">{currentUser?.email || 'No email set'}</p>
+              {!!currentUser?.phone_number && <p className="text-text-muted text-xs mt-0.5">{currentUser.phone_number}</p>}
             </div>
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-bg-input border border-border">
-              <span className={`w-2 h-2 rounded-full ${permissionStatus === 'granted' ? 'bg-accent-green' : 'bg-accent-yellow'}`} />
-              <span className="text-[11px] font-semibold text-text-secondary">
-                {permissionStatus === 'granted' ? 'Device Permission Enabled' : 'Device Permission Needed'}
-              </span>
-            </div>
-          </div>
-          <p className="text-text-muted text-[11px] mt-2">{formatLastUpdate(lastStepsUpdateAt)}</p>
-        </div>
-      </div>
 
-      <div className="px-4 pb-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <StatCard icon={<Footprints size={18} className="text-accent-blue" />} label="Total Steps" value={(currentUser?.total_steps || 0).toLocaleString()} />
-          <StatCard icon={<Trophy size={18} className="text-accent-pink" />} label="Challenges Won" value={String(currentUser?.challenges_won || 0)} />
-          <StatCard icon={<Wallet size={18} className="text-accent-yellow" />} label="Total Earned" value={`KSh ${parseFloat(currentUser?.total_earned || '0').toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
-          <StatCard icon={<Flame size={18} className="text-accent-green" />} label="Current Streak" value={`${currentUser?.current_streak || 0} days`} />
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <BadgePill active={isStepsSocketConnected} activeLabel="Live Sync Connected" inactiveLabel="Live Sync Disconnected" />
+              <BadgePill active={permissionStatus === 'granted'} activeLabel="Device Permission Enabled" inactiveLabel="Device Permission Needed" />
+              <BadgePill active={true} activeLabel={standingLabel} inactiveLabel={standingLabel} neutral />
+            </div>
+
+            <p className="text-text-muted text-[11px] mt-3">{formatLastUpdate(lastStepsUpdateAt)}</p>
+          </div>
         </div>
       </div>
 
       <div className="px-4 pb-4">
         <div className="card rounded-3xl p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <ShieldCheck size={16} className="text-accent-blue" />
-            <p className="text-sm font-semibold text-text-primary">Account Standing</p>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <p className="text-sm font-semibold text-text-primary">Analytics</p>
+            <button
+              onClick={() => navigate('/profile/analytics')}
+              className="text-xs text-accent-blue font-semibold"
+            >
+              Open Dashboard
+            </button>
           </div>
-          <p className={`text-sm font-semibold ${standing.color}`}>{standing.label}</p>
-          <div className="w-full h-2 rounded-full bg-bg-input mt-2 overflow-hidden">
-            <div className="h-full rounded-full" style={{ width: `${trustScore}%`, backgroundColor: standing.bar }} />
+          <p className="text-xs text-text-muted mb-4">
+            Total steps, challenges won, earnings, streak performance, and account standing are now in Analytics.
+          </p>
+          <button
+            onClick={() => navigate('/profile/analytics')}
+            className="w-full btn-primary py-3 rounded-2xl"
+          >
+            View Analytics
+          </button>
+        </div>
+      </div>
+
+      <div className="px-4 pb-4">
+        <div className="card rounded-3xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <UserCircle2 size={16} className="text-accent-blue" />
+            <p className="text-sm font-semibold text-text-primary">Account Details</p>
           </div>
-          <p className="text-xs text-text-muted mt-1">Trust score: {trustScore}/100</p>
+
+          <div className="space-y-2 text-sm">
+            <InfoRow label="Email" value={currentUser?.email || 'Not set'} />
+            <InfoRow label="Phone" value={currentUser?.phone_number || 'Not set'} />
+            <InfoRow label="Player Rank" value={currentUser?.player_rank || 'Newcomer'} />
+            <InfoRow
+              label="Member Since"
+              value={currentUser?.member_since ? new Date(currentUser.member_since).toLocaleDateString() : 'Unknown'}
+            />
+            <InfoRow label="Account Standing" value={`${standingLabel} (${trustScore}/100)`} />
+          </div>
+
+          <button
+            onClick={() => navigate('/settings')}
+            className="w-full btn-secondary py-3 rounded-2xl mt-4"
+          >
+            Edit Account Settings
+          </button>
         </div>
       </div>
 
@@ -177,16 +197,25 @@ export default function ProfileScreen() {
           ) : (
             <p className="text-xs text-text-muted mt-2">Run the stride calibration wizard in Settings to improve distance and calorie precision.</p>
           )}
+
+          <button
+            onClick={() => navigate('/steps')}
+            className="w-full btn-secondary py-3 rounded-2xl mt-4"
+          >
+            Open Step Details
+          </button>
         </div>
       </div>
 
       <div className="px-4 pb-8">
         <div className="card rounded-3xl overflow-hidden">
           {[
-            { icon: <Settings size={18} className="text-accent-blue" />, label: 'Open Settings', to: '/settings' },
-            { icon: <Activity size={18} className="text-accent-green" />, label: 'Step Details', to: '/steps' },
+            { icon: <BarChart3 size={18} className="text-accent-blue" />, label: 'Analytics Dashboard', to: '/profile/analytics' },
+            { icon: <Smartphone size={18} className="text-accent-green" />, label: 'Active Sessions', to: '/profile/sessions' },
             { icon: <Wallet size={18} className="text-accent-yellow" />, label: 'Wallet', to: '/wallet' },
-            { icon: <Trophy size={18} className="text-accent-pink" />, label: 'Challenges', to: '/challenges' },
+            { icon: <Activity size={18} className="text-accent-pink" />, label: 'Challenges', to: '/challenges' },
+            { icon: <LifeBuoy size={18} className="text-accent-purple" />, label: 'Help & Support', to: '/support' },
+            { icon: <Settings size={18} className="text-accent-blue" />, label: 'Open Settings', to: '/settings' },
           ].map((item, idx, arr) => (
             <button
               key={item.label}
@@ -204,12 +233,38 @@ export default function ProfileScreen() {
   );
 }
 
-function StatCard({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="card rounded-2xl p-4">
-      <div className="w-9 h-9 rounded-xl bg-bg-input border border-border flex items-center justify-center mb-2">{icon}</div>
-      <p className="text-xs text-text-muted">{label}</p>
-      <p className="text-text-primary text-lg font-bold mt-0.5 leading-tight">{value}</p>
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-bg-input px-3 py-2.5">
+      <span className="text-xs text-text-muted">{label}</span>
+      <span className="text-sm text-text-primary font-semibold text-right">{value}</span>
     </div>
+  );
+}
+
+function BadgePill({
+  active,
+  activeLabel,
+  inactiveLabel,
+  neutral = false,
+}: {
+  active: boolean;
+  activeLabel: string;
+  inactiveLabel: string;
+  neutral?: boolean;
+}) {
+  const label = active ? activeLabel : inactiveLabel;
+  const classes = neutral
+    ? 'bg-bg-input border-border text-text-secondary'
+    : active
+      ? 'bg-tint-green border-border text-accent-green'
+      : 'bg-tint-red border-border text-accent-red';
+
+  return (
+    <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-[11px] font-semibold ${classes}`}>
+      {!neutral && <span className={`w-2 h-2 rounded-full ${active ? 'bg-accent-green' : 'bg-accent-red'}`} />}
+      {neutral && <ShieldCheck size={12} />}
+      {label}
+    </span>
   );
 }

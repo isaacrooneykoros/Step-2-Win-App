@@ -11,6 +11,7 @@ import type { User } from '../types';
 
 const APP_SIGNING_SECRET = import.meta.env.VITE_APP_SIGNING_SECRET || '';
 const HOURLY_SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000;
+const SILENT_SYNC_MIN_INTERVAL_MS = 30 * 1000;
 
 function buildSignedHeaders(userId: string, body: object): Record<string, string> {
   const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -57,6 +58,7 @@ export function useHealthSync() {
   const syncInFlightRef = useRef(false);
   const lastSyncedFingerprintRef = useRef('');
   const lastHourlySyncAtRef = useRef(0);
+  const lastSilentSyncAtRef = useRef(0);
   const hourlyBaselineRef = useRef<{ key: string; baselineSteps: number }>({ key: '', baselineSteps: 0 });
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -137,6 +139,11 @@ export function useHealthSync() {
     setIsSyncing(true);
     try {
       const platform = Capacitor.getPlatform();
+      const isSilent = !!options?.silent;
+
+      if (isSilent && Date.now() - lastSilentSyncAtRef.current < SILENT_SYNC_MIN_INTERVAL_MS) {
+        return;
+      }
 
       if (platform !== 'android') {
         setPermissionStatus('unavailable');
@@ -146,7 +153,7 @@ export function useHealthSync() {
       const shouldAutoEnable = !hasAttemptedAutoEnableRef.current || permissionStatus !== 'granted';
       if (shouldAutoEnable) {
         hasAttemptedAutoEnableRef.current = true;
-        if (options?.silent) {
+        if (isSilent) {
           return;
         }
         const enabled = await connectDevice();
@@ -174,15 +181,18 @@ export function useHealthSync() {
         data.active_minutes ?? '',
       ].join('|');
 
-      if (options?.silent && fingerprint === lastSyncedFingerprintRef.current) {
+      if (isSilent && fingerprint === lastSyncedFingerprintRef.current) {
         return;
       }
 
       await stepsService.syncHealth(data, buildSignedHeaders(String(userId ?? ''), data));
       lastSyncedFingerprintRef.current = fingerprint;
+      if (isSilent) {
+        lastSilentSyncAtRef.current = Date.now();
+      }
 
       const now = Date.now();
-      const shouldSyncHourly = !options?.silent || now - lastHourlySyncAtRef.current >= HOURLY_SYNC_MIN_INTERVAL_MS;
+      const shouldSyncHourly = !isSilent || now - lastHourlySyncAtRef.current >= HOURLY_SYNC_MIN_INTERVAL_MS;
       if (shouldSyncHourly) {
         try {
           const pendingWaypoints = await DeviceStepCounter.getPendingWaypoints().catch(() => ({
