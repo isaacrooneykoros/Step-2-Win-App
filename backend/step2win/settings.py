@@ -238,12 +238,24 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-CORS_ALLOWED_ORIGINS = os.getenv(
-    'CORS_ALLOWED_ORIGINS',
-    # Local web dev + Capacitor Android (capacitor://localhost) + Capacitor with androidScheme=https (https://localhost)
-    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,'
-    'capacitor://localhost,https://localhost'
-).split(',')
+# Mobile app origins that must always be allowed so Capacitor Android/iOS can reach
+# the backend regardless of what CORS_ALLOWED_ORIGINS is set to in the environment.
+_CORS_REQUIRED_NATIVE = ['https://localhost', 'capacitor://localhost']
+_CORS_DEFAULT_DEV = [
+    'http://localhost:5173', 'http://127.0.0.1:5173',
+    'http://localhost:5174', 'http://127.0.0.1:5174',
+]
+_cors_explicit = [
+    o.strip()
+    for o in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
+    if o.strip()
+]
+# Always prepend the required native origins; use dict.fromkeys to deduplicate
+# while preserving order. If an explicit list was supplied in the env var it is
+# used; otherwise fall back to the local-dev defaults.
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(
+    _CORS_REQUIRED_NATIVE + (_cors_explicit if _cors_explicit else _CORS_DEFAULT_DEV)
+))
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT']
 CORS_ALLOW_HEADERS = [

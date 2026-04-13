@@ -32,11 +32,12 @@ async function checkApi(baseUrl: string): Promise<CheckResult> {
   try {
     let response: Response;
     try {
-      // Render and similar hosts can cold start; allow a generous first timeout.
-      response = await attempt(20000);
+      // Render free-tier services can take up to 50 s to wake from sleep.
+      // Allow a generous first window so a cold-start doesn't look like a failure.
+      response = await attempt(50000);
     } catch {
-      // Quick retry for transient startup/network hiccups.
-      response = await attempt(12000);
+      // One more try for transient startup/network hiccups.
+      response = await attempt(20000);
     }
 
     if (!response.ok) {
@@ -55,10 +56,14 @@ async function checkApi(baseUrl: string): Promise<CheckResult> {
       detail: ok ? 'Backend health endpoint responded OK.' : 'Unexpected health payload.',
     };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : 'unknown error';
+    const isColdStart = msg.toLowerCase().includes('abort') || msg.toLowerCase().includes('timeout');
     return {
       label: 'API health',
       state: 'fail',
-      detail: `Request failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      detail: isColdStart
+        ? 'Request timed out — the backend may still be waking up. Tap Retry in a moment.'
+        : `Request failed: ${msg}. Check your network connection and tap Retry. If the problem persists, the backend URL or CORS config on Render may need updating.`,
     };
   }
 }
@@ -68,15 +73,17 @@ async function checkWebSocket(wsBase: string): Promise<CheckResult> {
     const wsUrl = `${wsBase}/ws/steps/sync/?token=preflight`;
     let settled = false;
     let opened = false;
+    // Give the WebSocket long enough for the backend to finish its cold-start
+    // and complete the TLS + HTTP-upgrade handshake.
     const timeout = window.setTimeout(() => {
       if (settled) return;
       settled = true;
       resolve({
         label: 'Realtime WebSocket',
         state: 'fail',
-        detail: 'Connection timed out.',
+        detail: 'Connection timed out — backend may still be starting. Tap Retry.',
       });
-    }, 8000);
+    }, 20000);
 
     try {
       const socket = new WebSocket(wsUrl);
@@ -101,7 +108,7 @@ async function checkWebSocket(wsBase: string): Promise<CheckResult> {
         resolve({
           label: 'Realtime WebSocket',
           state: 'fail',
-          detail: 'WebSocket transport failed before auth handshake.',
+          detail: 'WebSocket transport failed — backend may be unreachable or still waking up. Tap Retry.',
         });
       };
 
@@ -204,6 +211,7 @@ export default function PreflightScreen() {
 
         <p className="text-sm text-text-muted mb-6">
           Network checks run before login to confirm your phone can reach both API and realtime services.
+          On Render's free tier the backend sleeps when idle — <strong>first launch may take up to 70 s</strong> to wake up. Tap <em>Retry Checks</em> if checks fail on the first attempt.
         </p>
 
         <div className="space-y-3 mb-5">
@@ -225,7 +233,7 @@ export default function PreflightScreen() {
 
         {checksDone && !allPassed && (
           <div className="bg-tint-red border border-red-200 text-accent-red px-4 py-3 rounded-xl text-sm mb-4">
-            One or more checks failed. Verify backend URL/CORS/SSL and retry.
+            One or more checks failed. If the backend just woke up from sleep, tap <strong>Retry Checks</strong>. Otherwise verify backend URL, CORS, and SSL on Render.
           </div>
         )}
 
