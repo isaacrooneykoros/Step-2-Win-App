@@ -149,7 +149,7 @@ export default function WalletScreen() {
     <div className="screen-enter pb-nav bg-bg-page">
       {/*  WALLET HERO CARD  */}
       <div className="pt-safe px-4 pt-4 pb-4">
-        <div className="bg-white rounded-3xl p-6 shadow-sm">
+        <div className="bg-bg-card rounded-3xl p-6 shadow-sm border border-border">
           <div className="mb-3">
             <span className="text-text-muted text-xs font-medium uppercase tracking-widest">AVAILABLE BALANCE</span>
           </div>
@@ -204,7 +204,7 @@ export default function WalletScreen() {
       </div>
 
       {activeTab === 'Transactions' && (
-        <div className="mx-4 mb-6 bg-white rounded-3xl overflow-hidden shadow-sm">
+        <div className="mx-4 mb-6 bg-bg-card rounded-3xl overflow-hidden shadow-sm border border-border">
           {loadingTransactions ? (
             [1, 2, 3].map((i) => (
               <div key={i} className="px-4 py-4 border-b border-border last:border-b-0">
@@ -254,7 +254,7 @@ export default function WalletScreen() {
       {/*  WITHDRAWALS LIST  */}
       {activeTab === 'Withdrawals' && (
         <div className="px-4 pb-4">
-          <div className="bg-white rounded-3xl overflow-hidden shadow-sm">
+          <div className="bg-bg-card rounded-3xl overflow-hidden shadow-sm border border-border">
             {loadingWithdrawals ? (
               <div>
                 {[1, 2, 3].map((i) => (

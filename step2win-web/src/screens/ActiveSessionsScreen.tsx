@@ -111,29 +111,29 @@ export default function ActiveSessionsScreen() {
   };
 
   return (
-    <div className="min-h-screen" style={{ background: '#F8F9FB' }}>
+    <div className="min-h-screen bg-bg-page">
       {/* Header */}
-      <div className="bg-white border-b border-gray-100 px-4 py-4 flex items-center gap-3 sticky top-0 z-10">
+      <div className="bg-bg-elevated border-b border-border-default px-4 py-4 flex items-center gap-3 sticky top-0 z-10">
         <button
           onClick={() => navigate(-1)}
-          className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center hover:bg-gray-100 transition-colors"
+          className="w-10 h-10 rounded-xl bg-bg-input flex items-center justify-center hover:opacity-90 transition-colors"
         >
-          <ArrowLeft size={20} className="text-gray-700" />
+          <ArrowLeft size={20} className="text-text-primary" />
         </button>
         <div>
-          <h1 className="text-gray-900 text-lg font-bold">Active Devices</h1>
-          <p className="text-gray-400 text-xs">Manage your logged-in devices</p>
+          <h1 className="text-text-primary text-lg font-bold">Active Devices</h1>
+          <p className="text-text-muted text-xs">Manage your logged-in devices</p>
         </div>
       </div>
 
       {/* Content */}
       <div className="p-4">
         {/* Info banner */}
-        <div className="mb-4 p-4 rounded-xl bg-blue-50 border border-blue-100 flex gap-3">
+        <div className="mb-4 p-4 rounded-xl bg-tint-blue border border-border flex gap-3">
           <AlertTriangle size={20} className="text-blue-500 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="text-blue-900 text-sm font-semibold mb-1">Security Tip</p>
-            <p className="text-blue-700 text-xs leading-relaxed">
+            <p className="text-text-primary text-sm font-semibold mb-1">Security Tip</p>
+            <p className="text-text-secondary text-xs leading-relaxed">
               If you see a device you don't recognize, log it out immediately and change your
               password.
             </p>
@@ -145,7 +145,7 @@ export default function ActiveSessionsScreen() {
           <button
             onClick={handleRevokeAll}
             disabled={revokingAll}
-            className="mb-4 w-full py-3 rounded-xl text-red-500 text-sm font-bold border border-red-200 bg-red-50 hover:bg-red-100 transition-colors disabled:opacity-50"
+            className="mb-4 w-full py-3 rounded-xl text-error text-sm font-bold border border-error/30 bg-error/10 hover:bg-error/15 transition-colors disabled:opacity-50"
           >
             {revokingAll ? 'Logging out...' : 'Log Out All Other Devices'}
           </button>
@@ -154,17 +154,14 @@ export default function ActiveSessionsScreen() {
         {/* Loading state */}
         {isLoading && (
           <div className="text-center py-12">
-            <div className="inline-block w-8 h-8 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin"></div>
-            <p className="text-gray-400 text-sm mt-3">Loading sessions...</p>
+          <div className="inline-block w-8 h-8 border-4 border-border-default border-t-accent-blue rounded-full animate-spin"></div>
+          <p className="text-text-muted text-sm mt-3">Loading sessions...</p>
           </div>
         )}
 
         {/* Sessions list */}
         {!isLoading && sessions && (
-          <div
-            className="rounded-2xl overflow-hidden bg-white"
-            style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
-          >
+          <div className="rounded-2xl overflow-hidden bg-bg-card border border-border shadow-sm">
             {sessions.map((session, i) => {
               const isCurrent = session.id === sessionId;
 
@@ -172,30 +169,29 @@ export default function ActiveSessionsScreen() {
                 <div
                   key={session.id}
                   className={`flex items-center gap-3 px-4 py-4 ${
-                    i > 0 ? 'border-t border-gray-50' : ''
+                    i > 0 ? 'border-t border-border-light' : ''
                   }`}
                 >
                   {/* Icon */}
-                  <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center flex-shrink-0">
+                  <div className="w-10 h-10 rounded-xl bg-bg-input flex items-center justify-center flex-shrink-0">
                     {deviceIcons[session.device_type]}
                   </div>
 
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-gray-900 text-sm font-bold truncate">
+                      <p className="text-text-primary text-sm font-bold truncate">
                         {session.device_name}
                       </p>
                       {isCurrent && (
                         <span
-                          className="text-xs px-2 py-0.5 rounded-full font-bold"
-                          style={{ background: '#EFF6FF', color: '#4F9CF9' }}
+                          className="text-xs px-2 py-0.5 rounded-full font-bold bg-tint-blue text-accent-blue"
                         >
                           This device
                         </span>
                       )}
                     </div>
-                    <p className="text-gray-400 text-xs mt-0.5">
+                    <p className="text-text-muted text-xs mt-0.5">
                       {session.ip_address}  {formatDate(session.last_active_at)}
                     </p>
                   </div>
@@ -219,8 +215,8 @@ export default function ActiveSessionsScreen() {
         {/* Empty state */}
         {!isLoading && sessions && sessions.length === 0 && (
           <div className="text-center py-12">
-            <Smartphone size={48} className="text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-400 text-sm">No active sessions</p>
+            <Smartphone size={48} className="text-text-muted mx-auto mb-3" />
+            <p className="text-text-muted text-sm">No active sessions</p>
           </div>
         )}
       </div>

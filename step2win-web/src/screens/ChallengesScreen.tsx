@@ -286,7 +286,7 @@ export default function ChallengesScreen() {
       </div>
 
       <div className="mx-4 mb-4">
-        <div className="flex rounded-2xl p-1" style={{ background: '#F3F4F6' }}>
+        <div className="flex rounded-2xl p-1 bg-bg-input border border-border-light">
           {[
             { key: 'mine', label: 'My Challenges' },
             { key: 'discover', label: ' Discover' },
@@ -296,8 +296,8 @@ export default function ChallengesScreen() {
               onClick={() => setTab(section.key as 'mine' | 'discover')}
               className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all"
               style={{
-                background: tab === section.key ? '#FFFFFF' : 'transparent',
-                color: tab === section.key ? '#111827' : '#9CA3AF',
+                background: tab === section.key ? 'hsl(var(--bg-elevated))' : 'transparent',
+                color: tab === section.key ? 'hsl(var(--text-primary))' : 'hsl(var(--text-muted))',
                 boxShadow: tab === section.key ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
               }}
             >
@@ -483,7 +483,7 @@ export default function ChallengesScreen() {
 
             {/* QR Code Box */}
             <div className="bg-tint-blue rounded-3xl p-6 mb-6 inline-block">
-              <div id="challenge-qr" className="bg-white p-3 rounded-xl inline-block">
+              <div id="challenge-qr" className="bg-bg-elevated p-3 rounded-xl inline-block border border-border-light">
                 <canvas
                   id="challenge-qr-canvas"
                   style={{ display: 'block', margin: '0 auto' }}

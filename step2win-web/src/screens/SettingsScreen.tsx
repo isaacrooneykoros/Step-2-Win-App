@@ -273,7 +273,7 @@ export default function SettingsScreen() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <p className="text-text-primary text-sm font-semibold">Step tracking</p>
-              <p className="text-text-muted text-xs">Reads your step count from Health Connect / Apple Health.</p>
+              <p className="text-text-muted text-xs">Reads your step count from the phone's own health store for the most accurate data available.</p>
             </div>
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${deviceStatus.dot}`} />
@@ -285,7 +285,7 @@ export default function SettingsScreen() {
             disabled={isConnectingDevice || permissionStatus === 'granted'}
             className="w-full btn-primary py-3 rounded-2xl disabled:opacity-50"
           >
-            {permissionStatus === 'granted' ? 'Permission already enabled' : isConnectingDevice ? 'Requesting...' : 'Request permission'}
+            {permissionStatus === 'granted' ? 'Phone health already connected' : isConnectingDevice ? 'Requesting...' : 'Connect phone health data'}
           </button>
         </div>
       </div>

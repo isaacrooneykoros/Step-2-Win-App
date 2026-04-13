@@ -19,21 +19,24 @@ const icons = {
 
 const colors = {
   success: {
-    background: 'rgba(52,211,153,0.95)',
-    border: 'rgba(52,211,153,0.3)',
+    background: 'hsl(var(--bg-elevated) / 0.96)',
+    border: 'rgba(52,211,153,0.45)',
+    icon: 'text-accent-green',
   },
   error: {
-    background: 'rgba(248,113,113,0.95)',
-    border: 'rgba(248,113,113,0.3)',
+    background: 'hsl(var(--bg-elevated) / 0.96)',
+    border: 'rgba(248,113,113,0.45)',
+    icon: 'text-accent-red',
   },
   info: {
-    background: 'rgba(255,255,255,0.95)',
-    border: '#E5E7EB',
-    textColor: '#111827',
+    background: 'hsl(var(--bg-elevated) / 0.96)',
+    border: 'hsl(var(--border-default))',
+    icon: 'text-accent-blue',
   },
   warning: {
-    background: 'rgba(251,191,36,0.95)',
-    border: 'rgba(251,191,36,0.3)',
+    background: 'hsl(var(--bg-elevated) / 0.96)',
+    border: 'rgba(251,191,36,0.45)',
+    icon: 'text-accent-yellow',
   },
 };
 
@@ -56,8 +59,8 @@ export default function Toast({ message, type = 'info', duration = 3000, onClose
       }}
       role="alert"
     >
-      <Icon size={18} className={type === 'info' ? 'text-accent-blue' : 'text-white'} />
-      <p className={`text-sm font-medium ${type === 'info' ? 'text-text-primary' : 'text-white'}`}>{message}</p>
+      <Icon size={18} className={colors[type].icon} />
+      <p className="text-sm font-medium text-text-primary">{message}</p>
     </div>
   );
 }

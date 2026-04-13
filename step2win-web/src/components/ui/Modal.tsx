@@ -34,7 +34,7 @@ export default function Modal({ isOpen, onClose, title, children, maxWidth = 'md
       onClick={onClose}
     >
       <div
-        className={`w-full ${maxWidthClasses[maxWidth]} rounded-t-3xl sm:rounded-3xl p-6 pb-8 bg-white shadow-modal screen-enter`}
+        className={`w-full ${maxWidthClasses[maxWidth]} rounded-t-3xl sm:rounded-3xl p-6 pb-8 bg-bg-elevated border border-border shadow-modal screen-enter`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="w-10 h-1 rounded-full bg-border mx-auto mb-6 sm:hidden" />

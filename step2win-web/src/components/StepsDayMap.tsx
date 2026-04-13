@@ -161,22 +161,23 @@ export function StepsDayMap({ waypoints }: StepsDayMapProps) {
       <div
         className="absolute bottom-3 left-3 flex items-center gap-3 px-3 py-1.5 rounded-xl"
         style={{
-          background: 'rgba(255,255,255,0.92)',
+          background: 'hsl(var(--bg-elevated) / 0.92)',
           boxShadow: '0 1px 6px rgba(0,0,0,0.12)',
           backdropFilter: 'blur(4px)',
+          border: '1px solid hsl(var(--border-default))',
         }}
       >
         <div className="flex items-center gap-1.5">
           <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#34D399' }} />
-          <span className="text-[10px] text-[#6B7280] font-medium">Start</span>
+          <span className="text-[10px] text-text-secondary font-medium">Start</span>
         </div>
         <div className="flex items-center gap-1.5">
           <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#4F9CF9' }} />
-          <span className="text-[10px] text-[#6B7280] font-medium">End</span>
+          <span className="text-[10px] text-text-secondary font-medium">End</span>
         </div>
         <div className="flex items-center gap-1.5">
           <div className="w-8 h-0.5 rounded-full" style={{ background: '#4F9CF9' }} />
-          <span className="text-[10px] text-[#6B7280] font-medium">Route</span>
+          <span className="text-[10px] text-text-secondary font-medium">Route</span>
         </div>
       </div>
     </div>

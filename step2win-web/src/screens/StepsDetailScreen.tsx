@@ -130,7 +130,7 @@ export default function StepsDetailScreen() {
               className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all duration-200
                 ${
                   period === key
-                    ? 'bg-white text-text-primary shadow-card'
+                    ? 'bg-bg-elevated text-text-primary shadow-card'
                     : 'text-text-muted'
                 }`}
             >
@@ -180,7 +180,7 @@ export default function StepsDetailScreen() {
                         ? '#4F9CF9'
                         : day.steps > 0
                           ? '#BFDBFE'
-                          : '#F3F4F6',
+                          : 'hsl(var(--bg-input))',
                       minHeight: '4px',
                     }}
                   />
