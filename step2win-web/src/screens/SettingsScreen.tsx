@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import {
   ChevronLeft,
   Bell,
@@ -26,6 +27,7 @@ import { useHealthSync } from '../hooks/useHealthSync';
 import type { User } from '../types';
 import { applyThemeMode, loadThemeMode, saveThemeMode, type ThemeMode } from '../config/theme';
 import { checkNotificationPermission, requestNotificationPermission, syncReminderNotifications } from '../services/notifications';
+import { DeviceStepCounter } from '../plugins/deviceStepCounter';
 
 type PreferencesState = {
   pushNotifications: boolean;
@@ -76,6 +78,7 @@ export default function SettingsScreen() {
   const [notificationPermission, setNotificationPermission] = useState<'prompt' | 'prompt-with-rationale' | 'granted' | 'denied' | 'unavailable'>('prompt');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showStrideWizard, setShowStrideWizard] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
     current_password: '',
     new_password: '',
@@ -85,7 +88,26 @@ export default function SettingsScreen() {
     email: '',
     phone_number: '',
     daily_goal: 10000,
+    stride_length_cm: 78,
+    weight_kg: 70,
+    calibration_quality: null as 'excellent' | 'good' | 'noisy' | null,
+    calibration_variance_pct: null as number | null,
+    last_calibrated_at: null as string | null,
   });
+  const [wizardDistanceM, setWizardDistanceM] = useState(20);
+  const [wizardCustomDistance, setWizardCustomDistance] = useState('20');
+  const [wizardRunning, setWizardRunning] = useState(false);
+  const [wizardPass, setWizardPass] = useState<1 | 2>(1);
+  const [wizardBusy, setWizardBusy] = useState(false);
+  const [wizardBaselineSteps, setWizardBaselineSteps] = useState<number | null>(null);
+  const [wizardCurrentSteps, setWizardCurrentSteps] = useState(0);
+  const [wizardDetectedSteps, setWizardDetectedSteps] = useState(0);
+  const [wizardPassOneStride, setWizardPassOneStride] = useState<number | null>(null);
+  const [wizardPassTwoStride, setWizardPassTwoStride] = useState<number | null>(null);
+  const [wizardEstimatedStride, setWizardEstimatedStride] = useState<number | null>(null);
+  const [wizardQualityScore, setWizardQualityScore] = useState<'excellent' | 'good' | 'noisy' | null>(null);
+  const [wizardVariancePct, setWizardVariancePct] = useState<number | null>(null);
+  const wizardPollRef = useRef<number | null>(null);
 
   const { data: profile } = useQuery<User>({
     queryKey: ['profile'],
@@ -98,6 +120,11 @@ export default function SettingsScreen() {
       email: profile.email || '',
       phone_number: profile.phone_number || '',
       daily_goal: profile.daily_goal || 10000,
+      stride_length_cm: profile.stride_length_cm || 78,
+      weight_kg: profile.weight_kg || 70,
+      calibration_quality: profile.calibration_quality ?? null,
+      calibration_variance_pct: profile.calibration_variance_pct ?? null,
+      last_calibrated_at: profile.last_calibrated_at ?? null,
     });
   }, [profile]);
 
@@ -136,6 +163,14 @@ export default function SettingsScreen() {
     syncReminderNotifications(preferences).catch(() => null);
   }, [notificationPermission, preferences]);
 
+  useEffect(() => {
+    return () => {
+      if (wizardPollRef.current !== null) {
+        window.clearInterval(wizardPollRef.current);
+      }
+    };
+  }, []);
+
   const changePasswordMutation = useMutation({
     mutationFn: (data: { old_password: string; new_password: string; confirm_password: string }) => authService.changePassword(data),
     onSuccess: () => {
@@ -157,6 +192,16 @@ export default function SettingsScreen() {
     },
     onError: (error: any) => {
       showToast({ message: error?.response?.data?.error || 'Failed to update profile.', type: 'error' });
+    },
+  });
+
+  const saveCalibrationBadgeMutation = useMutation({
+    mutationFn: (data: Partial<User>) => authService.updateProfile(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
+    },
+    onError: () => {
+      showToast({ message: 'Could not persist calibration badge yet.', type: 'warning' });
     },
   });
 
@@ -223,12 +268,184 @@ export default function SettingsScreen() {
       return;
     }
 
+    if (profileForm.stride_length_cm < 40 || profileForm.stride_length_cm > 130) {
+      showToast({ message: 'Stride length must be between 40 and 130 cm.', type: 'error' });
+      return;
+    }
+
+    if (profileForm.weight_kg < 30 || profileForm.weight_kg > 220) {
+      showToast({ message: 'Weight must be between 30 and 220 kg.', type: 'error' });
+      return;
+    }
+
     updateProfileMutation.mutate(profileForm);
   };
 
   const onLogout = async () => {
     await logout();
     navigate('/login');
+  };
+
+  const stopWizardPolling = () => {
+    if (wizardPollRef.current !== null) {
+      window.clearInterval(wizardPollRef.current);
+      wizardPollRef.current = null;
+    }
+  };
+
+  const closeStrideWizard = () => {
+    stopWizardPolling();
+    setWizardRunning(false);
+    setWizardPass(1);
+    setWizardBusy(false);
+    setWizardBaselineSteps(null);
+    setWizardDetectedSteps(0);
+    setWizardCurrentSteps(0);
+    setWizardPassOneStride(null);
+    setWizardPassTwoStride(null);
+    setWizardEstimatedStride(null);
+    setWizardQualityScore(null);
+    setWizardVariancePct(null);
+    setShowStrideWizard(false);
+  };
+
+  const onDistancePreset = (value: number) => {
+    setWizardDistanceM(value);
+    setWizardCustomDistance(String(value));
+  };
+
+  const refreshWizardReading = async (baseline?: number) => {
+    const reading = await DeviceStepCounter.getTodaySteps();
+    const nowSteps = Math.max(0, Math.round(Number(reading.steps) || 0));
+    setWizardCurrentSteps(nowSteps);
+    const base = baseline ?? wizardBaselineSteps ?? nowSteps;
+    const delta = Math.max(0, nowSteps - base);
+    setWizardDetectedSteps(delta);
+    return nowSteps;
+  };
+
+  const startStrideCalibrationPass = async (pass: 1 | 2) => {
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+      showToast({ message: 'Stride wizard needs Android sensor support.', type: 'error' });
+      return;
+    }
+
+    const custom = parseFloat(wizardCustomDistance);
+    const effectiveDistance = Number.isFinite(custom) && custom > 0 ? custom : wizardDistanceM;
+    if (effectiveDistance < 5 || effectiveDistance > 1000) {
+      showToast({ message: 'Use a measured distance between 5m and 1000m.', type: 'error' });
+      return;
+    }
+
+    setWizardBusy(true);
+    try {
+      const ok = await connectDevice({ silent: true });
+      if (!ok) {
+        return;
+      }
+
+      const reading = await DeviceStepCounter.getTodaySteps();
+      const base = Math.max(0, Math.round(Number(reading.steps) || 0));
+      setWizardDistanceM(effectiveDistance);
+      setWizardPass(pass);
+      setWizardBaselineSteps(base);
+      setWizardCurrentSteps(base);
+      setWizardDetectedSteps(0);
+
+      if (pass === 1) {
+        setWizardPassOneStride(null);
+        setWizardPassTwoStride(null);
+        setWizardEstimatedStride(null);
+        setWizardQualityScore(null);
+        setWizardVariancePct(null);
+      } else {
+        setWizardPassTwoStride(null);
+      }
+
+      setWizardRunning(true);
+
+      stopWizardPolling();
+      wizardPollRef.current = window.setInterval(() => {
+        void refreshWizardReading(base);
+      }, 1200);
+    } catch (error: any) {
+      showToast({ message: error?.message || 'Could not start calibration.', type: 'error' });
+    } finally {
+      setWizardBusy(false);
+    }
+  };
+
+  const startStrideCalibration = async () => {
+    await startStrideCalibrationPass(1);
+  };
+
+  const startReturnStrideCalibration = async () => {
+    await startStrideCalibrationPass(2);
+  };
+
+  const finishStrideCalibration = async () => {
+    if (!wizardRunning) return;
+
+    setWizardBusy(true);
+    try {
+      const current = await refreshWizardReading();
+      const baseline = wizardBaselineSteps ?? current;
+      const walkedSteps = Math.max(0, current - baseline);
+
+      if (walkedSteps < 12) {
+        showToast({ message: 'Too few steps detected. Walk farther and try again.', type: 'error' });
+        return;
+      }
+
+      const rawStride = (wizardDistanceM * 100) / walkedSteps;
+      const strideCm = Math.min(130, Math.max(40, rawStride));
+      const rounded = Number(strideCm.toFixed(1));
+
+      if (wizardPass === 1) {
+        setWizardPassOneStride(rounded);
+        setWizardRunning(false);
+        stopWizardPolling();
+        showToast({ message: `Outbound pass captured: ${rounded} cm. Now walk back and start return pass.`, type: 'info' });
+      } else {
+        const passOne = wizardPassOneStride ?? rounded;
+        const average = Number((((passOne + rounded) / 2)).toFixed(1));
+        const variancePct = Number((Math.abs(passOne - rounded) / Math.max(average, 0.1) * 100).toFixed(1));
+        const quality: 'excellent' | 'good' | 'noisy' = variancePct <= 2 ? 'excellent' : variancePct <= 5 ? 'good' : 'noisy';
+
+        const calibratedAt = new Date().toISOString();
+
+        setWizardPassTwoStride(rounded);
+        setWizardEstimatedStride(average);
+        setWizardVariancePct(variancePct);
+        setWizardQualityScore(quality);
+        setProfileForm((prev) => ({
+          ...prev,
+          stride_length_cm: average,
+          calibration_quality: quality,
+          calibration_variance_pct: variancePct,
+          last_calibrated_at: calibratedAt,
+        }));
+        setWizardRunning(false);
+        stopWizardPolling();
+
+        saveCalibrationBadgeMutation.mutate({
+          stride_length_cm: average,
+          calibration_quality: quality,
+          calibration_variance_pct: variancePct,
+          last_calibrated_at: calibratedAt,
+        });
+
+        if (quality === 'noisy') {
+          showToast({ message: `2-pass stride calibrated to ${average} cm, but quality is noisy (${variancePct}% variance). Consider rerunning.`, type: 'warning' });
+        } else {
+          showToast({ message: `2-pass stride calibrated to ${average} cm (${quality}).`, type: 'success' });
+        }
+      }
+    } catch (error: any) {
+      showToast({ message: error?.message || 'Could not finish calibration.', type: 'error' });
+    } finally {
+      setWizardBusy(false);
+    }
   };
 
   return (
@@ -273,7 +490,7 @@ export default function SettingsScreen() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <p className="text-text-primary text-sm font-semibold">Step tracking</p>
-              <p className="text-text-muted text-xs">Reads your step count from the phone's own health store for the most accurate data available.</p>
+              <p className="text-text-muted text-xs">Uses motion sensor + activity recognition permission to measure steps directly on your device.</p>
             </div>
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${deviceStatus.dot}`} />
@@ -285,7 +502,7 @@ export default function SettingsScreen() {
             disabled={isConnectingDevice || permissionStatus === 'granted'}
             className="w-full btn-primary py-3 rounded-2xl disabled:opacity-50"
           >
-            {permissionStatus === 'granted' ? 'Phone health already connected' : isConnectingDevice ? 'Requesting...' : 'Connect phone health data'}
+            {permissionStatus === 'granted' ? 'Step sensor connected' : isConnectingDevice ? 'Requesting...' : 'Enable step sensor'}
           </button>
         </div>
       </div>
@@ -463,11 +680,148 @@ export default function SettingsScreen() {
             />
             <span className="text-sm text-text-muted">steps</span>
           </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min="40"
+              max="130"
+              step="0.5"
+              value={profileForm.stride_length_cm}
+              onChange={(e) => setProfileForm({ ...profileForm, stride_length_cm: parseFloat(e.target.value) || 78 })}
+              className="input-field flex-1"
+            />
+            <span className="text-sm text-text-muted">cm stride</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowStrideWizard(true)}
+            className="w-full btn-secondary py-2.5 rounded-2xl"
+          >
+            Run stride calibration wizard
+          </button>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min="30"
+              max="220"
+              step="0.1"
+              value={profileForm.weight_kg}
+              onChange={(e) => setProfileForm({ ...profileForm, weight_kg: parseFloat(e.target.value) || 70 })}
+              className="input-field flex-1"
+            />
+            <span className="text-sm text-text-muted">kg</span>
+          </div>
         </div>
         <div className="flex gap-3">
           <button onClick={() => setShowProfileModal(false)} className="flex-1 btn-secondary py-3 rounded-2xl">Cancel</button>
           <button onClick={onSaveProfile} disabled={updateProfileMutation.isPending} className="flex-1 btn-primary py-3 rounded-2xl disabled:opacity-40">
             {updateProfileMutation.isPending ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </BaseModal>
+
+      <BaseModal open={showStrideWizard} onClose={closeStrideWizard}>
+        <h2 className="text-2xl font-black text-text-primary mb-2">Stride Calibration Wizard</h2>
+        <p className="text-sm text-text-muted mb-4">
+          Walk a known distance at your normal pace. We auto-detect steps and estimate stride length.
+        </p>
+
+        <div className="space-y-3 mb-4">
+          <p className="text-xs uppercase tracking-widest text-text-muted">Measured Distance</p>
+          <div className="grid grid-cols-4 gap-2">
+            {[10, 20, 50, 100].map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => onDistancePreset(d)}
+                disabled={wizardRunning || wizardPassOneStride !== null}
+                className={`py-2 rounded-xl text-xs font-semibold ${wizardDistanceM === d ? 'bg-accent-blue text-white' : 'bg-bg-input text-text-secondary'}`}
+              >
+                {d}m
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min="5"
+              max="1000"
+              step="1"
+              value={wizardCustomDistance}
+              onChange={(e) => setWizardCustomDistance(e.target.value)}
+              disabled={wizardRunning || wizardPassOneStride !== null}
+              className="input-field flex-1"
+              placeholder="Custom distance"
+            />
+            <span className="text-sm text-text-muted">meters</span>
+          </div>
+          <p className="text-xs text-text-muted">
+            Pass mode: {wizardPassOneStride === null ? 'Ready for outbound walk' : wizardPassTwoStride === null ? 'Ready for return walk' : 'Completed'}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-bg-input p-3 mb-4">
+          <p className="text-xs text-text-muted mb-1">Live sensor progress</p>
+          <p className="text-xs text-text-secondary mb-1">Current pass: {wizardPass === 1 ? 'Outbound' : 'Return'}</p>
+          <p className="text-sm text-text-primary font-semibold">Detected steps: {wizardDetectedSteps.toLocaleString()}</p>
+          <p className="text-xs text-text-muted">Current sensor total: {wizardCurrentSteps.toLocaleString()}</p>
+          {wizardPassOneStride !== null && (
+            <p className="text-xs text-text-secondary mt-1">Pass 1 stride: {wizardPassOneStride.toFixed(1)} cm</p>
+          )}
+          {wizardPassTwoStride !== null && (
+            <p className="text-xs text-text-secondary">Pass 2 stride: {wizardPassTwoStride.toFixed(1)} cm</p>
+          )}
+          {wizardEstimatedStride !== null && (
+            <p className="text-xs text-accent-green mt-1">Averaged stride: {wizardEstimatedStride.toFixed(1)} cm (applied)</p>
+          )}
+          {wizardQualityScore !== null && wizardVariancePct !== null && (
+            <p className={`text-xs mt-1 ${wizardQualityScore === 'excellent' ? 'text-accent-green' : wizardQualityScore === 'good' ? 'text-accent-blue' : 'text-accent-yellow'}`}>
+              Quality: {wizardQualityScore.toUpperCase()} ({wizardVariancePct}% pass variance)
+              {wizardQualityScore === 'noisy' ? ' — rerun recommended for tighter accuracy.' : ''}
+            </p>
+          )}
+        </div>
+
+        <div className="flex gap-3">
+          {!wizardRunning && wizardPassOneStride === null ? (
+            <button
+              type="button"
+              onClick={startStrideCalibration}
+              disabled={wizardBusy}
+              className="flex-1 btn-primary py-3 rounded-2xl"
+            >
+              {wizardBusy ? 'Preparing...' : 'Start Outbound Pass'}
+            </button>
+          ) : !wizardRunning && wizardPassOneStride !== null && wizardPassTwoStride === null ? (
+            <button
+              type="button"
+              onClick={startReturnStrideCalibration}
+              disabled={wizardBusy}
+              className="flex-1 btn-primary py-3 rounded-2xl"
+            >
+              {wizardBusy ? 'Preparing...' : 'Start Return Pass'}
+            </button>
+          ) : !wizardRunning && wizardPassOneStride !== null && wizardPassTwoStride !== null ? (
+            <button
+              type="button"
+              onClick={startStrideCalibration}
+              disabled={wizardBusy}
+              className="flex-1 btn-primary py-3 rounded-2xl"
+            >
+              {wizardBusy ? 'Preparing...' : 'Run Again'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={finishStrideCalibration}
+              disabled={wizardBusy}
+              className="flex-1 btn-primary py-3 rounded-2xl"
+            >
+              {wizardBusy ? 'Calculating...' : `Finish ${wizardPass === 1 ? 'Outbound' : 'Return'} Pass`}
+            </button>
+          )}
+          <button type="button" onClick={closeStrideWizard} className="flex-1 btn-secondary py-3 rounded-2xl">
+            Close
           </button>
         </div>
       </BaseModal>

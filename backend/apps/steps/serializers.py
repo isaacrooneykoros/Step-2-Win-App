@@ -17,8 +17,8 @@ class HealthSyncSerializer(serializers.Serializer):
     """Validates incoming sync payload from the Capacitor app."""
     date = serializers.DateField()
     source = serializers.ChoiceField(
-        choices=['google_fit', 'apple_health', 'manual'],
-        default='google_fit'
+        choices=['device_sensor', 'google_fit', 'apple_health', 'manual'],
+        default='device_sensor'
     )
     steps = serializers.IntegerField(min_value=0, max_value=100000, default=0)
     distance_km = serializers.FloatField(
@@ -36,6 +36,18 @@ class HealthSyncSerializer(serializers.Serializer):
     active_minutes = serializers.IntegerField(
         min_value=0,
         max_value=1440,
+        required=False,
+        allow_null=True,
+    )
+    cadence_spm = serializers.FloatField(
+        min_value=0,
+        max_value=400,
+        required=False,
+        allow_null=True,
+    )
+    burst_steps_5s = serializers.IntegerField(
+        min_value=0,
+        max_value=100,
         required=False,
         allow_null=True,
     )

@@ -4,6 +4,7 @@ from django.db import models
 
 class HealthRecord(models.Model):
     SOURCE_CHOICES = [
+        ('device_sensor', 'Device Sensor'),
         ('google_fit', 'Google Fit'),
         ('apple_health', 'Apple Health'),
         ('manual', 'Manual Entry'),

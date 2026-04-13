@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GoogleOAuthProvider } from '@react-oauth/google';
+import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import { useAuthStore } from './store/authStore';
 import { GOOGLE_CLIENT_ID, isGoogleClientIdConfigured } from './config/googleAuth';
 import { applyThemeMode, loadThemeMode, ThemeMode } from './config/theme';
@@ -88,6 +90,38 @@ function AuthLoadRedirect({
   return null;
 }
 
+function NativeBackButtonGuard() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+      return;
+    }
+
+    const listener = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      if (canGoBack) {
+        window.history.back();
+        return;
+      }
+
+      if (location.pathname !== '/') {
+        navigate('/', { replace: true });
+        return;
+      }
+
+      // Avoid accidental hard exits: keep app alive in background on home.
+      CapacitorApp.minimizeApp().catch(() => null);
+    });
+
+    return () => {
+      listener.then((handle) => handle.remove()).catch(() => null);
+    };
+  }, [location.pathname, navigate]);
+
+  return null;
+}
+
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -143,6 +177,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <GoogleOAuthProvider clientId={isGoogleClientIdConfigured ? GOOGLE_CLIENT_ID : 'invalid-client-id'}>
         <BrowserRouter>
+          <NativeBackButtonGuard />
           <AuthLoadRedirect loading={loading} isAuthenticated={isAuthenticated} />
           <Routes>
             {/* Public routes */}

@@ -226,7 +226,7 @@ export default function MainLayout() {
         <div className="space-y-3 mb-5">
           <PermissionCard
             title="Step sync"
-            subtitle="Reads your steps from the phone's own health store: Health Connect on Android, Apple Health on iPhone."
+            subtitle="Uses your phone's built-in motion sensor (activity recognition) to count and sync steps in real time."
             status={permissionStatus === 'granted' ? 'Granted' : 'Needs permission'}
             accent={activeAccent}
           />
@@ -253,7 +253,7 @@ export default function MainLayout() {
               disabled={isConnectingDevice || permissionStatus === 'granted'}
               className="flex-1 py-3 rounded-2xl bg-bg-input text-text-secondary font-semibold disabled:opacity-50"
             >
-              {permissionStatus === 'granted' ? 'Step access on' : 'Allow steps'}
+              {permissionStatus === 'granted' ? 'Sensor access on' : 'Allow sensor access'}
             </button>
             <button
               onClick={handleEnableNotifications}

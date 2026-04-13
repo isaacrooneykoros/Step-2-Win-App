@@ -179,6 +179,8 @@ def sync_health(request):
         distance_km=data.get('distance_km'),
         calories=data.get('calories_active'),
         active_minutes=data.get('active_minutes'),
+        cadence_spm=data.get('cadence_spm'),
+        burst_steps_5s=data.get('burst_steps_5s'),
         submitted_at=now,
     )
 
@@ -244,7 +246,7 @@ def sync_health(request):
         user=user,
         date=date,
         defaults={
-            'source': data.get('source', 'google_fit'),
+            'source': data.get('source', 'device_sensor'),
             'steps': approved_steps,
             'distance_km': data.get('distance_km'),
             'calories_active': data.get('calories_active'),
