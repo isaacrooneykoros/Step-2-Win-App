@@ -32,12 +32,16 @@ class RegisterSerializer(serializers.ModelSerializer):
         return data
 
     def validate_email(self, value):
+        if not value:
+            raise serializers.ValidationError('Email is required')
         normalized = str(value).lower().strip()
         if User.objects.filter(email=normalized).exists():
             raise serializers.ValidationError('Email already registered')
         return normalized
 
     def validate_username(self, value):
+        if not value:
+            raise serializers.ValidationError('Username is required')
         try:
             cleaned = sanitize_username(value)
         except DjangoValidationError as e:
@@ -45,6 +49,17 @@ class RegisterSerializer(serializers.ModelSerializer):
         if User.objects.filter(username=cleaned).exists():
             raise serializers.ValidationError('Username already taken')
         return cleaned
+
+    def validate_phone_number(self, value):
+        if not value:
+            raise serializers.ValidationError('Phone number is required')
+        # Basic phone validation - should be digits and +/- only
+        phone_clean = value.replace('+', '').replace('-', '').replace(' ', '')
+        if not phone_clean.isdigit() or len(phone_clean) < 9:
+            raise serializers.ValidationError('Phone number must be at least 9 digits')
+        if User.objects.filter(phone_number=value).exists():
+            raise serializers.ValidationError('Phone number already registered')
+        return value
 
     def create(self, validated_data):
         validated_data.pop('confirm_password')

@@ -160,13 +160,14 @@ export default function RegisterScreen() {
           />
 
           <Input
-            label="Phone Number (for withdrawals)"
+            label="Phone Number (Required for withdrawals)"
             name="phone_number"
             type="tel"
             value={formData.phone_number}
             onChange={handleChange}
             placeholder="254712345678"
             error={getFieldError(errors.phone_number)}
+            required
             autoComplete="tel"
           />
 
