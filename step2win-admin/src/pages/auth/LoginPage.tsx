@@ -18,6 +18,45 @@ interface FormErrors {
   general?: string;
 }
 
+function classifyLoginError(error: unknown): string {
+  const maybeError = error as {
+    response?: { status?: number; data?: { error?: string; detail?: string } };
+    message?: string;
+  };
+
+  const responseStatus = maybeError?.response?.status;
+  const responseError = maybeError?.response?.data?.error ?? maybeError?.response?.data?.detail ?? '';
+  const message = (maybeError?.message ?? '').toLowerCase();
+
+  if (
+    !maybeError?.response ||
+    message.includes('network error') ||
+    message.includes('failed to fetch') ||
+    message.includes('cors') ||
+    message.includes('timeout')
+  ) {
+    return 'Network/CORS issue: the app could not reach the backend. Check the Vercel and Render API settings.';
+  }
+
+  if (responseStatus === 401) {
+    return 'Invalid username or password.';
+  }
+
+  if (responseStatus === 403) {
+    return responseError || 'Admin access required.';
+  }
+
+  if (responseStatus === 429) {
+    return responseError || 'Too many login attempts. Please wait and try again.';
+  }
+
+  if (responseError) {
+    return responseError;
+  }
+
+  return maybeError?.message || 'Login failed. Please try again.';
+}
+
 export default function LoginPage() {
   const [form, setForm] = useState<LoginForm>({ username: '', password: '' });
   const [errors, setErrors] = useState<FormErrors>({});
@@ -49,16 +88,7 @@ export default function LoginPage() {
       { username: form.username.trim(), password: form.password },
       {
         onError: (error: unknown) => {
-          const maybeError = error as {
-            response?: { data?: { error?: string } };
-            message?: string;
-          };
-          const message =
-            maybeError?.response?.data?.error ?? maybeError?.message ?? 'Invalid credentials. Please try again.';
-
-          setErrors({
-            general: message.toLowerCase().includes('admin') ? message : 'Invalid username or password.',
-          });
+          setErrors({ general: classifyLoginError(error) });
         },
       }
     );

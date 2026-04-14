@@ -424,7 +424,7 @@ if os.getenv('SENTRY_DSN'):
         environment='production' if not DEBUG else 'development',
     )
 
-# ── Structured logging ────────────────────────────────────────────────────────
+# ── Structured logging ─────────────────────────────────────────────────────────
 os.makedirs(os.path.join(BASE_DIR, 'logs'), exist_ok=True)
 
 LOGGING = {
