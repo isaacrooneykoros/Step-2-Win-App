@@ -63,10 +63,10 @@ services:
       - key: ALLOWED_HOSTS
         sync: false       # Set to your Render domain, e.g. step2win-backend.onrender.com
       - key: CSRF_TRUSTED_ORIGINS
-        sync: false       # e.g. https://step2win-backend.onrender.com
+        sync: false       # e.g. https://step2win-backend.onrender.com,https://step-2-win-app.vercel.app
       - key: CORS_ALLOWED_ORIGINS
         sync: false       # Must include mobile app origins: https://localhost,capacitor://localhost
-                          # and any web frontend origins, e.g. https://your-frontend.onrender.com
+                          # and any web frontend origins, e.g. https://step-2-win-app.vercel.app
       - key: DJANGO_ADMIN_URL
         value: admin-s2w-secure/
       - key: ENABLE_DEFENDER

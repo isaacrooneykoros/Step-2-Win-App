@@ -250,6 +250,9 @@ _CORS_DEFAULT_DEV = [
     'http://localhost:5173', 'http://127.0.0.1:5173',
     'http://localhost:5174', 'http://127.0.0.1:5174',
 ]
+_CORS_REQUIRED_WEB = [
+    'https://step-2-win-app.vercel.app',
+]
 _cors_explicit = [
     o.strip()
     for o in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
@@ -259,7 +262,7 @@ _cors_explicit = [
 # while preserving order. If an explicit list was supplied in the env var it is
 # used; otherwise fall back to the local-dev defaults.
 CORS_ALLOWED_ORIGINS = list(dict.fromkeys(
-    _CORS_REQUIRED_NATIVE + (_cors_explicit if _cors_explicit else _CORS_DEFAULT_DEV)
+    _CORS_REQUIRED_NATIVE + _CORS_REQUIRED_WEB + (_cors_explicit if _cors_explicit else _CORS_DEFAULT_DEV)
 ))
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT']
@@ -349,6 +352,9 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',')
     if origin.strip()
 ]
+
+if 'https://step-2-win-app.vercel.app' not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append('https://step-2-win-app.vercel.app')
 
 # ── Django admin URL — obscured to resist automated scanning ─────────────────
 ADMIN_URL = os.getenv('DJANGO_ADMIN_URL', 'admin-s2w-secure/')
