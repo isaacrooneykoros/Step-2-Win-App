@@ -7,20 +7,27 @@ import { useAuthStore } from '../store/authStore';
 import { v4 as uuidv4 } from 'uuid';
 import CryptoJS from 'crypto-js';
 import { DeviceStepCounter } from '../plugins/deviceStepCounter';
-import type { User } from '../types';
+import type { HourlyStep, LocationWaypoint, StepSyncForm, User } from '../types';
+import {
+  listOutboxItems,
+  removeOutboxItem,
+  touchOutboxRetry,
+  upsertOutboxItem,
+} from '../services/offlineSyncOutbox';
 
 const APP_SIGNING_SECRET = import.meta.env.VITE_APP_SIGNING_SECRET || '';
 const HOURLY_SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000;
 const SILENT_SYNC_MIN_INTERVAL_MS = 30 * 1000;
+const PERMISSIONS_BOOTSTRAP_DONE_KEY = 'permissions_bootstrap_done_v1';
 
-function buildSignedHeaders(userId: string, body: object): Record<string, string> {
+function buildSignedHeaders(userId: string, body: object, idempotencyKey?: string): Record<string, string> {
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const bodyHash = CryptoJS.SHA256(JSON.stringify(body)).toString();
   const message = `${userId}:${timestamp}:${bodyHash}`;
   return {
     'X-App-Signature': CryptoJS.HmacSHA256(message, APP_SIGNING_SECRET).toString(),
     'X-Timestamp': timestamp,
-    'X-Idempotency-Key': uuidv4(),
+    'X-Idempotency-Key': idempotencyKey || uuidv4(),
   };
 }
 
@@ -50,6 +57,29 @@ function extractSyncErrorMessage(error: unknown): string {
   return 'Sync failed. Try again.';
 }
 
+function isLikelyOfflineError(error: unknown): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return true;
+  }
+
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const maybeAxios = error as { code?: string; message?: string };
+  const message = (maybeAxios.message || '').toLowerCase();
+  return maybeAxios.code === 'ERR_NETWORK' || message.includes('network') || message.includes('failed to fetch');
+}
+
+function isDuplicateSyncError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const maybeAxios = error as { response?: { status?: number; data?: { error?: string } } };
+  return maybeAxios.response?.status === 409 || maybeAxios.response?.data?.error === 'Duplicate request';
+}
+
 export function useHealthSync() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isConnectingDevice, setIsConnectingDevice] = useState(false);
@@ -63,6 +93,45 @@ export function useHealthSync() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const userId = useAuthStore((state) => state.user?.id);
+
+  const flushQueuedSync = useCallback(async () => {
+    if (!userId || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+      return;
+    }
+
+    const queue = await listOutboxItems(userId);
+    if (queue.length === 0) {
+      return;
+    }
+
+    for (const item of queue) {
+      try {
+        if (item.kind === 'health') {
+          const healthPayload = item.payload as StepSyncForm;
+          await stepsService.syncHealth(healthPayload, buildSignedHeaders(String(userId), healthPayload, item.idempotencyKey));
+        } else {
+          const hourlyPayload = item.payload as { date: string; hourly: HourlyStep[]; waypoints: LocationWaypoint[] };
+          await stepsService.syncHourly(hourlyPayload);
+        }
+        await removeOutboxItem(item.queueKey);
+      } catch (error) {
+        if (isDuplicateSyncError(error)) {
+          await removeOutboxItem(item.queueKey);
+          continue;
+        }
+        await touchOutboxRetry(item.queueKey);
+      }
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    const onOnline = () => {
+      void flushQueuedSync();
+    };
+
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [flushQueuedSync]);
 
   const refreshPermissionStatus = useCallback(async () => {
     const platform = Capacitor.getPlatform();
@@ -137,9 +206,13 @@ export function useHealthSync() {
 
     syncInFlightRef.current = true;
     setIsSyncing(true);
+    let latestHealthPayload: any = null;
+    let latestHourlyPayload: any = null;
+
     try {
       const platform = Capacitor.getPlatform();
       const isSilent = !!options?.silent;
+      const permissionBootstrapDone = localStorage.getItem(PERMISSIONS_BOOTSTRAP_DONE_KEY) === 'true';
 
       if (isSilent && Date.now() - lastSilentSyncAtRef.current < SILENT_SYNC_MIN_INTERVAL_MS) {
         return;
@@ -150,7 +223,9 @@ export function useHealthSync() {
         return;
       }
 
-      const shouldAutoEnable = !hasAttemptedAutoEnableRef.current || permissionStatus !== 'granted';
+      const shouldAutoEnable = !permissionBootstrapDone && (
+        !hasAttemptedAutoEnableRef.current || permissionStatus === 'unknown'
+      );
       if (shouldAutoEnable) {
         hasAttemptedAutoEnableRef.current = true;
         if (isSilent) {
@@ -160,6 +235,13 @@ export function useHealthSync() {
         if (!enabled) {
           return;
         }
+      }
+
+      if (permissionBootstrapDone && permissionStatus !== 'granted') {
+        if (!isSilent) {
+          showToast({ message: 'Enable physical activity permission in Settings to sync steps.', type: 'warning' });
+        }
+        return;
       }
 
       let data;
@@ -185,10 +267,13 @@ export function useHealthSync() {
         return;
       }
 
-      await stepsService.syncHealth(data, buildSignedHeaders(String(userId ?? ''), data));
-      lastSyncedFingerprintRef.current = fingerprint;
-      if (isSilent) {
-        lastSilentSyncAtRef.current = Date.now();
+      latestHealthPayload = data;
+      if (userId) {
+        await upsertOutboxItem({
+          userId,
+          kind: 'health',
+          payload: data,
+        });
       }
 
       const now = Date.now();
@@ -205,16 +290,7 @@ export function useHealthSync() {
             baselineSteps: hourlySnapshot.baselineSteps,
           };
 
-          if (pendingWaypoints.waypoints.length > 0 && pendingWaypoints.date !== data.date) {
-            await stepsService.syncHourly({
-              date: pendingWaypoints.date,
-              hourly: [],
-              waypoints: pendingWaypoints.waypoints,
-            });
-            await DeviceStepCounter.clearPendingWaypoints().catch(() => ({ cleared: false }));
-          }
-
-          await stepsService.syncHourly({
+          latestHourlyPayload = {
             date: data.date,
             hourly: [{
               hour: hourlySnapshot.hour,
@@ -223,15 +299,53 @@ export function useHealthSync() {
               calories: hourlySnapshot.calories,
             }],
             waypoints: pendingWaypoints.date === data.date ? pendingWaypoints.waypoints : [],
-          });
+          };
+          if (userId) {
+            await upsertOutboxItem({
+              userId,
+              kind: 'hourly',
+              payload: latestHourlyPayload,
+            });
+          }
 
-          if (pendingWaypoints.waypoints.length > 0 && pendingWaypoints.date === data.date) {
+          if (pendingWaypoints.waypoints.length > 0 && pendingWaypoints.date !== data.date) {
+            const legacyWaypointPayload = {
+              date: pendingWaypoints.date,
+              hourly: [],
+              waypoints: pendingWaypoints.waypoints,
+            };
+            if (userId) {
+              await upsertOutboxItem({
+                userId,
+                kind: 'hourly',
+                payload: legacyWaypointPayload,
+              });
+            }
             await DeviceStepCounter.clearPendingWaypoints().catch(() => ({ cleared: false }));
           }
 
           lastHourlySyncAtRef.current = now;
         } catch (hourlyError) {
           console.warn('Hourly/waypoint sync skipped:', hourlyError);
+        }
+      }
+
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        if (!options?.silent) {
+          showToast({ message: 'You are offline. Steps were saved in SQLite and will sync automatically when online.', type: 'info' });
+        }
+        return;
+      }
+
+      await flushQueuedSync();
+
+      if (userId) {
+        const remaining = await listOutboxItems(userId);
+        if (remaining.length === 0) {
+          lastSyncedFingerprintRef.current = fingerprint;
+          if (isSilent) {
+            lastSilentSyncAtRef.current = Date.now();
+          }
         }
       }
 
@@ -249,6 +363,31 @@ export function useHealthSync() {
       if (platform === 'android') {
         setPermissionStatus('denied');
       }
+
+      if (userId && (latestHealthPayload || latestHourlyPayload)) {
+        if (latestHealthPayload) {
+          await upsertOutboxItem({
+            userId,
+            kind: 'health',
+            payload: latestHealthPayload,
+          });
+        }
+        if (latestHourlyPayload) {
+          await upsertOutboxItem({
+            userId,
+            kind: 'hourly',
+            payload: latestHourlyPayload,
+          });
+        }
+
+        if (isLikelyOfflineError(error)) {
+          if (!options?.silent) {
+            showToast({ message: 'Offline detected. Data stored in SQLite and will sync when connection returns.', type: 'info' });
+          }
+          return;
+        }
+      }
+
       if (!options?.silent) {
         showToast({ message: extractSyncErrorMessage(error), type: 'error' });
       }
@@ -256,7 +395,7 @@ export function useHealthSync() {
       syncInFlightRef.current = false;
       setIsSyncing(false);
     }
-  }, [connectDevice, permissionStatus, queryClient, showToast, userId]);
+  }, [connectDevice, flushQueuedSync, permissionStatus, queryClient, showToast, userId]);
 
   const syncHealth = useCallback(() => runSyncHealth(), [runSyncHealth]);
   const syncHealthSilent = useCallback(() => runSyncHealth({ silent: true }), [runSyncHealth]);

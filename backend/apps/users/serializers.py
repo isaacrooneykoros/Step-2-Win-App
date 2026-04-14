@@ -64,6 +64,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     avg_payout_kes = serializers.SerializerMethodField()
     player_rank = serializers.SerializerMethodField()
     member_since = serializers.SerializerMethodField()
+    profile_picture_url = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -75,12 +76,12 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'daily_goal', 'stride_length_cm', 'weight_kg',
             'calibration_quality', 'calibration_variance_pct', 'last_calibrated_at',
             'win_rate', 'avg_payout_kes', 'player_rank', 'member_since',
-            'trust_score', 'trust_status', 'created_at'
+            'trust_score', 'trust_status', 'profile_picture', 'profile_picture_url', 'created_at'
         ]
         read_only_fields = [
             'wallet_balance', 'locked_balance', 'total_steps', 
             'challenges_won', 'total_earned', 'current_streak',
-            'challenges_joined', 'best_streak', 'best_day_steps'
+            'challenges_joined', 'best_streak', 'best_day_steps', 'profile_picture_url'
         ]
 
     def get_device_bound(self, obj) -> bool:
@@ -127,6 +128,14 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     def get_member_since(self, obj) -> str:
         return obj.date_joined.strftime('%B %Y')
+    
+    def get_profile_picture_url(self, obj) -> str:
+        if obj.profile_picture:
+            request = self.context.get('request') if hasattr(self, 'context') else None
+            if request is not None:
+                return request.build_absolute_uri(obj.profile_picture.url)
+            return obj.profile_picture.url
+        return None
 
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -153,6 +162,25 @@ class ChangePasswordSerializer(serializers.Serializer):
                 'confirm_password': 'Passwords do not match'
             })
         return data
+
+
+class ProfilePictureSerializer(serializers.Serializer):
+    """
+    Serializer for uploading profile pictures
+    """
+    profile_picture = serializers.ImageField(required=True)
+    
+    def validate_profile_picture(self, value):
+        # Validate file size (max 5MB)
+        if value.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError('Profile picture must be less than 5MB')
+        
+        # Validate file type
+        allowed_types = ['image/jpeg', 'image/png', 'image/webp']
+        if value.content_type not in allowed_types:
+            raise serializers.ValidationError('Only JPEG, PNG, and WebP images are allowed')
+        
+        return value
 
 
 class LoginSerializer(serializers.Serializer):

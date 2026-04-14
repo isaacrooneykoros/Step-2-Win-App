@@ -76,5 +76,7 @@ class DayDetailSerializer(serializers.Serializer):
     peak_steps = serializers.IntegerField()
     hourly = HourlyStepSerializer(many=True)
     waypoints = LocationWaypointSerializer(many=True)
+    route_distance_km = serializers.FloatField()
+    encoded_polyline = serializers.CharField()
     goal = serializers.IntegerField()
     goal_achieved = serializers.BooleanField()

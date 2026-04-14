@@ -28,6 +28,8 @@ export interface User {
   member_since: string;
   trust_score?: number;
   trust_status?: 'GOOD' | 'WARN' | 'REVIEW' | 'RESTRICT' | 'SUSPEND' | 'BAN';
+  profile_picture?: string | null;
+  profile_picture_url?: string | null;
   created_at: string;
 }
 
@@ -357,6 +359,8 @@ export interface DayDetail {
   peak_steps: number;
   hourly: HourlyStep[];
   waypoints: LocationWaypoint[];
+  route_distance_km?: number;
+  encoded_polyline?: string;
   goal: number;
   goal_achieved: boolean;
 }

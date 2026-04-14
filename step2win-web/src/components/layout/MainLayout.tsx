@@ -11,6 +11,15 @@ import {
   requestNotificationPermission,
   syncReminderNotifications,
 } from '../../services/notifications';
+import { checkCameraPermission, requestCameraPermission, type CameraPermissionState } from '../../services/cameraPermissions';
+import {
+  checkAdvancedPermissionSnapshot,
+  requestBackgroundLocationPermission,
+  requestForegroundLocationPermission,
+  type LocationPermissionState,
+} from '../../services/locationPermissions';
+
+const PERMISSIONS_BOOTSTRAP_DONE_KEY = 'permissions_bootstrap_done_v1';
 
 type BrandToken = {
   accent: string;
@@ -58,6 +67,9 @@ export default function MainLayout() {
   const { permissionStatus: globalPermissionStatus } = usePermissionStatus();
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<'prompt' | 'prompt-with-rationale' | 'granted' | 'denied' | 'unavailable'>('prompt');
+  const [cameraPermission, setCameraPermission] = useState<CameraPermissionState>('prompt');
+  const [locationPermission, setLocationPermission] = useState<LocationPermissionState>('prompt');
+  const [backgroundLocationPermission, setBackgroundLocationPermission] = useState<LocationPermissionState>('prompt');
 
   const isNative = Capacitor.isNativePlatform();
   const brand = useMemo(() => {
@@ -72,6 +84,14 @@ export default function MainLayout() {
   const canRequestNotificationPermission = useMemo(() => {
     return isNative && notificationPermission !== 'granted';
   }, [isNative, notificationPermission]);
+
+  const canRequestCameraPermission = useMemo(() => {
+    return isNative && cameraPermission !== 'granted';
+  }, [isNative, cameraPermission]);
+
+  const canRequestLocationPermission = useMemo(() => {
+    return isNative && locationPermission !== 'granted';
+  }, [isNative, locationPermission]);
 
   useEffect(() => {
     syncHealthSilent();
@@ -95,8 +115,13 @@ export default function MainLayout() {
       }
 
       const status = await checkNotificationPermission();
+      const camera = await checkCameraPermission();
+      const advanced = await checkAdvancedPermissionSnapshot();
       if (!cancelled) {
         setNotificationPermission(status);
+        setCameraPermission(camera);
+        setLocationPermission(advanced.location);
+        setBackgroundLocationPermission(advanced.backgroundLocation);
       }
     };
 
@@ -113,20 +138,21 @@ export default function MainLayout() {
   }, [isNative, notificationPermission]);
 
   useEffect(() => {
-    if (!canRequestDevicePermission && !canRequestNotificationPermission) {
+    const alreadyDone = localStorage.getItem(PERMISSIONS_BOOTSTRAP_DONE_KEY) === 'true';
+    if (alreadyDone) {
       setShowPermissionModal(false);
       return;
     }
 
-    const dismissedAt = localStorage.getItem('permissions_permission_modal_dismissed_at');
-    const cooldownMs = 12 * 60 * 60 * 1000;
-    const recentlyDismissed = dismissedAt ? Date.now() - Number(dismissedAt) < cooldownMs : false;
-
-    if (!recentlyDismissed) {
-      const timer = window.setTimeout(() => setShowPermissionModal(true), 800);
-      return () => window.clearTimeout(timer);
+    if (!canRequestDevicePermission && !canRequestNotificationPermission && !canRequestCameraPermission && !canRequestLocationPermission) {
+      localStorage.setItem(PERMISSIONS_BOOTSTRAP_DONE_KEY, 'true');
+      setShowPermissionModal(false);
+      return;
     }
-  }, [canRequestDevicePermission, canRequestNotificationPermission]);
+
+    const timer = window.setTimeout(() => setShowPermissionModal(true), 700);
+    return () => window.clearTimeout(timer);
+  }, [canRequestCameraPermission, canRequestDevicePermission, canRequestLocationPermission, canRequestNotificationPermission]);
 
   const handleEnablePermission = async () => {
     const ok = await connectDevice();
@@ -144,13 +170,25 @@ export default function MainLayout() {
   };
 
   const handleDismissPermission = () => {
-    localStorage.setItem('permissions_permission_modal_dismissed_at', String(Date.now()));
+    localStorage.setItem(PERMISSIONS_BOOTSTRAP_DONE_KEY, 'true');
     setShowPermissionModal(false);
   };
 
   const handleEnableEverything = async () => {
     await handleEnablePermission();
     await handleEnableNotifications();
+    const cameraGranted = await requestCameraPermission();
+    setCameraPermission(cameraGranted ? 'granted' : 'denied');
+
+    const locationGranted = await requestForegroundLocationPermission();
+    setLocationPermission(locationGranted ? 'granted' : 'denied');
+
+    if (locationGranted) {
+      const backgroundGranted = await requestBackgroundLocationPermission();
+      setBackgroundLocationPermission(backgroundGranted ? 'granted' : 'denied');
+    }
+
+    localStorage.setItem(PERMISSIONS_BOOTSTRAP_DONE_KEY, 'true');
     setShowPermissionModal(false);
   };
 
@@ -252,6 +290,24 @@ export default function MainLayout() {
             status={notificationPermission === 'granted' ? 'Granted' : 'Needs permission'}
             accent="#FBBF24"
           />
+          <PermissionCard
+            title="QR camera"
+            subtitle="Needed to scan challenge QR invites quickly without extra prompts."
+            status={cameraPermission === 'granted' ? 'Granted' : 'Needs permission'}
+            accent="#34D399"
+          />
+          <PermissionCard
+            title="Location tracking"
+            subtitle="Keeps route map accurate with current location and movement history."
+            status={locationPermission === 'granted' ? 'Granted' : 'Needs permission'}
+            accent="#A78BFA"
+          />
+          <PermissionCard
+            title="Background location"
+            subtitle="Captures route continuity while app is in background for better map consistency."
+            status={backgroundLocationPermission === 'granted' ? 'Granted' : 'Optional'}
+            accent="#22D3EE"
+          />
         </div>
 
         <div className="flex flex-col gap-3">
@@ -283,7 +339,7 @@ export default function MainLayout() {
             onClick={handleDismissPermission}
             className="w-full py-3 rounded-2xl text-text-muted font-semibold"
           >
-            Maybe later
+            Continue without prompts
           </button>
         </div>
       </BaseModal>

@@ -106,6 +106,17 @@ class User(AbstractUser):
         blank=True,
         help_text='Timestamp of the most recent stride calibration.'
     )
+    profile_picture = models.ImageField(
+        upload_to='profile_pictures/',
+        null=True,
+        blank=True,
+        help_text='User profile picture'
+    )
+    last_profile_picture_update = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='Timestamp when profile picture was last updated'
+    )
     privacy_policy_accepted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

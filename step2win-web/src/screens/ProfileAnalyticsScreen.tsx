@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -15,16 +15,26 @@ import {
   Activity,
 } from 'lucide-react';
 import { authService } from '../services/api';
+import { stepsService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import type { User } from '../types';
+
+type PeriodType = '1d' | '7d' | '30d' | '1y';
 
 export default function ProfileAnalyticsScreen() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const [period, setPeriod] = useState<PeriodType>('7d');
 
   const { data: profile } = useQuery<User>({
     queryKey: ['profile'],
     queryFn: authService.getProfile,
+  });
+
+  const { data: historyData = [] } = useQuery({
+    queryKey: ['steps-history', period],
+    queryFn: () => stepsService.getHistory(period),
+    staleTime: 5 * 60 * 1000,
   });
 
   const currentUser = (profile || user) as User | null;
@@ -37,19 +47,17 @@ export default function ProfileAnalyticsScreen() {
   }, [trustScore]);
 
   const winRate = Math.round(currentUser?.win_rate || 0);
+
   const trendData = useMemo(() => {
-    const totalSteps = currentUser?.total_steps || 0;
-    const bestDaySteps = currentUser?.best_day_steps || 0;
-    const streak = currentUser?.current_streak || 0;
-    const wins = currentUser?.challenges_won || 0;
-    return buildWeeklyTrend(totalSteps, bestDaySteps, streak, trustScore, wins);
-  }, [
-    currentUser?.best_day_steps,
-    currentUser?.challenges_won,
-    currentUser?.current_streak,
-    currentUser?.total_steps,
-    trustScore,
-  ]);
+    if (!historyData || historyData.length === 0) return [];
+    
+    return historyData
+      .map((record: any) => ({
+        date: record.date || '',
+        value: record.total_steps || 0,
+      }))
+      .slice(-Math.min(historyData.length, period === '1y' ? 365 : period === '30d' ? 30 : period === '7d' ? 7 : 1));
+  }, [historyData, period]);
 
   const trendMax = Math.max(...trendData.map((item) => item.value), 1);
   const trendMin = Math.min(...trendData.map((item) => item.value), trendMax);
@@ -73,57 +81,110 @@ export default function ProfileAnalyticsScreen() {
       <div className="px-4 pb-4">
         <div className="card rounded-[2rem] p-4 overflow-hidden relative">
           <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-r from-accent-blue/15 via-accent-purple/10 to-accent-green/10 pointer-events-none" />
+          
+          {/* Period selector */}
+          <div className="relative mb-4 flex gap-2">
+            {(['1d', '7d', '30d', '1y'] as PeriodType[]).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  period === p
+                    ? 'bg-accent-blue text-white'
+                    : 'bg-bg-input text-text-secondary border border-border'
+                }`}
+              >
+                {p === '1d' ? '1D' : p === '7d' ? '7D' : p === '30d' ? '30D' : '1Y'}
+              </button>
+            ))}
+          </div>
+
           <div className="relative flex items-end justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-widest text-text-muted mb-1">Performance Trend</p>
-              <h2 className="text-text-primary text-lg font-bold">Weekly Momentum</h2>
-              <p className="text-xs text-text-muted mt-1">A quick view of how your activity is moving.</p>
+              <p className="text-xs uppercase tracking-widest text-text-muted mb-1">Daily Steps</p>
+              <h2 className="text-text-primary text-lg font-bold">
+                {period === '1d' ? 'Today' : period === '7d' ? 'This Week' : period === '30d' ? 'This Month' : 'This Year'}
+              </h2>
+              <p className="text-xs text-text-muted mt-1">Day-by-day step performance</p>
             </div>
             <div className="rounded-2xl bg-bg-elevated border border-border px-3 py-2">
-              <p className="text-[11px] text-text-muted">Score</p>
-              <p className="text-lg font-black text-text-primary">{trustScore}</p>
+              <p className="text-[11px] text-text-muted">Avg Daily</p>
+              <p className="text-lg font-black text-text-primary">
+                {trendData.length > 0
+                  ? Math.round(trendData.reduce((sum, d) => sum + d.value, 0) / trendData.length).toLocaleString()
+                  : '0'}
+              </p>
             </div>
           </div>
 
           <div className="mt-4 rounded-2xl border border-border bg-bg-input/60 p-3">
-            <div className="relative h-40">
-              <div className="absolute inset-0 flex items-end gap-2">
-                {trendData.map((item, index) => {
-                  const height = Math.max(12, (item.value / trendMax) * 120);
-                  const activeTone = index >= trendData.length - 2;
-                  return (
-                    <div key={item.label} className="flex-1 flex items-end justify-center">
-                      <div
-                        className={`w-full rounded-xl ${activeTone ? 'bg-gradient-to-t from-accent-green to-accent-blue' : 'bg-gradient-to-t from-accent-blue/80 to-accent-purple/70'}`}
-                        style={{ height: `${height}px` }}
-                        aria-label={`${item.label} ${item.value}`}
-                      />
-                    </div>
-                  );
-                })}
+            {trendData.length > 0 ? (
+              <>
+                <div className="relative h-40">
+                  <div className="absolute inset-0 flex items-end justify-start gap-0.5 overflow-hidden">
+                    {trendData.map((item, index) => {
+                      const height = ((item.value - trendMin) / Math.max(trendMax - trendMin, 1)) * 120 + 4;
+                      const colorIndex = Math.floor((index / trendData.length) * 100);
+                      
+                      let bgColor: string;
+                      if (colorIndex < 30) {
+                        bgColor = 'from-accent-blue/90 to-accent-blue/60';
+                      } else if (colorIndex < 60) {
+                        bgColor = 'from-accent-purple/80 to-accent-blue/70';
+                      } else if (colorIndex < 80) {
+                        bgColor = 'from-accent-cyan/80 to-accent-purple/60';
+                      } else {
+                        bgColor = 'from-accent-green/90 to-accent-cyan/70';
+                      }
+
+                      return (
+                        <div
+                          key={`${item.date}-${index}`}
+                          className="flex-1 flex items-end justify-center min-w-0"
+                          aria-label={`${item.date}: ${item.value} steps`}
+                        >
+                          <div
+                            className={`w-full rounded-sm bg-gradient-to-t ${bgColor}`}
+                            style={{ height: `${height}px`, minWidth: '2px' }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                    <polyline
+                      fill="none"
+                      stroke="hsl(var(--accent-yellow))"
+                      strokeWidth="1.5"
+                      opacity="0.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      points={toSparklinePoints(trendData)}
+                    />
+                  </svg>
+                </div>
+                <div className="mt-3 flex items-center justify-between text-[11px] text-text-muted">
+                  <span>Low: {trendMin.toLocaleString()} steps</span>
+                  <span>High: {trendMax.toLocaleString()} steps</span>
+                </div>
+                <div className="mt-2 grid gap-1" style={{ gridTemplateColumns: `repeat(${Math.min(trendData.length, 14)}, 1fr)` }}>
+                  {trendData.slice(-Math.min(trendData.length, 14)).map((item, idx) => {
+                    const label = period === '1d' ? new Date(item.date).getHours() + 'h' : 
+                                 period === '7d' ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'][new Date(item.date).getDay()] :
+                                 new Date(item.date).getDate().toString();
+                    return (
+                      <span key={`${item.date}-label-${idx}`} className="text-[9px] text-text-muted text-center truncate">
+                        {label}
+                      </span>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="h-40 flex items-center justify-center text-text-muted text-sm">
+                No data for this period
               </div>
-              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                <polyline
-                  fill="none"
-                  stroke="hsl(var(--accent-yellow))"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  points={toSparklinePoints(trendData)}
-                />
-              </svg>
-            </div>
-            <div className="mt-3 flex items-center justify-between text-[11px] text-text-muted">
-              <span>Low: {trendMin.toLocaleString()}</span>
-              <span>High: {trendMax.toLocaleString()}</span>
-            </div>
-            <div className="mt-2 grid grid-cols-7 gap-2">
-              {trendData.map((item) => (
-                <span key={`${item.label}-axis`} className="text-[10px] text-text-muted text-center">
-                  {item.label}
-                </span>
-              ))}
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -213,28 +274,8 @@ export default function ProfileAnalyticsScreen() {
   );
 }
 
-function buildWeeklyTrend(
-  totalSteps: number,
-  bestDaySteps: number,
-  streak: number,
-  trust: number,
-  wins: number,
-): Array<{ label: string; value: number }> {
-  const labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-  const base = Math.max(2000, Math.floor(totalSteps / 21));
-  const boost = Math.max(0, Math.floor(bestDaySteps / 18));
-  const pulse = clamp(trust, 35, 100) / 100;
-
-  return labels.map((label, index) => {
-    const wave = Math.sin((index + streak) * 0.9) * 0.22 + 1;
-    const slope = 0.9 + index * 0.04;
-    const winPush = 1 + Math.min(wins, 12) * 0.01;
-    const value = Math.round((base * wave * slope + boost * pulse) * winPush);
-    return { label, value: Math.max(1200, value) };
-  });
-}
-
 function toSparklinePoints(data: Array<{ value: number }>): string {
+  if (data.length === 0) return '';
   const max = Math.max(...data.map((item) => item.value), 1);
   const min = Math.min(...data.map((item) => item.value), max);
   const range = Math.max(max - min, 1);

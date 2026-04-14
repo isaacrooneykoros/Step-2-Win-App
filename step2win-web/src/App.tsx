@@ -26,6 +26,7 @@ const WalletScreen = lazy(() => import('./screens/WalletScreen'));
 const ProfileScreen = lazy(() => import('./screens/ProfileScreen'));
 const ProfileAnalyticsScreen = lazy(() => import('./screens/ProfileAnalyticsScreen'));
 const SettingsScreen = lazy(() => import('./screens/SettingsScreen'));
+const SyncOutboxScreen = lazy(() => import('./screens/SyncOutboxScreen'));
 const StepsDetailScreen = lazy(() => import('./screens/StepsDetailScreen'));
 const StepsHistoryScreen = lazy(() => import('./screens/StepsHistoryScreen'));
 const StepsDayDetailScreen = lazy(() => import('./screens/StepsDayDetailScreen'));
@@ -243,6 +244,7 @@ export default function App() {
               <Route path="/profile" element={withSuspense(<ProfileScreen />)} />
               <Route path="/profile/analytics" element={withSuspense(<ProfileAnalyticsScreen />)} />
               <Route path="/settings" element={withSuspense(<SettingsScreen />)} />
+              <Route path="/settings/sync-outbox" element={withSuspense(<SyncOutboxScreen />)} />
               <Route path="/profile/sessions" element={withSuspense(<ActiveSessionsScreen />)} />
               <Route path="/support" element={withSuspense(<SupportScreen />)} />
               <Route path="/legal/:slug" element={withSuspense(<LegalDocumentScreen />)} />

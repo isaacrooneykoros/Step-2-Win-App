@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useQuery } from '@tanstack/react-query';
+import { API_BASE } from '../../config/network';
 
 type StatsResponse = {
   total_users?: number;
@@ -48,9 +49,8 @@ export function AuthRightPanel() {
     retry: false,
     staleTime: 60_000,
     queryFn: async (): Promise<StatsResponse | null> => {
-      const base = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
       try {
-        const response = await axios.get<StatsResponse>(`${base}/api/admin/dashboard/overview/`, {
+        const response = await axios.get<StatsResponse>(`${API_BASE}/api/admin/dashboard/overview/`, {
           timeout: 4000,
         });
         return response.data;
