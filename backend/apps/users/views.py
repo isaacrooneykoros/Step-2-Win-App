@@ -247,6 +247,7 @@ class ProfileView(generics.RetrieveUpdateAPIView):
     """
     Get or update user profile
     Supports both PUT (partial update) and PATCH (partial update)
+    Automatically handles daily reset and streak calculation on retrieval
     """
     serializer_class = UserProfileSerializer
     permission_classes = [IsAuthenticated]
@@ -255,9 +256,91 @@ class ProfileView(generics.RetrieveUpdateAPIView):
     def get_object(self):
         return self.request.user
     
+    def retrieve(self, request, *args, **kwargs):
+        """Override retrieve to handle daily reset"""
+        from apps.steps.daily_reset import reset_daily_stats_if_needed
+        
+        user = self.get_object()
+        reset_daily_stats_if_needed(user)
+        
+        return super().retrieve(request, *args, **kwargs)
+    
     def put(self, request, *args, **kwargs):
         """Handle PUT requests as partial updates"""
         return self.partial_update(request, *args, **kwargs)
+
+
+@extend_schema(
+    request=inline_serializer(
+        name='UploadProfilePictureRequest',
+        fields={
+            'profile_picture': serializers.ImageField(),
+        },
+    ),
+    responses={
+        200: inline_serializer(
+            name='UploadProfilePictureResponse',
+            fields={
+                'status': serializers.CharField(),
+                'profile_picture_url': serializers.CharField(),
+                'message': serializers.CharField(),
+            },
+        )
+    },
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_profile_picture(request):
+    """
+    Upload a profile picture for the current user
+    """
+    from .serializers import ProfilePictureSerializer
+    from django.utils import timezone
+    
+    serializer = ProfilePictureSerializer(data=request.FILES)
+    serializer.is_valid(raise_exception=True)
+    
+    user = request.user
+    
+    # Delete old profile picture if it exists
+    if user.profile_picture:
+        user.profile_picture.delete()
+    
+    # Save new profile picture
+    user.profile_picture = serializer.validated_data['profile_picture']
+    user.last_profile_picture_update = timezone.now()
+    user.save()
+    
+    return Response({
+        'status': 'success',
+        'profile_picture_url': user.profile_picture.url if user.profile_picture else None,
+        'message': 'Profile picture uploaded successfully'
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_profile_picture(request):
+    """
+    Delete the current user's profile picture
+    """
+    user = request.user
+    
+    if user.profile_picture:
+        user.profile_picture.delete()
+        user.profile_picture = None
+        user.last_profile_picture_update = None
+        user.save()
+        
+        return Response({
+            'status': 'success',
+            'message': 'Profile picture deleted successfully'
+        }, status=status.HTTP_200_OK)
+    
+    return Response({
+        'status': 'error',
+        'message': 'No profile picture to delete'
+    }, status=status.HTTP_400_BAD_REQUEST)
 
 
 @extend_schema(

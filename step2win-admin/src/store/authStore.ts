@@ -5,6 +5,7 @@
  */
 
 import { create } from 'zustand';
+import { API_BASE } from '../config/network';
 
 export interface AdminUser {
   id: number;
@@ -54,7 +55,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true });
     const refresh = localStorage.getItem(REFRESH_KEY);
     const rawUser = localStorage.getItem(USER_KEY);
-    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
     if (!refresh) {
       set({ isLoading: false, isHydrated: true });
@@ -62,7 +62,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
 
     try {
-      const res = await fetch(`${apiBase}/api/auth/refresh/`, {
+      const res = await fetch(`${API_BASE}/api/auth/refresh/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh }),

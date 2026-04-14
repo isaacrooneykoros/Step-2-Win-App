@@ -3,8 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, Share2, MapPin, Flame, Footprints, Timer } from 'lucide-react';
 import { stepsService } from '../services/api/steps';
-import type { DayDetail, HourlyStep } from '../types';
+import type { DayDetail, HourlyStep, LocationWaypoint } from '../types';
 import { StepsDayMap } from '../components/StepsDayMap';
+import { buildStepShareCard } from '../utils/shareCard';
 
 export default function StepsDayDetailScreen() {
   const { date } = useParams<{ date: string }>();
@@ -29,13 +30,47 @@ export default function StepsDayDetailScreen() {
       })
     : '';
 
-  const handleShare = () => {
+  const handleShare = async () => {
     if (!data) return;
-    if (navigator.share) {
-      navigator.share({
-        title: `My steps on ${formattedDate}`,
-        text: `I walked ${data.total_steps.toLocaleString()} steps (${data.total_km} km) on ${formattedDate}!  #Step2Win`,
+
+    const message = `I just did ${data.total_steps.toLocaleString()} steps, ${Number(data.total_km).toFixed(2)} km, ${data.total_calories.toLocaleString()} kcal on ${formattedDate}.\nJoin me on Step2Win and turn every step into rewards.`;
+
+    try {
+      const cardBlob = await buildStepShareCard({
+        dateLabel: formattedDate,
+        steps: data.total_steps,
+        km: Number(data.total_km) || 0,
+        kcal: data.total_calories,
+        minutes: data.active_minutes,
       });
+
+      const file = new File([cardBlob], `step2win-${date || 'day'}.png`, { type: 'image/png' });
+      const canShareFiles = typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
+
+      if (navigator.share && canShareFiles) {
+        await navigator.share({
+          title: `My Step2Win stats - ${formattedDate}`,
+          text: message,
+          files: [file],
+        });
+        return;
+      }
+
+      if (navigator.share) {
+        await navigator.share({
+          title: `My Step2Win stats - ${formattedDate}`,
+          text: message,
+        });
+        return;
+      }
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(message);
+      }
+      window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.warn('Share failed, falling back to WhatsApp link', error);
+      window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -65,6 +100,9 @@ export default function StepsDayDetailScreen() {
         </div>
       </div>
     );
+
+  const routeConfidence = getRouteConfidence(data);
+  const hasRoute = Boolean(data.encoded_polyline) || data.waypoints.length > 0;
 
   return (
     <div className="min-h-screen pb-10 bg-bg-page">
@@ -111,12 +149,19 @@ export default function StepsDayDetailScreen() {
       <SectionCard
         title="Movement Map"
         subtitle={
-          data.waypoints.length > 0
-            ? `${data.waypoints.length} GPS points recorded`
+          hasRoute
+            ? `${data.route_distance_km?.toFixed(2) || data.total_km.toFixed(2)} km route tracked`
             : 'No GPS data for this day'
         }
       >
-        {data.waypoints.length > 0 ? <StepsDayMap waypoints={data.waypoints} /> : <NoMapState />}
+        {hasRoute ? (
+          <>
+            <RouteConfidenceBadges confidence={routeConfidence} />
+            <StepsDayMap waypoints={data.waypoints} encodedPolyline={data.encoded_polyline} />
+          </>
+        ) : (
+          <NoMapState />
+        )}
       </SectionCard>
     </div>
   );
@@ -232,6 +277,96 @@ function SectionCard({
       {children}
     </div>
   );
+}
+
+function RouteConfidenceBadges({ confidence }: { confidence: RouteConfidence }) {
+  return (
+    <div className="px-4 pb-3 flex flex-wrap gap-2">
+      <Badge
+        label={`Route: ${confidence.sourceLabel}`}
+        tone={confidence.source === 'encoded' ? 'good' : 'warn'}
+      />
+      <Badge
+        label={`${confidence.waypointCount.toLocaleString()} points`}
+        tone={confidence.waypointCount >= 25 ? 'good' : confidence.waypointCount >= 8 ? 'warn' : 'neutral'}
+      />
+      <Badge label={`Confidence: ${confidence.grade}`} tone={confidence.tone} />
+      {confidence.routeDistanceKm > 0 && (
+        <Badge label={`Route ${confidence.routeDistanceKm.toFixed(2)} km`} tone="neutral" />
+      )}
+    </div>
+  );
+}
+
+function Badge({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: 'good' | 'warn' | 'bad' | 'neutral';
+}) {
+  const toneClass =
+    tone === 'good'
+      ? 'bg-tint-green text-accent-green border-border'
+      : tone === 'warn'
+        ? 'bg-tint-yellow text-accent-yellow border-border'
+        : tone === 'bad'
+          ? 'bg-tint-red text-accent-red border-border'
+          : 'bg-bg-input text-text-secondary border-border';
+
+  return <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${toneClass}`}>{label}</span>;
+}
+
+type RouteConfidence = {
+  source: 'encoded' | 'waypoints';
+  sourceLabel: string;
+  waypointCount: number;
+  routeDistanceKm: number;
+  grade: 'High' | 'Medium' | 'Low';
+  tone: 'good' | 'warn' | 'bad';
+};
+
+function getRouteConfidence(data: DayDetail): RouteConfidence {
+  const source: 'encoded' | 'waypoints' = data.encoded_polyline ? 'encoded' : 'waypoints';
+  const sourceLabel = source === 'encoded' ? 'Encoded polyline' : 'Waypoint fallback';
+  const waypointCount = data.waypoints.length;
+  const routeDistanceKm = Number(data.route_distance_km || data.total_km || 0);
+
+  let score = source === 'encoded' ? 2 : 0;
+
+  if (waypointCount >= 25) score += 2;
+  else if (waypointCount >= 8) score += 1;
+
+  const avgAccuracy = averageAccuracy(data.waypoints);
+  if (avgAccuracy > 0) {
+    if (avgAccuracy <= 20) score += 2;
+    else if (avgAccuracy <= 40) score += 1;
+    else if (avgAccuracy >= 80) score -= 1;
+  }
+
+  const reportedKm = Number(data.total_km || 0);
+  if (reportedKm > 0 && routeDistanceKm > 0) {
+    const ratio = Math.abs(routeDistanceKm - reportedKm) / Math.max(reportedKm, 0.01);
+    if (ratio <= 0.25) score += 1;
+    else if (ratio > 0.7) score -= 1;
+  }
+
+  if (score >= 5) {
+    return { source, sourceLabel, waypointCount, routeDistanceKm, grade: 'High', tone: 'good' };
+  }
+  if (score >= 2) {
+    return { source, sourceLabel, waypointCount, routeDistanceKm, grade: 'Medium', tone: 'warn' };
+  }
+  return { source, sourceLabel, waypointCount, routeDistanceKm, grade: 'Low', tone: 'bad' };
+}
+
+function averageAccuracy(points: LocationWaypoint[]): number {
+  const valid = points
+    .map((point) => Number(point.accuracy_m || 0))
+    .filter((accuracy) => Number.isFinite(accuracy) && accuracy > 0);
+
+  if (valid.length === 0) return 0;
+  return valid.reduce((sum, accuracy) => sum + accuracy, 0) / valid.length;
 }
 
 //  Hourly Bar Chart 

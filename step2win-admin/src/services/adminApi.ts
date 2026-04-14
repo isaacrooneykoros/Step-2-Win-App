@@ -15,8 +15,7 @@ import type {
   FraudOverview,
 } from '../types/admin';
 import { useAuthStore, type AdminUser as StoreAdminUser } from '../store/authStore';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+import { API_BASE } from '../config/network';
 
 function getAuthToken(): string | null {
   return useAuthStore.getState().accessToken;

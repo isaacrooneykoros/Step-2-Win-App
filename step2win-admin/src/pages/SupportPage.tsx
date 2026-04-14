@@ -3,6 +3,7 @@ import { adminApi } from '../services/adminApi';
 import type { SupportAdminUser, SupportTicket, SupportTicketMessage } from '../types/admin';
 import { Headset, Search, Filter, MessageSquare, Clock, User } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
+import { API_BASE } from '../config/network';
 
 export function SupportPage() {
   const accessToken = useAuthStore((state) => state.accessToken);
@@ -87,8 +88,7 @@ export function SupportPage() {
     const token = accessToken;
     if (!token) return;
 
-    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
-    const wsBase = apiBase.replace(/^http/, 'ws').replace(/\/$/, '');
+    const wsBase = API_BASE.replace(/^http/, 'ws').replace(/\/$/, '');
     const socket = new WebSocket(`${wsBase}/ws/support/tickets/${ticketId}/?token=${encodeURIComponent(token)}`);
     wsRef.current = socket;
 

@@ -1,5 +1,6 @@
 from datetime import timedelta
 import logging
+import math
 
 import redis as redis_client
 from django.conf import settings
@@ -17,10 +18,17 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
 from .anti_cheat import DAILY_STEP_CAP, run_anti_cheat
+from .daily_reset import update_streak
 from .models import FraudFlag, HealthRecord, SuspiciousActivity, TrustScore, HourlyStepRecord, LocationWaypoint
 from .serializers import HealthRecordSerializer, HealthSyncSerializer, HourlyStepSerializer, LocationWaypointSerializer
 
 logger = logging.getLogger(__name__)
+
+WAYPOINT_MAX_ACCURACY_M = 75.0
+WAYPOINT_MIN_DISTANCE_M = 2.0
+WAYPOINT_MAX_SPEED_MPS = 8.0
+ROUTE_DISTANCE_PER_STEP_MIN_KM = 0.0002
+ROUTE_DISTANCE_PER_STEP_MAX_KM = 0.0030
 
 
 def _get_redis_client():
@@ -69,6 +77,114 @@ def _acquire_periodic_lock(lock_key: str, ttl_seconds: int) -> bool:
         return _redis.set(lock_key, '1', nx=True, ex=ttl_seconds) is not None
     except Exception:
         return cache.add(lock_key, '1', timeout=ttl_seconds)
+
+
+def _haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius_m = 6_371_000.0
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(d_lat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(d_lon / 2) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return radius_m * c
+
+
+def _filter_waypoints_for_storage(day, waypoints: list) -> tuple[list[dict], dict]:
+    accepted: list[dict] = []
+    dropped_accuracy = 0
+    dropped_speed = 0
+    dropped_jitter = 0
+    dropped_malformed = 0
+
+    for wp in waypoints:
+        try:
+            lat = float(wp['latitude'])
+            lng = float(wp['longitude'])
+            accuracy = max(0.0, float(wp.get('accuracy_m', 0.0)))
+            recorded_at = timezone.datetime.fromisoformat(str(wp['recorded_at']).replace('Z', '+00:00'))
+            if timezone.is_naive(recorded_at):
+                recorded_at = timezone.make_aware(recorded_at, timezone.utc)
+            hour = int(wp.get('hour', recorded_at.hour))
+            hour = min(23, max(0, hour))
+        except Exception:
+            dropped_malformed += 1
+            continue
+
+        if recorded_at.date() != day:
+            continue
+
+        if accuracy > WAYPOINT_MAX_ACCURACY_M:
+            dropped_accuracy += 1
+            continue
+
+        if accepted:
+            prev = accepted[-1]
+            dt_seconds = max(1.0, (recorded_at - prev['recorded_at']).total_seconds())
+            distance_m = _haversine_meters(prev['latitude'], prev['longitude'], lat, lng)
+            if distance_m < WAYPOINT_MIN_DISTANCE_M:
+                dropped_jitter += 1
+                continue
+            if (distance_m / dt_seconds) > WAYPOINT_MAX_SPEED_MPS:
+                dropped_speed += 1
+                continue
+
+        accepted.append({
+            'hour': hour,
+            'recorded_at': recorded_at,
+            'latitude': lat,
+            'longitude': lng,
+            'accuracy_m': accuracy,
+        })
+
+    return accepted, {
+        'accepted': len(accepted),
+        'dropped_accuracy': dropped_accuracy,
+        'dropped_speed': dropped_speed,
+        'dropped_jitter': dropped_jitter,
+        'dropped_malformed': dropped_malformed,
+    }
+
+
+def _route_distance_km(points: list[dict]) -> float:
+    if len(points) < 2:
+        return 0.0
+
+    meters = 0.0
+    for idx in range(1, len(points)):
+        prev = points[idx - 1]
+        curr = points[idx]
+        meters += _haversine_meters(prev['latitude'], prev['longitude'], curr['latitude'], curr['longitude'])
+    return meters / 1000.0
+
+
+def _encode_polyline(points: list[tuple[float, float]]) -> str:
+    if not points:
+        return ''
+
+    def _encode_value(value: int) -> str:
+        value = ~(value << 1) if value < 0 else (value << 1)
+        out = []
+        while value >= 0x20:
+            out.append(chr((0x20 | (value & 0x1F)) + 63))
+            value >>= 5
+        out.append(chr(value + 63))
+        return ''.join(out)
+
+    last_lat = 0
+    last_lng = 0
+    encoded = []
+    for lat, lng in points:
+        lat_i = int(round(lat * 1e5))
+        lng_i = int(round(lng * 1e5))
+        encoded.append(_encode_value(lat_i - last_lat))
+        encoded.append(_encode_value(lng_i - last_lng))
+        last_lat = lat_i
+        last_lng = lng_i
+    return ''.join(encoded)
 
 
 @extend_schema(
@@ -260,6 +376,9 @@ def sync_health(request):
             best_day_steps=record.steps
         )
 
+    # Keep streak counters fresh whenever step sync updates a daily record.
+    update_streak(user)
+
     from apps.challenges.models import Challenge, Participant
     from apps.challenges.services import finalize_expired_challenges
 
@@ -364,9 +483,9 @@ def today_health(request):
     return Response({
         'date': str(today),
         'steps': 0,
-        'distance_km': None,
-        'calories_active': None,
-        'active_minutes': None,
+        'distance_km': 0,
+        'calories_active': 0,
+        'active_minutes': 0,
         'is_suspicious': False,
     })
 
@@ -505,6 +624,8 @@ def weekly_steps(request):
                 'peak_steps': serializers.IntegerField(),
                 'hourly': serializers.ListField(),
                 'waypoints': serializers.ListField(),
+                'route_distance_km': serializers.FloatField(),
+                'encoded_polyline': serializers.CharField(),
                 'goal': serializers.IntegerField(),
                 'goal_achieved': serializers.BooleanField(),
             },
@@ -572,6 +693,19 @@ def day_detail(request, date_str):
     if daily_record and daily_record.steps > total_steps:
         total_steps = daily_record.steps
 
+    waypoint_payload = LocationWaypointSerializer(waypoints_qs, many=True).data
+    route_points = [
+        (float(wp['latitude']), float(wp['longitude']))
+        for wp in waypoint_payload
+        if wp.get('latitude') is not None and wp.get('longitude') is not None
+    ]
+    route_distance_km = 0.0
+    if len(route_points) >= 2:
+        route_distance_km = round(sum(
+            _haversine_meters(route_points[idx - 1][0], route_points[idx - 1][1], route_points[idx][0], route_points[idx][1])
+            for idx in range(1, len(route_points))
+        ) / 1000.0, 3)
+
     data = {
         'date': str(day),
         'total_steps': total_steps,
@@ -581,7 +715,9 @@ def day_detail(request, date_str):
         'peak_hour': peak_hour,
         'peak_steps': peak_steps,
         'hourly': HourlyStepSerializer(hourly_qs, many=True).data,
-        'waypoints': LocationWaypointSerializer(waypoints_qs, many=True).data,
+        'waypoints': waypoint_payload,
+        'route_distance_km': route_distance_km,
+        'encoded_polyline': _encode_polyline(route_points),
         'goal': goal,
         'goal_achieved': total_steps >= goal,
     }
@@ -647,24 +783,72 @@ def sync_hourly_steps(request):
             }
         )
 
-    # Store waypoints — only keep last 500 per day to manage storage
+    stored_waypoints = 0
+    waypoint_quality = {
+        'accepted': 0,
+        'dropped_accuracy': 0,
+        'dropped_speed': 0,
+        'dropped_jitter': 0,
+        'dropped_malformed': 0,
+    }
+
+    # Store waypoints with quality filtering — keeps route realistic and prevents teleport spikes.
     if waypoints:
+        filtered, waypoint_quality = _filter_waypoints_for_storage(day, waypoints)
         existing_count = LocationWaypoint.objects.filter(user=user, date=day).count()
-        for wp in waypoints[:max(0, 500 - existing_count)]:
-            try:
-                LocationWaypoint.objects.get_or_create(
+        budget = max(0, 500 - existing_count)
+        for wp in filtered[:budget]:
+            _, created = LocationWaypoint.objects.get_or_create(
+                user=user,
+                date=day,
+                recorded_at=wp['recorded_at'],
+                defaults={
+                    'hour': wp['hour'],
+                    'latitude': wp['latitude'],
+                    'longitude': wp['longitude'],
+                    'accuracy_m': wp['accuracy_m'],
+                }
+            )
+            if created:
+                stored_waypoints += 1
+
+        # Route plausibility check: compare route distance against synced steps.
+        route_km = _route_distance_km(filtered)
+        daily_record = HealthRecord.objects.filter(user=user, date=day).first()
+        if daily_record and daily_record.steps > 0 and route_km > 0:
+            ratio_km_per_step = route_km / daily_record.steps
+            if ratio_km_per_step < ROUTE_DISTANCE_PER_STEP_MIN_KM:
+                FraudFlag.objects.create(
                     user=user,
                     date=day,
-                    recorded_at=wp['recorded_at'],
-                    defaults={
-                        'hour': wp.get('hour', 0),
-                        'latitude': float(wp['latitude']),
-                        'longitude': float(wp['longitude']),
-                        'accuracy_m': float(wp.get('accuracy_m', 0)),
-                    }
+                    flag_type='route_step_mismatch_low_distance',
+                    severity='high',
+                    details={
+                        'steps': daily_record.steps,
+                        'route_km': round(route_km, 3),
+                        'ratio_km_per_step': round(ratio_km_per_step, 6),
+                        'min_expected_km_per_step': ROUTE_DISTANCE_PER_STEP_MIN_KM,
+                        'note': 'Route distance is too short for submitted step volume.',
+                    },
                 )
-            except (KeyError, ValueError):
-                continue
+            elif ratio_km_per_step > ROUTE_DISTANCE_PER_STEP_MAX_KM:
+                FraudFlag.objects.create(
+                    user=user,
+                    date=day,
+                    flag_type='route_step_mismatch_high_distance',
+                    severity='medium',
+                    details={
+                        'steps': daily_record.steps,
+                        'route_km': round(route_km, 3),
+                        'ratio_km_per_step': round(ratio_km_per_step, 6),
+                        'max_expected_km_per_step': ROUTE_DISTANCE_PER_STEP_MAX_KM,
+                        'note': 'Route distance is unusually long for submitted step volume.',
+                    },
+                )
 
-    return Response({'status': 'synced', 'hourly_count': len(hourly),
-                     'waypoint_count': len(waypoints)})
+    return Response({
+        'status': 'synced',
+        'hourly_count': len(hourly),
+        'waypoint_count': stored_waypoints,
+        'waypoint_quality': waypoint_quality,
+    })

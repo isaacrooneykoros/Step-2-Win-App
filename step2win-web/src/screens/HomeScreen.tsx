@@ -2,7 +2,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { Footprints, Trophy, Wallet, Flame, ChevronRight, Zap, Compass, Target, X, CheckCircle } from 'lucide-react';
-import { stepsService, challengesService, gamificationService, walletService } from '../services/api';
+import { authService, stepsService, challengesService, gamificationService, walletService } from '../services/api';
 import { usersService } from '../services/api/users';
 import { useAuthStore } from '../store/authStore';
 import { useStepsSyncStore } from '../store/stepsSyncStore';
@@ -28,6 +28,11 @@ export default function HomeScreen() {
   const { data: todayData, isLoading: loadingToday } = useQuery({
     queryKey: ['health', 'today'],
     queryFn: stepsService.getTodayHealth,
+  });
+
+  const { data: profileData } = useQuery({
+    queryKey: ['profile'],
+    queryFn: authService.getProfile,
   });
 
   const { data: weeklyData, isLoading: loadingWeekly } = useQuery({
@@ -71,7 +76,7 @@ export default function HomeScreen() {
   // const today = new Date().toISOString().split('T')[0];
   const days = weeklyData || [];
 
-  const streak = 5;
+  const streak = profileData?.current_streak ?? user?.current_streak ?? 0;
   const weekTotal = days.reduce((sum, d) => sum + d.steps, 0);
   const todayIndex = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
 
@@ -292,39 +297,49 @@ export default function HomeScreen() {
               {weekTotal.toLocaleString()}
             </span>
           </div>
-          <div className="flex items-end gap-2" style={{ height: 120 }}>
-            {days.map((day, i) => {
-              const maxSteps = Math.max(...days.map(d => d.steps), 1);
-              const barH = Math.max((day.steps / maxSteps) * 96, 8);
-              const isToday = i === todayIndex;
-              const hasSteps = day.steps > 0;
-              return (
-                <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                  <span className="text-[10px] font-medium text-text-muted h-4 flex items-center">
-                    {hasSteps ? (
-                      day.steps >= 1000 ? `${(day.steps/1000).toFixed(1)}k` : day.steps
-                    ) : ''}
-                  </span>
-                  <div 
-                    className="w-full rounded-lg transition-all duration-700 ease-out"
-                    style={{
-                      height: `${barH}px`,
-                      minHeight: 8,
-                      backgroundColor: isToday
-                        ? '#4F9CF9'
-                        : hasSteps
-                          ? '#BFDBFE'
-                          : '#F3F4F6',
-                    }}
-                  />
-                  <span className={`text-xs font-medium ${
-                    isToday ? 'text-accent-blue' : 'text-text-muted'
-                  }`}>
-                    {['M','T','W','T','F','S','S'][i]}
-                  </span>
-                </div>
-              );
-            })}
+          <div className="relative rounded-2xl border border-border bg-bg-input/40 p-3" style={{ height: 160 }}>
+            <div className="absolute inset-3 flex items-end justify-start gap-0.5">
+              {days.map((day, i) => {
+                const maxSteps = Math.max(...days.map(d => d.steps), 1);
+                const minSteps = Math.min(...days.map(d => d.steps, 1));
+                const range = Math.max(maxSteps - minSteps, 1);
+                const barH = ((day.steps - minSteps) / range) * 120 + 4;
+                const isToday = i === todayIndex;
+                const hasSteps = day.steps > 0;
+                
+                // Gradient color based on day position
+                let bgColor = 'from-accent-blue/80 to-accent-purple/60';
+                if (i >= 5) {
+                  bgColor = 'from-accent-cyan/80 to-accent-green/70';
+                } else if (i >= 3) {
+                  bgColor = 'from-accent-purple/70 to-accent-blue/60';
+                }
+
+                return (
+                  <div
+                    key={i}
+                    className="flex-1 flex items-end justify-center min-w-0"
+                    aria-label={`${['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'][i]}: ${day.steps} steps`}
+                  >
+                    <div
+                      className={`w-full rounded-sm bg-gradient-to-t transition-all duration-500 ${bgColor} ${isToday ? 'ring-2 ring-offset-1 ring-offset-bg-input ring-accent-blue' : ''}`}
+                      style={{
+                        height: hasSteps ? `${barH}px` : '3px',
+                        minWidth: '2px',
+                        opacity: hasSteps ? 1 : 0.3,
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="absolute bottom-2 inset-x-3 flex justify-between text-[10px] text-text-muted px-0.5">
+              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((label, i) => (
+                <span key={`${label}-${i}`} className={todayIndex === i ? 'text-accent-blue font-bold' : ''}>
+                  {label}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
       </div>

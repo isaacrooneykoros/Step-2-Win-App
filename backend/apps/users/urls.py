@@ -21,6 +21,8 @@ urlpatterns = [
     
     # User profile and settings
     path('profile/', views.ProfileView.as_view(), name='profile'),
+    path('profile/picture/upload/', views.upload_profile_picture, name='upload_profile_picture'),
+    path('profile/picture/delete/', views.delete_profile_picture, name='delete_profile_picture'),
     path('goal/', views.update_daily_goal, name='update_daily_goal'),
     path('bind-device/', views.bind_device, name='bind_device'),
     path('device-status/', views.device_status, name='device_status'),

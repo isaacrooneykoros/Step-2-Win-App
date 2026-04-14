@@ -11,6 +11,7 @@ import {
   BarChart3,
   LifeBuoy,
   ShieldCheck,
+  Database,
 } from 'lucide-react';
 import { authService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
@@ -90,12 +91,20 @@ export default function ProfileScreen() {
           <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-accent-blue/15 via-accent-purple/10 to-transparent pointer-events-none" />
           <div className="relative flex flex-col items-center text-center">
             <div className="relative">
-              <div
-                className="w-24 h-24 rounded-[2rem] flex items-center justify-center text-3xl font-black text-white shadow-soft ring-4 ring-white/70"
-                style={{ background: 'linear-gradient(135deg, #4F9CF9, #A78BFA)' }}
-              >
-                {currentUser?.username?.slice(0, 2).toUpperCase() || 'U'}
-              </div>
+              {currentUser?.profile_picture_url ? (
+                <img
+                  src={currentUser.profile_picture_url}
+                  alt="Profile"
+                  className="w-24 h-24 rounded-[2rem] object-cover shadow-soft ring-4 ring-white/70"
+                />
+              ) : (
+                <div
+                  className="w-24 h-24 rounded-[2rem] flex items-center justify-center text-3xl font-black text-white shadow-soft ring-4 ring-white/70"
+                  style={{ background: 'linear-gradient(135deg, #4F9CF9, #A78BFA)' }}
+                >
+                  {currentUser?.username?.slice(0, 2).toUpperCase() || 'U'}
+                </div>
+              )}
               <button
                 onClick={() => navigate('/settings')}
                 className="absolute -right-1 -bottom-1 w-10 h-10 rounded-full bg-bg-elevated border border-border flex items-center justify-center shadow-soft"
@@ -212,6 +221,7 @@ export default function ProfileScreen() {
           {[
             { icon: <BarChart3 size={18} className="text-accent-blue" />, label: 'Analytics Dashboard', to: '/profile/analytics' },
             { icon: <Smartphone size={18} className="text-accent-green" />, label: 'Active Sessions', to: '/profile/sessions' },
+            { icon: <Database size={18} className="text-accent-blue" />, label: 'Sync Outbox', to: '/settings/sync-outbox' },
             { icon: <Wallet size={18} className="text-accent-yellow" />, label: 'Wallet', to: '/wallet' },
             { icon: <Activity size={18} className="text-accent-pink" />, label: 'Challenges', to: '/challenges' },
             { icon: <LifeBuoy size={18} className="text-accent-purple" />, label: 'Help & Support', to: '/support' },

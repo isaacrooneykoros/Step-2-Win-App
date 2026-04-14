@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ChangeEvent, ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
@@ -23,11 +23,15 @@ import {
   Wallet,
   Trophy,
   ChevronRight,
+  UserCircle2,
+  Database,
 } from 'lucide-react';
 import { authService } from '../services/api';
+import { usersService } from '../services/api/users';
 import { useAuthStore } from '../store/authStore';
 import { useToast } from '../components/ui/Toast';
 import { BaseModal } from '../components/ui/BaseModal';
+import { ImageCropper } from '../components/ui/ImageCropper';
 import { PermissionStatusCard } from '../components/PermissionStatusIndicator';
 import { useHealthSync } from '../hooks/useHealthSync';
 import type { User } from '../types';
@@ -99,6 +103,9 @@ export default function SettingsScreen() {
   const [exactAlarmPermission, setExactAlarmPermission] = useState<'granted' | 'denied' | 'unavailable'>('unavailable');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showProfilePictureModal, setShowProfilePictureModal] = useState(false);
+  const [profilePictureToUpload, setProfilePictureToUpload] = useState<File | null>(null);
+  const [previewImage, setPreviewImage] = useState<string>('');
   const [showStrideWizard, setShowStrideWizard] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
     current_password: '',
@@ -129,6 +136,7 @@ export default function SettingsScreen() {
   const [wizardQualityScore, setWizardQualityScore] = useState<'excellent' | 'good' | 'noisy' | null>(null);
   const [wizardVariancePct, setWizardVariancePct] = useState<number | null>(null);
   const wizardPollRef = useRef<number | null>(null);
+  const profilePictureInputRef = useRef<HTMLInputElement | null>(null);
 
   const { data: profile } = useQuery<User>({
     queryKey: ['profile'],
@@ -222,6 +230,33 @@ export default function SettingsScreen() {
     },
     onError: (error: any) => {
       showToast({ message: error?.response?.data?.error || 'Failed to update profile.', type: 'error' });
+    },
+  });
+
+  const uploadProfilePictureMutation = useMutation({
+    mutationFn: (file: Blob) => usersService.uploadProfilePicture(file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
+      setProfilePictureToUpload(null);
+      setPreviewImage('');
+      setShowProfilePictureModal(false);
+      showToast({ message: 'Profile picture updated successfully.', type: 'success' });
+    },
+    onError: (error: any) => {
+      showToast({ message: error?.response?.data?.error || 'Failed to upload profile picture.', type: 'error' });
+    },
+  });
+
+  const deleteProfilePictureMutation = useMutation({
+    mutationFn: () => usersService.deleteProfilePicture(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
+      setProfilePictureToUpload(null);
+      setPreviewImage('');
+      showToast({ message: 'Profile picture removed.', type: 'success' });
+    },
+    onError: (error: any) => {
+      showToast({ message: error?.response?.data?.error || 'Failed to remove profile picture.', type: 'error' });
     },
   });
 
@@ -364,6 +399,46 @@ export default function SettingsScreen() {
     }
 
     updateProfileMutation.mutate(profileForm);
+  };
+
+  const openProfilePicturePicker = () => {
+    profilePictureInputRef.current?.click();
+  };
+
+  const onProfilePictureFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast({ message: 'Please choose an image file.', type: 'error' });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast({ message: 'Image must be less than 5MB.', type: 'error' });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setPreviewImage(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const onProfilePictureCropComplete = (cropped: Blob) => {
+    setProfilePictureToUpload(new File([cropped], 'profile-picture.jpg', { type: 'image/jpeg' }));
+    setPreviewImage('');
+  };
+
+  const onSaveProfilePicture = () => {
+    if (!profilePictureToUpload) {
+      showToast({ message: 'Select and crop an image first.', type: 'error' });
+      return;
+    }
+    uploadProfilePictureMutation.mutate(profilePictureToUpload);
   };
 
   const onLogout = async () => {
@@ -654,6 +729,10 @@ export default function SettingsScreen() {
         <div className="card rounded-3xl p-4">
           <p className="text-xs uppercase tracking-widest text-text-muted mb-3">Account</p>
           <div className="space-y-2">
+            <button onClick={() => setShowProfilePictureModal(true)} className="settings-row">
+              <UserCircle2 size={18} className="text-accent-cyan" />
+              <span>Change profile picture</span>
+            </button>
             <button onClick={() => setShowProfileModal(true)} className="settings-row">
               <Mail size={18} className="text-accent-blue" />
               <span>Edit profile details</span>
@@ -665,6 +744,10 @@ export default function SettingsScreen() {
             <button onClick={() => navigate('/profile/sessions')} className="settings-row">
               <Smartphone size={18} className="text-accent-green" />
               <span>Active sessions</span>
+            </button>
+            <button onClick={() => navigate('/settings/sync-outbox')} className="settings-row">
+              <Database size={18} className="text-accent-blue" />
+              <span>Sync outbox</span>
             </button>
           </div>
         </div>
@@ -1014,6 +1097,84 @@ export default function SettingsScreen() {
           </button>
         </div>
       </BaseModal>
+
+      <BaseModal open={showProfilePictureModal} onClose={() => {
+        setShowProfilePictureModal(false);
+        setPreviewImage('');
+        setProfilePictureToUpload(null);
+      }}>
+        <h2 className="text-2xl font-black text-text-primary mb-2">Profile Picture</h2>
+        <p className="text-sm text-text-muted mb-4">Upload, crop, update, or remove your profile photo.</p>
+
+        <input
+          ref={profilePictureInputRef}
+          type="file"
+          accept="image/*"
+          onChange={onProfilePictureFileChange}
+          className="hidden"
+        />
+
+        <div className="mb-4 flex flex-col items-center gap-3">
+          {profile?.profile_picture_url ? (
+            <img
+              src={profile.profile_picture_url}
+              alt="Profile"
+              className="w-24 h-24 rounded-[1.5rem] object-cover border border-border"
+            />
+          ) : (
+            <div className="w-24 h-24 rounded-[1.5rem] border border-border bg-bg-input flex items-center justify-center">
+              <UserCircle2 size={36} className="text-text-muted" />
+            </div>
+          )}
+
+          <div className="w-full flex gap-2">
+            <button type="button" onClick={openProfilePicturePicker} className="flex-1 btn-secondary py-2.5 rounded-2xl">
+              Choose Image
+            </button>
+            <button
+              type="button"
+              onClick={() => deleteProfilePictureMutation.mutate()}
+              disabled={!profile?.profile_picture_url || deleteProfilePictureMutation.isPending}
+              className="flex-1 btn-secondary py-2.5 rounded-2xl disabled:opacity-40"
+            >
+              {deleteProfilePictureMutation.isPending ? 'Removing...' : 'Remove'}
+            </button>
+          </div>
+
+          {profilePictureToUpload && (
+            <p className="text-xs text-accent-green">Cropped image ready. Tap Save to upload.</p>
+          )}
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={() => {
+              setShowProfilePictureModal(false);
+              setPreviewImage('');
+              setProfilePictureToUpload(null);
+            }}
+            className="flex-1 btn-secondary py-3 rounded-2xl"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSaveProfilePicture}
+            disabled={!profilePictureToUpload || uploadProfilePictureMutation.isPending}
+            className="flex-1 btn-primary py-3 rounded-2xl disabled:opacity-40"
+          >
+            {uploadProfilePictureMutation.isPending ? 'Uploading...' : 'Save'}
+          </button>
+        </div>
+      </BaseModal>
+
+      {previewImage && (
+        <ImageCropper
+          imageSrc={previewImage}
+          onCropComplete={onProfilePictureCropComplete}
+          onCancel={() => setPreviewImage('')}
+          aspectRatio={1}
+        />
+      )}
 
       <BaseModal open={showStrideWizard} onClose={closeStrideWizard}>
         <h2 className="text-2xl font-black text-text-primary mb-2">Stride Calibration Wizard</h2>
