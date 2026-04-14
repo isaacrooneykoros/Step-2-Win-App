@@ -269,7 +269,7 @@ class AdminUserViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['patch'])
     def update_user(self, request, pk=None):
-        """Update user details"""
+        """Update user details - phone_number, email, and username are required fields"""
         user = self.get_object()
         
         # Update allowed fields
@@ -277,24 +277,42 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         email = request.data.get('email')
         phone_number = request.data.get('phone_number')
         
-        if username and username != user.username:
-            if User.objects.filter(username=username).exists():
-                return Response(
-                    {'error': 'Username already exists'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            user.username = username
+        errors = {}
         
-        if email and email != user.email:
-            if User.objects.filter(email=email).exists():
-                return Response(
-                    {'error': 'Email already exists'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            user.email = email
+        # Validate username if provided
+        if username is not None and username != user.username:
+            if not username or len(username.strip()) == 0:
+                errors['username'] = 'Username cannot be empty'
+            elif User.objects.filter(username=username).exists():
+                errors['username'] = 'Username already exists'
+            else:
+                user.username = username
         
-        if phone_number is not None:
-            user.phone_number = phone_number
+        # Validate email if provided
+        if email is not None and email != user.email:
+            if not email or len(email.strip()) == 0:
+                errors['email'] = 'Email cannot be empty'
+            elif User.objects.filter(email=email).exists():
+                errors['email'] = 'Email already exists'
+            else:
+                user.email = email
+        
+        # Validate phone_number if provided
+        if phone_number is not None and phone_number != user.phone_number:
+            if not phone_number or len(phone_number.strip()) == 0:
+                errors['phone_number'] = 'Phone number is required'
+            else:
+                # Basic phone validation
+                phone_clean = phone_number.replace('+', '').replace('-', '').replace(' ', '')
+                if not phone_clean.isdigit() or len(phone_clean) < 9:
+                    errors['phone_number'] = 'Phone number must be at least 9 digits'
+                elif User.objects.filter(phone_number=phone_number).exists():
+                    errors['phone_number'] = 'Phone number already registered'
+                else:
+                    user.phone_number = phone_number
+        
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
         
         user.save()
         serializer = AdminUserSerializer(user)

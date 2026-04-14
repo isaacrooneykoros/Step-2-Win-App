@@ -14,8 +14,9 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     phone_number = models.CharField(
         max_length=20,
-        blank=True,
-        null=True,
+        blank=False,
+        null=False,
+        unique=True,
         help_text='M-Pesa phone number (e.g., 254712345678)'
     )
     wallet_balance = models.DecimalField(

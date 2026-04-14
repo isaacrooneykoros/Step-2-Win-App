@@ -22,6 +22,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
             'id',
             'username',
             'email',
+            'phone_number',
             'wallet_balance',
             'locked_balance',
             'total_steps',
