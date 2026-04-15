@@ -27,6 +27,11 @@ from apps.gamification.models import Badge, UserBadge, XPEvent
 from apps.steps.models import HealthRecord
 from apps.payments.models import WithdrawalRequest
 from apps.payments import intasend
+from apps.payments.services import (
+    PaymentsServiceError,
+    approve_withdrawal_and_send,
+    reject_withdrawal_request,
+)
 from apps.payments.views import _notify_user
 from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiTypes
 
@@ -1940,59 +1945,9 @@ def approve_withdrawal(request, withdrawal_id):
     Admin approves a withdrawal. This immediately sends it to IntaSend.
     IntaSend generates a tracking_id which is stored in the withdrawal record.
     """
-    withdrawal = get_object_or_404(WithdrawalRequest, id=withdrawal_id)
-
-    if withdrawal.status != 'pending_review':
-        return Response(
-            {'error': f'Cannot approve — status is: {withdrawal.status}'},
-            status=400
-        )
-
-    callback_url = getattr(settings, 'INTASEND_WITHDRAWAL_CALLBACK_URL', '')
-    remarks = f'Step2Win withdrawal for {withdrawal.user.username}'
-
-    withdrawal.status = 'approved'
-    withdrawal.reviewed_by = request.user
-    withdrawal.reviewed_at = timezone.now()
-    withdrawal.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'updated_at'])
-
     try:
-        if withdrawal.method == 'mpesa':
-            tracking_id = intasend.send_withdrawal_to_mobile(
-                phone_number=withdrawal.phone_number,
-                amount=float(withdrawal.amount_kes),
-                remarks=remarks,
-                callback_url=callback_url,
-            )
-
-        elif withdrawal.method == 'bank':
-            tracking_id = intasend.send_withdrawal_to_bank(
-                bank_code=withdrawal.bank_code,
-                account_number=withdrawal.account_number,
-                amount=float(withdrawal.amount_kes),
-                remarks=f'Step2Win bank withdrawal for {withdrawal.user.username}',
-                callback_url=callback_url,
-            )
-
-        elif withdrawal.method == 'paybill':
-            tracking_id = intasend.send_withdrawal_to_paybill(
-                short_code=withdrawal.short_code,
-                account_number=withdrawal.account_number or None,
-                amount=float(withdrawal.amount_kes),
-                remarks='Step2Win paybill withdrawal',
-                callback_url=callback_url,
-            )
-
-        else:
-            return Response({'error': f'Unknown withdrawal method: {withdrawal.method}'}, status=400)
-
-        # Store IntaSend's tracking_id for callback matching and status queries
-        withdrawal.tracking_reference = tracking_id
-        withdrawal.request_id = tracking_id
-        withdrawal.status = 'processing'
-        withdrawal.save(update_fields=[
-            'tracking_reference', 'request_id', 'status', 'updated_at'
-        ])
+        withdrawal = get_object_or_404(WithdrawalRequest, id=withdrawal_id)
+        withdrawal, tracking_id = approve_withdrawal_and_send(withdrawal, reviewer=request.user)
 
         _notify_user(withdrawal.user, 'withdrawal_approved',
                      amount=withdrawal.amount_kes, method=withdrawal.method)
@@ -2008,17 +1963,10 @@ def approve_withdrawal(request, withdrawal_id):
             'status': 'processing',
         })
 
+    except PaymentsServiceError as exc:
+        return Response({'error': exc.message}, status=exc.status_code)
     except Exception as e:
         logger.error(f'IntaSend call failed after approval | id={withdrawal_id}: {e}')
-
-        with db_transaction.atomic():
-            locked_user = withdrawal.user.__class__.objects.select_for_update().get(id=withdrawal.user.id)
-            locked_user.wallet_balance = locked_user.wallet_balance + withdrawal.amount_kes
-            locked_user.save(update_fields=['wallet_balance', 'updated_at'])
-
-            withdrawal.status = 'failed'
-            withdrawal.fail_reason = f'IntaSend error: {str(e)}'
-            withdrawal.save(update_fields=['status', 'fail_reason', 'updated_at'])
 
         return Response({'error': 'Disbursement failed. Balance refunded to user.'}, status=502)
 
@@ -2031,27 +1979,13 @@ def reject_withdrawal(request, withdrawal_id):
     Admin rejects a withdrawal request.
     Balance is immediately refunded to the user.
     """
-    withdrawal = get_object_or_404(WithdrawalRequest, id=withdrawal_id)
     reason = request.data.get('reason', 'Rejected by admin')
 
-    if withdrawal.status != 'pending_review':
-        return Response(
-            {'error': f'Cannot reject — status is: {withdrawal.status}'},
-            status=400
-        )
-
-    with db_transaction.atomic():
-        locked_user = withdrawal.user.__class__.objects.select_for_update().get(id=withdrawal.user.id)
-        locked_user.wallet_balance = locked_user.wallet_balance + withdrawal.amount_kes
-        locked_user.save(update_fields=['wallet_balance', 'updated_at'])
-
-        withdrawal.status = 'rejected'
-        withdrawal.rejection_reason = reason
-        withdrawal.reviewed_by = request.user
-        withdrawal.reviewed_at = timezone.now()
-        withdrawal.save(update_fields=[
-            'status', 'rejection_reason', 'reviewed_by', 'reviewed_at', 'updated_at'
-        ])
+    try:
+        withdrawal = get_object_or_404(WithdrawalRequest, id=withdrawal_id)
+        withdrawal = reject_withdrawal_request(withdrawal, reason=reason, reviewer=request.user)
+    except PaymentsServiceError as exc:
+        return Response({'error': exc.message}, status=exc.status_code)
 
     _notify_user(withdrawal.user, 'withdrawal_rejected',
                  amount=withdrawal.amount_kes, reason=reason)
