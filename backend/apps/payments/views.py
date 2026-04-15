@@ -1,7 +1,6 @@
+import json
 import logging
-import uuid
 from decimal import Decimal
-from datetime import timedelta
 from django.conf import settings
 from django.db import transaction as db_transaction
 from django.db.models import Sum
@@ -17,6 +16,20 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema, inline_serializer
 
 from . import intasend
+from .serializers import InitiateDepositSerializer, WithdrawalRequestInputSerializer
+from .services import (
+    PaymentsServiceError,
+    approve_withdrawal_and_send,
+    debit_wallet,
+    initiate_deposit as initiate_deposit_service,
+    log_callback,
+    process_deposit_callback,
+    process_payout_callback,
+    process_withdrawal_callback,
+    reject_withdrawal_request,
+    request_withdrawal as create_withdrawal_request,
+    verify_intasend_signature,
+)
 from .models import PaymentTransaction, CallbackLog, WithdrawalRequest
 from apps.core.throttles import DepositRateThrottle
 
@@ -64,88 +77,28 @@ def initiate_deposit(request):
         amount (float): Amount in KES to deposit
         phone_number (str): User's M-Pesa number
     """
-    user   = request.user
-    amount = request.data.get('amount')
-    phone  = request.data.get('phone_number')
-
-    # ── Validate inputs ────────────────────────────────────────────────────
-    if not amount or not phone:
-        return Response({'error': 'amount and phone_number are required'}, status=400)
+    serializer = InitiateDepositSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
 
     try:
-        amount = Decimal(str(amount))
-    except Exception:
-        return Response({'error': 'Invalid amount'}, status=400)
-
-    if amount < MIN_DEPOSIT:
-        return Response({'error': f'Minimum deposit is KES {MIN_DEPOSIT}'}, status=400)
-    if amount > MAX_DEPOSIT:
-        return Response({'error': f'Maximum deposit is KES {MAX_DEPOSIT}'}, status=400)
-
-    try:
-        phone = intasend.format_phone(phone)
-    except ValueError as e:
-        return Response({'error': str(e)}, status=400)
-
-    # ── Idempotency — reject duplicate in-flight deposits ───────────────────────
-    recent_pending = PaymentTransaction.objects.filter(
-        user=user,
-        type='deposit',
-        status__in=['initiated', 'pending'],
-        created_at__gte=timezone.now() - timedelta(minutes=5),
-    ).first()
-    if recent_pending:
-        return Response({
-            'error': 'You already have a pending deposit. '
-                     'Please wait for it to complete before initiating another.',
-            'order_id': recent_pending.order_id,
-        }, status=400)
-    # ── Create transaction record first (before calling IntaSend) ──────────
-    order_id           = f"DEP-{uuid.uuid4().hex[:20].upper()}"
-    tracking_reference = intasend.generate_tracking_reference('DEP')
-
-    txn = PaymentTransaction.objects.create(
-        user               = user,
-        type               = 'deposit',
-        status             = 'initiated',
-        amount_kes         = amount,
-        order_id           = order_id,
-        tracking_reference = tracking_reference,
-        phone_number       = phone,
-        narration          = f'Step2Win wallet deposit - {user.username}',
-    )
-
-    # ── Send STK Push via IntaSend ─────────────────────────────────────────
-    try:
-        invoice = intasend.initiate_mpesa_collection(
-            order_id     = order_id,
-            phone_number = phone,
-            amount       = float(amount),
-            narration    = 'Step2Win Deposit',
-            user_email   = getattr(user, 'email', ''),
+        txn = initiate_deposit_service(
+            request.user,
+            serializer.validated_data['amount'],
+            serializer.validated_data['phone_number'],
         )
-        # Store IntaSend's invoice_id for status polling (collection_id field)
-        txn.collection_id = invoice.get('invoice_id', '')
-        txn.status        = 'pending'
-        txn.save(update_fields=['collection_id', 'status', 'updated_at'])
-
-    except Exception as e:
-        txn.status     = 'failed'
-        txn.fail_reason = str(e)
-        txn.save(update_fields=['status', 'fail_reason', 'updated_at'])
-        logger.error(f'Deposit STK Push failed for user {user.id}: {e}')
-
-        if isinstance(e, intasend.IntaSendAPIError):
-            # Configuration/auth issues should surface as 400 for easier debugging.
-            if e.status_code == 400 or 'api key missing' in str(e).lower():
-                return Response({'error': str(e)}, status=400)
-
+    except PaymentsServiceError as exc:
+        return Response({'error': exc.message}, status=exc.status_code)
+    except Exception as exc:
+        logger.error(f'Deposit STK Push failed for user {request.user.id}: {exc}')
+        if isinstance(exc, intasend.IntaSendAPIError):
+            if exc.status_code == 400 or 'api key missing' in str(exc).lower():
+                return Response({'error': str(exc)}, status=400)
         return Response({'error': 'Payment initiation failed. Please try again.'}, status=502)
 
     return Response({
         'message':    'M-Pesa STK Push sent. Check your phone to complete payment.',
-        'order_id':   order_id,
-        'amount_kes': str(amount),
+        'order_id':   txn.order_id,
+        'amount_kes': str(txn.amount_kes),
         'status':     'pending',
     })
 
@@ -174,107 +127,18 @@ def deposit_callback(request):
           }
         }
     """
-    import json
-    import hmac
-    import hashlib
-
-    # ── Optional webhook challenge verification ───────────────────────────
-    webhook_secret = getattr(settings, 'INTASEND_WEBHOOK_SECRET', None)
-    if webhook_secret:
-        provided_sig = request.headers.get('X-IntaSend-Signature', '')
-        if provided_sig:
-            expected_sig = hmac.new(
-                webhook_secret.encode(),
-                request.body,
-                hashlib.sha256,
-            ).hexdigest()
-            if not hmac.compare_digest(provided_sig, expected_sig):
-                logger.warning('Deposit callback: invalid webhook signature — rejected')
-                return JsonResponse({'error': 'Invalid signature'}, status=403)
-
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    # ── Extract IntaSend invoice fields ───────────────────────────────────
-    invoice      = payload.get('invoice', {})
-    order_id     = invoice.get('api_ref', '')          # our order_id passed as api_ref
-    state        = invoice.get('state', '')
-    is_successful = state == 'COMPLETE'
-    mpesa_ref    = invoice.get('mpesa_reference', '')
-    fail_reason  = invoice.get('failed_reason', '') or invoice.get('failed_code', '')
-
-    # Log the raw callback first — always, even if we reject it
-    log = CallbackLog.objects.create(
-        type        = 'deposit',
-        raw_payload = payload,
-        order_id    = order_id,
-    )
-
-    if not order_id:
-        logger.warning(f'Deposit callback missing api_ref (order_id): {payload}')
-        return JsonResponse({'status': 'ok'})  # always 200 to IntaSend
-
-    # ── Idempotency: check if already processed ───────────────────────────
     try:
-        txn = PaymentTransaction.objects.get(order_id=order_id, type='deposit')
+        verify_intasend_signature(request, 'Deposit callback')
+        process_deposit_callback(payload)
+    except PaymentsServiceError as exc:
+        return JsonResponse({'error': exc.message}, status=exc.status_code)
     except PaymentTransaction.DoesNotExist:
-        logger.error(f'Deposit callback for unknown order_id={order_id}')
-        return JsonResponse({'status': 'ok'})
-
-    if txn.status in ('completed', 'failed', 'cancelled'):
-        logger.info(f'Duplicate deposit callback for order_id={order_id} — already {txn.status}')
-        return JsonResponse({'status': 'ok'})
-
-    # ── Process in atomic transaction — prevents double-credit ───────────
-    try:
-        with db_transaction.atomic():
-            if is_successful:
-                # Credit the user's wallet
-                from apps.users.models import User
-                user = User.objects.select_for_update().get(id=txn.user_id)
-                user.wallet_balance = user.wallet_balance + txn.amount_kes
-                user.save(update_fields=['wallet_balance', 'updated_at'])
-
-                # Update transaction
-                txn.status               = 'completed'
-                txn.mpesa_reference      = mpesa_ref
-                txn.callback_received_at = timezone.now()
-                txn.save(update_fields=['status', 'mpesa_reference',
-                                        'callback_received_at', 'updated_at'])
-
-                # Also create a WalletTransaction record for the history
-                _create_wallet_transaction(
-                    user=txn.user, type='deposit',
-                    amount=txn.amount_kes, reference=order_id,
-                    description=f'M-Pesa deposit via {mpesa_ref}',
-                )
-
-                logger.info(f'Deposit completed | user={txn.user.id} | '
-                            f'amount=KES {txn.amount_kes} | mpesa={mpesa_ref}')
-
-                # Send push notification to user
-                _notify_user(txn.user, 'deposit_success',
-                             amount=txn.amount_kes, mpesa_ref=mpesa_ref)
-
-            else:
-                txn.status               = 'failed' if fail_reason else 'cancelled'
-                txn.fail_reason          = fail_reason
-                txn.callback_received_at = timezone.now()
-                txn.save(update_fields=['status', 'fail_reason',
-                                        'callback_received_at', 'updated_at'])
-
-                logger.info(f'Deposit failed | user={txn.user.id} | reason={txn.fail_reason}')
-                _notify_user(txn.user, 'deposit_failed',
-                             amount=txn.amount_kes, reason=txn.fail_reason)
-
-        log.processed = True
-        log.save(update_fields=['processed'])
-
-    except Exception as e:
-        logger.error(f'Deposit callback processing error for {order_id}: {e}')
-        # Still return 200 so IntaSend doesn't retry endlessly
+        logger.error('Deposit callback for unknown order_id=%s', payload.get('invoice', {}).get('api_ref', ''))
         return JsonResponse({'status': 'ok'})
 
     return JsonResponse({'status': 'ok'})
@@ -305,118 +169,17 @@ def payout_callback(request):
           ]
         }
     """
-    import json
-    import hmac
-    import hashlib
-
-    # ── Optional webhook signature verification ───────────────────────────
-    webhook_secret = getattr(settings, 'INTASEND_WEBHOOK_SECRET', None)
-    if webhook_secret:
-        provided_sig = request.headers.get('X-IntaSend-Signature', '')
-        if provided_sig:
-            expected_sig = hmac.new(
-                webhook_secret.encode(),
-                request.body,
-                hashlib.sha256,
-            ).hexdigest()
-            if not hmac.compare_digest(provided_sig, expected_sig):
-                logger.warning('Payout callback: invalid webhook signature — rejected')
-                return JsonResponse({'error': 'Invalid signature'}, status=403)
-
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
-
-    # ── Extract IntaSend send-money fields ────────────────────────────────
-    tracking_ref  = payload.get('tracking_id', '')
-    status_str    = payload.get('status', '')
-    is_successful = status_str == 'COMPLETE'
-    transactions  = payload.get('transactions', [])
-    first_txn     = transactions[0] if transactions else {}
-    mpesa_ref     = first_txn.get('mpesa_reference', '')
-    fail_reason   = (
-        first_txn.get('failed_reason', '')
-        or payload.get('failed_reason', '')
-    )
-
-    log = CallbackLog.objects.create(
-        type        = 'payout',
-        raw_payload = payload,
-        order_id    = tracking_ref,
-    )
-
-    if not tracking_ref:
-        return JsonResponse({'status': 'ok'})
-
     try:
-        txn = PaymentTransaction.objects.get(
-            tracking_reference=tracking_ref, type='payout'
-        )
+        verify_intasend_signature(request, 'Payout callback')
+        process_payout_callback(payload)
+    except PaymentsServiceError as exc:
+        return JsonResponse({'error': exc.message}, status=exc.status_code)
     except PaymentTransaction.DoesNotExist:
-        logger.error(f'Payout callback for unknown tracking_id={tracking_ref}')
-        return JsonResponse({'status': 'ok'})
-
-    if txn.status in ('completed', 'failed'):
-        return JsonResponse({'status': 'ok'})
-
-    try:
-        with db_transaction.atomic():
-            if is_successful:
-                txn.status               = 'completed'
-                txn.mpesa_reference      = mpesa_ref
-                txn.callback_received_at = timezone.now()
-                txn.save(update_fields=['status', 'mpesa_reference',
-                                        'callback_received_at', 'updated_at'])
-
-                logger.info(f'Payout completed | user={txn.user.id} | '
-                            f'amount=KES {txn.amount_kes} | mpesa={mpesa_ref}')
-                _notify_user(txn.user, 'payout_success',
-                             amount=txn.amount_kes, mpesa_ref=mpesa_ref)
-
-                # If this payout originated from wallet withdrawal, mark it completed
-                from apps.wallet.models import Withdrawal
-                try:
-                    wd = Withdrawal.objects.select_for_update().get(reference_number=txn.order_id)
-                    wd.status = 'completed'
-                    wd.processed_at = timezone.now()
-                    wd.save(update_fields=['status', 'processed_at'])
-                except Withdrawal.DoesNotExist:
-                    pass
-
-            else:
-                txn.status               = 'failed'
-                txn.fail_reason          = fail_reason
-                txn.callback_received_at = timezone.now()
-                txn.save(update_fields=['status', 'fail_reason',
-                                        'callback_received_at', 'updated_at'])
-
-                logger.warning(f'Payout failed | user={txn.user.id} | reason={fail_reason}')
-
-                # Refund the user's wallet on payout failure
-                from apps.users.models import User
-                user = User.objects.select_for_update().get(id=txn.user_id)
-                user.wallet_balance = user.wallet_balance + txn.amount_kes
-                user.save(update_fields=['wallet_balance', 'updated_at'])
-                _notify_user(txn.user, 'payout_failed',
-                             amount=txn.amount_kes, reason=fail_reason)
-
-                # If this payout originated from wallet withdrawal, mark it failed
-                from apps.wallet.models import Withdrawal
-                try:
-                    wd = Withdrawal.objects.select_for_update().get(reference_number=txn.order_id)
-                    wd.status = 'failed'
-                    wd.rejection_reason = fail_reason or 'Payout failed'
-                    wd.processed_at = timezone.now()
-                    wd.save(update_fields=['status', 'rejection_reason', 'processed_at'])
-                except Withdrawal.DoesNotExist:
-                    pass
-
-        log.processed = True
-        log.save(update_fields=['processed'])
-
-    except Exception as e:
-        logger.error(f'Payout callback error for {tracking_ref}: {e}')
+        logger.error('Payout callback for unknown tracking_id=%s', payload.get('tracking_id', ''))
 
     return JsonResponse({'status': 'ok'})
 
@@ -610,118 +373,12 @@ def request_withdrawal(request):
       6. Notify admin
       7. Return confirmation to user
     """
-    user   = request.user
-    data   = request.data
-    method = data.get('method')
-    amount = data.get('amount')
-
-    if method not in ('mpesa', 'bank', 'paybill'):
-        return Response(
-            {'error': 'method must be one of: mpesa, bank, paybill'}, status=400
-        )
-
     try:
-        amount = Decimal(str(amount))
-    except Exception:
-        return Response({'error': 'Invalid amount'}, status=400)
-
-    if amount < MIN_WITHDRAWAL:
-        return Response(
-            {'error': f'Minimum withdrawal is KES {MIN_WITHDRAWAL}'}, status=400
-        )
-    if amount > MAX_WITHDRAWAL:
-        return Response(
-            {'error': f'Maximum single withdrawal is KES {MAX_WITHDRAWAL}'}, status=400
-        )
-
-    if method == 'mpesa':
-        phone = data.get('phone_number')
-        if not phone:
-            return Response({'error': 'phone_number is required for M-Pesa'}, status=400)
-        try:
-            phone = intasend.format_phone(phone)
-        except ValueError as e:
-            return Response({'error': str(e)}, status=400)
-
-    elif method == 'bank':
-        bank_code = data.get('bank_code')
-        account_number = data.get('account_number')
-        if not bank_code or not account_number:
-            return Response(
-                {'error': 'bank_code and account_number are required for bank withdrawals'},
-                status=400
-            )
-        try:
-            banks = intasend.get_available_banks()
-            valid_codes = [b.get('bankCode') or b.get('bank_code') for b in banks]
-            if bank_code not in valid_codes:
-                return Response({'error': 'Invalid bank_code'}, status=400)
-            bank_name = next(
-                (b.get('name', '') for b in banks
-                 if (b.get('bankCode') or b.get('bank_code')) == bank_code),
-                ''
-            )
-        except Exception:
-            return Response({'error': 'Could not validate bank. Try again.'}, status=502)
-
-    else:
-        short_code = data.get('short_code')
-        account_number = data.get('account_number')
-        is_paybill = data.get('is_paybill', True)
-        if not short_code:
-            return Response({'error': 'short_code is required for paybill/till'}, status=400)
-
-    try:
-        with db_transaction.atomic():
-            locked_user = user.__class__.objects.select_for_update().get(id=user.id)
-
-            if locked_user.wallet_balance < amount:
-                return Response(
-                    {'error': f'Insufficient balance. Available: KES {locked_user.wallet_balance}'},
-                    status=400
-                )
-
-            today = timezone.now().date()
-            daily_total = WithdrawalRequest.objects.filter(
-                user=user,
-                created_at__date=today,
-                status__in=['pending_review', 'approved', 'processing', 'completed'],
-            ).aggregate(t=Sum('amount_kes'))['t'] or Decimal('0')
-
-            if daily_total + amount > MAX_DAILY:
-                remaining = MAX_DAILY - daily_total
-                return Response(
-                    {'error': f'Daily withdrawal limit reached. Remaining today: KES {remaining}'},
-                    status=400
-                )
-
-            locked_user.wallet_balance = locked_user.wallet_balance - amount
-            locked_user.save(update_fields=['wallet_balance', 'updated_at'])
-
-            withdrawal_data = {
-                'user':       user,
-                'status':     'pending_review',
-                'amount_kes': amount,
-                'method':     method,
-                'narration':  f'Step2Win withdrawal - {user.username}',
-            }
-
-            if method == 'mpesa':
-                withdrawal_data['phone_number'] = phone
-            elif method == 'bank':
-                withdrawal_data['bank_code'] = bank_code
-                withdrawal_data['bank_name'] = bank_name
-                withdrawal_data['account_number'] = account_number
-            else:
-                withdrawal_data['short_code'] = short_code
-                withdrawal_data['account_number'] = account_number or ''
-                withdrawal_data['is_paybill'] = bool(is_paybill)
-
-            withdrawal = WithdrawalRequest.objects.create(**withdrawal_data)
-
-    except Exception as e:
-        logger.error(f'Withdrawal request creation failed for user {user.id}: {e}')
-        return Response({'error': 'Could not process your request. Try again.'}, status=500)
+        serializer = WithdrawalRequestInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        withdrawal = create_withdrawal_request(request.user, serializer.validated_data)
+    except PaymentsServiceError as exc:
+        return Response({'error': exc.message}, status=exc.status_code)
 
     _notify_admin_new_withdrawal(withdrawal)
 
@@ -848,108 +505,18 @@ def withdrawal_callback(request):
           ]
         }
     """
-    import json
-    import hmac
-    import hashlib
-
-    # ── Optional webhook signature verification ───────────────────────────
-    webhook_secret = getattr(settings, 'INTASEND_WEBHOOK_SECRET', None)
-    if webhook_secret:
-        provided_sig = request.headers.get('X-IntaSend-Signature', '')
-        if provided_sig:
-            expected_sig = hmac.new(
-                webhook_secret.encode(),
-                request.body,
-                hashlib.sha256,
-            ).hexdigest()
-            if not hmac.compare_digest(provided_sig, expected_sig):
-                logger.warning('Withdrawal callback: invalid webhook signature — rejected')
-                return JsonResponse({'error': 'Invalid signature'}, status=403)
-
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    # ── Extract IntaSend send-money fields ────────────────────────────────
-    tracking_ref  = payload.get('tracking_id', '')
-    status_str    = payload.get('status', '')
-    is_successful = status_str == 'COMPLETE'
-    transactions  = payload.get('transactions', [])
-    first_txn     = transactions[0] if transactions else {}
-    mpesa_ref     = first_txn.get('mpesa_reference', '')
-    fail_reason   = (
-        first_txn.get('failed_reason', '')
-        or payload.get('failed_reason', '')
-    )
-
-    log = CallbackLog.objects.create(
-        type='withdrawal',
-        raw_payload=payload,
-        order_id=tracking_ref,
-    )
-
-    if not tracking_ref:
-        return JsonResponse({'status': 'ok'})
-
     try:
-        withdrawal = WithdrawalRequest.objects.get(tracking_reference=tracking_ref)
+        verify_intasend_signature(request, 'Withdrawal callback')
+        process_withdrawal_callback(payload)
+    except PaymentsServiceError as exc:
+        return JsonResponse({'error': exc.message}, status=exc.status_code)
     except WithdrawalRequest.DoesNotExist:
-        logger.error(f'Withdrawal callback for unknown tracking_id={tracking_ref}')
-        return JsonResponse({'status': 'ok'})
-
-    if withdrawal.status in ('completed', 'failed'):
-        logger.info(f'Duplicate withdrawal callback ignored | ref={tracking_ref}')
-        return JsonResponse({'status': 'ok'})
-
-    try:
-        with db_transaction.atomic():
-            if is_successful:
-                withdrawal.status = 'completed'
-                withdrawal.mpesa_reference = mpesa_ref
-                withdrawal.callback_received_at = timezone.now()
-                withdrawal.save(update_fields=[
-                    'status', 'mpesa_reference', 'callback_received_at', 'updated_at'
-                ])
-                logger.info(
-                    f'Withdrawal completed | user={withdrawal.user.id} | '
-                    f'KES {withdrawal.amount_kes} | mpesa={mpesa_ref}'
-                )
-                _notify_user(
-                    withdrawal.user,
-                    'withdrawal_success',
-                    amount=withdrawal.amount_kes,
-                    mpesa_ref=mpesa_ref,
-                    method=withdrawal.method,
-                )
-
-            else:
-                locked_user = withdrawal.user.__class__.objects.select_for_update().get(id=withdrawal.user.id)
-                locked_user.wallet_balance = locked_user.wallet_balance + withdrawal.amount_kes
-                locked_user.save(update_fields=['wallet_balance', 'updated_at'])
-
-                withdrawal.status = 'failed'
-                withdrawal.fail_reason = fail_reason
-                withdrawal.callback_received_at = timezone.now()
-                withdrawal.save(update_fields=[
-                    'status', 'fail_reason', 'callback_received_at', 'updated_at'
-                ])
-                logger.warning(
-                    f'Withdrawal failed — balance refunded | '
-                    f'user={withdrawal.user.id} | reason={fail_reason}'
-                )
-                _notify_user(
-                    withdrawal.user,
-                    'withdrawal_failed',
-                    amount=withdrawal.amount_kes,
-                    reason=fail_reason,
-                )
-
-        log.processed = True
-        log.save(update_fields=['processed'])
-
-    except Exception as e:
-        logger.error(f'Withdrawal callback processing error | ref={tracking_ref}: {e}')
+        logger.error('Withdrawal callback for unknown tracking_id=%s', payload.get('tracking_id', ''))
 
     return JsonResponse({'status': 'ok'})
 

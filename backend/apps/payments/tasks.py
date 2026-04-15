@@ -130,6 +130,7 @@ def _reconcile_payout(txn, result):
                  'transactions': [...]}
     """
     from django.utils import timezone
+    from .services import refund_failed_payout
 
     status = result.get('status', '')
     transactions = result.get('transactions', [])
@@ -149,3 +150,4 @@ def _reconcile_payout(txn, result):
             or result.get('failed_reason', '')
         )
         txn.save(update_fields=['status', 'fail_reason', 'updated_at'])
+        refund_failed_payout(txn, txn.fail_reason or 'Payout failed')
