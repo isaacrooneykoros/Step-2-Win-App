@@ -3,6 +3,7 @@ from pathlib import Path
 from datetime import timedelta
 from celery.schedules import crontab
 import dj_database_url
+import sentry_sdk
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
 
@@ -422,7 +423,6 @@ MIN_SECONDS_BETWEEN_WITHDRAWALS = 300  # 5 minutes
 MAX_DAILY_WITHDRAWAL_AMOUNT_KES = 100_000
 
 # ── Sentry error monitoring ───────────────────────────────────────────────────
-import sentry_sdk
 if os.getenv('SENTRY_DSN'):
     sentry_sdk.init(
         dsn=os.getenv('SENTRY_DSN'),
