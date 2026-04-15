@@ -383,16 +383,16 @@ def request_withdrawal(request):
     _notify_admin_new_withdrawal(withdrawal)
 
     logger.info(
-        f'Withdrawal request created | user={user.id} | '
-        f'amount=KES {amount} | method={method} | id={withdrawal.id}'
+        f'Withdrawal request created | user={request.user.id} | '
+        f'amount=KES {withdrawal.amount_kes} | method={withdrawal.method} | id={withdrawal.id}'
     )
 
     return Response({
         'message':       'Withdrawal request submitted. Under review — usually processed within 24 hours.',
         'withdrawal_id': str(withdrawal.id),
-        'amount_kes':    str(amount),
-        'method':        method,
-        'status':        'pending_review',
+        'amount_kes':    str(withdrawal.amount_kes),
+        'method':        withdrawal.method,
+        'status':        withdrawal.status,
         'destination':   withdrawal.destination_display,
     }, status=201)
 

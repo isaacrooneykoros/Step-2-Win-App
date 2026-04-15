@@ -15,7 +15,11 @@ from .serializers import (
 )
 from apps.users.views import WalletThrottle
 from apps.payments.serializers import WithdrawalRequestInputSerializer
-from apps.payments.services import PaymentsServiceError, credit_wallet, request_withdrawal as create_withdrawal_request
+from apps.payments.services import (
+    PaymentsServiceError,
+    initiate_deposit as initiate_deposit_service,
+    request_withdrawal as create_withdrawal_request,
+)
 
 
 class WithdrawalRequestDisplaySerializer(serializers.Serializer):
@@ -105,12 +109,12 @@ class TransactionListView(generics.ListAPIView):
     request=DepositSerializer,
     responses={
         201: inline_serializer(
-            name='DepositResponse',
+            name='DepositInitiationResponse',
             fields={
+                'message': serializers.CharField(),
+                'order_id': serializers.CharField(),
+                'amount_kes': serializers.CharField(),
                 'status': serializers.CharField(),
-                'balance': serializers.CharField(),
-                'transaction_id': serializers.IntegerField(),
-                'amount': serializers.CharField(),
             },
         )
     },
@@ -120,32 +124,25 @@ class TransactionListView(generics.ListAPIView):
 @throttle_classes([WalletThrottle])
 def deposit(request):
     """
-    Process a deposit (simulated for demo purposes)
+    Initiate a production deposit using the payment lifecycle.
+
+    The actual wallet credit happens in the deposit callback after the
+    gateway confirms the payment.
     """
     serializer = DepositSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     
     amount = serializer.validated_data['amount']
-    payment_method = serializer.validated_data.get('payment_method', 'card')
-    reference_id = serializer.validated_data.get('reference_id')
-    
-    trans = credit_wallet(
-        request.user,
-        amount,
-        reference_id=reference_id or '',
-        description=f'Deposit via {payment_method}',
-        transaction_type='deposit',
-        metadata={
-            'payment_method': payment_method,
-            'status': 'completed',
-        },
-    )
+    try:
+        trans = initiate_deposit_service(request.user, amount, request.user.phone_number)
+    except PaymentsServiceError as exc:
+        return Response({'error': exc.message}, status=exc.status_code)
     
     return Response({
-        'status': 'Deposit successful',
-        'balance': str(trans.balance_after),
-        'transaction_id': trans.id,
-        'amount': str(amount)
+        'message': 'M-Pesa STK Push sent. Check your phone to complete payment.',
+        'order_id': trans.order_id,
+        'amount_kes': str(trans.amount_kes),
+        'status': trans.status,
     }, status=status.HTTP_201_CREATED)
 
 
@@ -155,10 +152,12 @@ def deposit(request):
         201: inline_serializer(
             name='WithdrawalInitiateResponse',
             fields={
-                'status': serializers.CharField(),
-                'reference_number': serializers.CharField(),
-                'amount': serializers.CharField(),
                 'message': serializers.CharField(),
+                'withdrawal_id': serializers.CharField(),
+                'amount_kes': serializers.CharField(),
+                'method': serializers.CharField(),
+                'status': serializers.CharField(),
+                'destination': serializers.CharField(),
             },
         )
     },
@@ -179,9 +178,11 @@ def withdraw(request):
         return Response({'error': exc.message}, status=exc.status_code)
     
     return Response({
-        'status': 'Withdrawal request submitted',
+        'status': withdrawal.status,
         'withdrawal_id': str(withdrawal.id),
         'amount_kes': str(withdrawal.amount_kes),
+        'method': withdrawal.method,
+        'destination': withdrawal.destination_display,
         'message': 'Withdrawal request submitted and is pending review.'
     }, status=status.HTTP_201_CREATED)
 
