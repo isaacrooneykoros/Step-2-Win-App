@@ -27,6 +27,7 @@ htmlcov/
 .env.*
 !.env.example
 !**/.env.example
+step2win-web/.env.staging
 .venv
 env/
 venv/
@@ -72,3 +73,4 @@ ios/
 .c9/
 *.launch
 .settings/
+

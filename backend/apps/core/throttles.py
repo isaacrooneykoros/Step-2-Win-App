@@ -39,3 +39,18 @@ class StepSyncRateThrottle(UserRateThrottle):
 class ChatMessageRateThrottle(UserRateThrottle):
     """30 chat messages per minute per user — prevents chat spam."""
     scope = 'chat'
+
+
+class AdminLoginRateThrottle(AnonRateThrottle):
+    """Stricter admin login throttle to reduce credential stuffing impact."""
+    scope = 'admin_login'
+
+
+class ProfilePictureUploadRateThrottle(UserRateThrottle):
+    """Limit profile picture uploads to prevent storage abuse."""
+    scope = 'profile_picture_upload'
+
+
+class DeviceBindRateThrottle(UserRateThrottle):
+    """Throttle device binding attempts to reduce device-id probing."""
+    scope = 'device_bind'

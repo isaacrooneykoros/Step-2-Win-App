@@ -1,4 +1,6 @@
 import api from './client';
+import CryptoJS from 'crypto-js';
+import { useAuthStore } from '../../store/authStore';
 import type {
   AuthResponse,
   LoginCredentials,
@@ -7,6 +9,13 @@ import type {
   ChangePasswordData,
   DeviceBinding,
 } from '../../types';
+
+const APP_SIGNING_SECRET = import.meta.env.VITE_APP_SIGNING_SECRET || '';
+
+function buildDeviceSignature(userId: string, deviceId: string, platform: 'android' | 'ios'): string {
+  const payload = `${userId}:${deviceId}:${platform}`;
+  return CryptoJS.HmacSHA256(payload, APP_SIGNING_SECRET).toString();
+}
 
 export const authService = {
   /**
@@ -67,7 +76,20 @@ export const authService = {
    * Bind device for step tracking
    */
   bindDevice: async (data: DeviceBinding): Promise<{ status: string }> => {
-    const response = await api.post<{ status: string }>('/api/auth/bind-device/', data);
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) {
+      throw new Error('Unable to bind device: user context missing');
+    }
+    if (!APP_SIGNING_SECRET) {
+      throw new Error('Unable to bind device: VITE_APP_SIGNING_SECRET is not configured');
+    }
+
+    const payload: DeviceBinding = {
+      ...data,
+      device_signature: buildDeviceSignature(String(userId), data.device_id, data.platform),
+    };
+
+    const response = await api.post<{ status: string }>('/api/auth/bind-device/', payload);
     return response.data;
   },
 

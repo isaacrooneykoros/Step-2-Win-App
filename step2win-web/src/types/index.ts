@@ -397,6 +397,7 @@ export interface ChangePasswordData {
 export interface DeviceBinding {
   device_id: string;
   platform: 'android' | 'ios';
+  device_signature?: string;
 }
 
 export interface DeviceStatus {

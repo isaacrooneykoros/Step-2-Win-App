@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema, inline_serializer
+from django.conf import settings
 from django.db import transaction, models
 from django.db.models import Count, Q, F
 from datetime import date, timedelta
@@ -94,6 +95,25 @@ def create_challenge(request):
         )
     
     entry_fee = serializer.validated_data['entry_fee']
+
+    # Hardening: require minimum reputation/history for paid challenge creators.
+    if entry_fee > 0:
+        min_trust = int(getattr(settings, 'MIN_TRUST_SCORE_FOR_PAID_CHALLENGE', 60))
+        min_joined = int(getattr(settings, 'MIN_CHALLENGES_JOINED_TO_CREATE_PAID_CHALLENGE', 1))
+        trust = getattr(request.user, 'trust_score', None)
+        trust_score = trust.score if trust else 100
+
+        if trust_score < min_trust:
+            return Response(
+                {'error': f'Your trust score must be at least {min_trust} to create paid challenges.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if request.user.challenges_joined < min_joined:
+            return Response(
+                {'error': f'Complete at least {min_joined} challenge(s) before creating paid challenges.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
     
     # Check if user has enough balance
     if request.user.wallet_balance < entry_fee:

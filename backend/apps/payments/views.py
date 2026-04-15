@@ -2,6 +2,7 @@ import json
 import logging
 from decimal import Decimal
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction as db_transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -135,6 +136,8 @@ def deposit_callback(request):
     try:
         verify_intasend_signature(request, 'Deposit callback')
         process_deposit_callback(payload)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({'error': str(exc)}, status=500)
     except PaymentsServiceError as exc:
         return JsonResponse({'error': exc.message}, status=exc.status_code)
     except PaymentTransaction.DoesNotExist:
@@ -176,6 +179,8 @@ def payout_callback(request):
     try:
         verify_intasend_signature(request, 'Payout callback')
         process_payout_callback(payload)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({'error': str(exc)}, status=500)
     except PaymentsServiceError as exc:
         return JsonResponse({'error': exc.message}, status=exc.status_code)
     except PaymentTransaction.DoesNotExist:
@@ -273,19 +278,21 @@ def _create_wallet_transaction(user, type, amount, reference, description):
     """
     from apps.wallet.models import WalletTransaction
     from apps.users.models import User
-    
-    user_obj = User.objects.get(id=user.id)
-    balance_before = user_obj.wallet_balance - amount
-    
-    WalletTransaction.objects.create(
-        user            = user,
-        type            = type,
-        amount          = amount,
-        balance_before  = balance_before,
-        balance_after   = user_obj.wallet_balance,
-        description     = description,
-        reference_id    = reference,
-    )
+
+    with db_transaction.atomic():
+        user_obj = User.objects.select_for_update().get(id=user.id)
+        balance_before = user_obj.wallet_balance
+        balance_after = balance_before + amount
+
+        WalletTransaction.objects.create(
+            user=user_obj,
+            type=type,
+            amount=amount,
+            balance_before=balance_before,
+            balance_after=balance_after,
+            description=description,
+            reference_id=reference,
+        )
 
 
 def _notify_user(user, event: str, **kwargs):
@@ -513,6 +520,8 @@ def withdrawal_callback(request):
     try:
         verify_intasend_signature(request, 'Withdrawal callback')
         process_withdrawal_callback(payload)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({'error': str(exc)}, status=500)
     except PaymentsServiceError as exc:
         return JsonResponse({'error': exc.message}, status=exc.status_code)
     except WithdrawalRequest.DoesNotExist:

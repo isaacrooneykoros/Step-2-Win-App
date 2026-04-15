@@ -1,4 +1,5 @@
 import os
+import secrets
 from pathlib import Path
 from datetime import timedelta
 from celery.schedules import crontab
@@ -32,6 +33,8 @@ if not DEBUG:
 USE_REDIS = os.getenv('USE_REDIS', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 APP_SIGNING_SECRET = os.environ.get('APP_SIGNING_SECRET', '')
+if not APP_SIGNING_SECRET:
+    raise ImproperlyConfigured('APP_SIGNING_SECRET environment variable is required.')
 
 INSTALLED_APPS = [
     'daphne',
@@ -109,11 +112,21 @@ TEMPLATES = [
 WSGI_APPLICATION = 'step2win.wsgi.application'
 ASGI_APPLICATION = 'step2win.asgi.application'
 
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
-    },
-}
+if os.getenv('REDIS_URL'):
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [os.getenv('REDIS_URL')],
+            },
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
 
 USE_SQLITE = os.getenv('USE_SQLITE', 'False') == 'True'
 DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
@@ -193,6 +206,7 @@ REST_FRAMEWORK = {
         'user':           '500/hour',
         # Auth endpoints
         'login':          '5/minute',
+        'admin_login':    '3/minute',
         'register':       '3/minute',
         'password_reset': '3/hour',
         # Financial endpoints
@@ -201,6 +215,8 @@ REST_FRAMEWORK = {
         # Activity endpoints
         'step_sync':      '10/minute',
         'chat':           '30/minute',
+        'profile_picture_upload': '10/hour',
+        'device_bind':    '10/hour',
         # Legacy
         'wallet':         '10/minute',
     },
@@ -217,13 +233,16 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN':        True,
     'ALGORITHM':                'HS256',
-    'SIGNING_KEY':              SECRET_KEY,
+    'SIGNING_KEY':              os.getenv('JWT_SIGNING_KEY', ''),
     'AUTH_HEADER_TYPES':        ('Bearer',),
     'USER_ID_FIELD':            'id',
     'USER_ID_CLAIM':            'user_id',
     'AUTH_TOKEN_CLASSES':       ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM':         'token_type',
 }
+
+if not SIMPLE_JWT['SIGNING_KEY']:
+    raise ImproperlyConfigured('JWT_SIGNING_KEY environment variable is required.')
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Step2Win API',
@@ -358,7 +377,11 @@ if 'https://step-2-win-app.vercel.app' not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append('https://step-2-win-app.vercel.app')
 
 # ── Django admin URL — obscured to resist automated scanning ─────────────────
-ADMIN_URL = os.getenv('DJANGO_ADMIN_URL', 'admin-s2w-secure/')
+ADMIN_URL = os.getenv('DJANGO_ADMIN_URL', '').strip()
+if not ADMIN_URL:
+    ADMIN_URL = f"admin-{secrets.token_urlsafe(12).replace('-', '').replace('_', '').lower()}/"
+if not DEBUG and (ADMIN_URL == 'admin-s2w-secure/' or len(ADMIN_URL) < 12):
+    raise ImproperlyConfigured('DJANGO_ADMIN_URL must be a non-default randomized path in production.')
 
 # ── django-axes brute force protection ───────────────────────────────────────
 AXES_FAILURE_LIMIT                        = 5
@@ -388,6 +411,14 @@ INTASEND_API_KEY = os.getenv('INTASEND_API_KEY', '')          # Secret/Token key
 INTASEND_PUBLISHABLE_KEY = os.getenv('INTASEND_PUBLISHABLE_KEY', '')  # Publishable key
 INTASEND_WEBHOOK_SECRET = os.getenv('INTASEND_WEBHOOK_SECRET', '')    # Webhook challenge secret
 INTASEND_TEST_MODE = os.getenv('INTASEND_TEST_MODE', 'False').strip().lower() == 'true'
+if not INTASEND_WEBHOOK_SECRET:
+    raise ImproperlyConfigured('INTASEND_WEBHOOK_SECRET environment variable is required.')
+
+TRUSTED_PROXY_IPS = [
+    ip.strip()
+    for ip in os.getenv('TRUSTED_PROXY_IPS', '').split(',')
+    if ip.strip()
+]
 
 # Callback URLs — must be publicly accessible, unauthenticated POST endpoints.
 # Register these in the IntaSend dashboard under Settings > Webhooks.
@@ -421,6 +452,11 @@ MAX_WITHDRAWALS_PER_DAY = 3
 MAX_WITHDRAWALS_PER_HOUR = 1
 MIN_SECONDS_BETWEEN_WITHDRAWALS = 300  # 5 minutes
 MAX_DAILY_WITHDRAWAL_AMOUNT_KES = 100_000
+PROFILE_PICTURE_COOLDOWN_MINUTES = int(os.getenv('PROFILE_PICTURE_COOLDOWN_MINUTES', '10'))
+MIN_TRUST_SCORE_FOR_PAID_CHALLENGE = int(os.getenv('MIN_TRUST_SCORE_FOR_PAID_CHALLENGE', '60'))
+MIN_CHALLENGES_JOINED_TO_CREATE_PAID_CHALLENGE = int(
+    os.getenv('MIN_CHALLENGES_JOINED_TO_CREATE_PAID_CHALLENGE', '1')
+)
 
 # ── Sentry error monitoring ───────────────────────────────────────────────────
 if os.getenv('SENTRY_DSN'):

@@ -2,7 +2,7 @@ import os
 import uuid
 import logging
 from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework import serializers
 from django.conf import settings
@@ -12,6 +12,7 @@ from django.db.models import Sum
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.shortcuts import get_object_or_404
+from django.core.cache import cache
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import AllowAny
 from datetime import timedelta
@@ -34,6 +35,7 @@ from apps.payments.services import (
 )
 from apps.payments.views import _notify_user
 from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiTypes
+from apps.core.throttles import AdminLoginRateThrottle
 
 from apps.admin_api.serializers import (
     AdminUserSerializer,
@@ -67,6 +69,7 @@ def _admin_profile(user):
 )
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([AdminLoginRateThrottle])
 def admin_login(request):
     """Authenticate admin user and return JWT tokens"""
     from apps.admin_api.models import AuditLog
@@ -158,11 +161,11 @@ def admin_register(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    # Only allow registration if no admin accounts exist (first admin only)
-    if User.objects.filter(is_staff=True).exists():
+    lock_key = 'admin_register_lock'
+    if not cache.add(lock_key, '1', timeout=30):
         return Response(
-            {'error': 'Admin registration is closed. Contact an existing admin to grant you access.'},
-            status=status.HTTP_403_FORBIDDEN,
+            {'error': 'Another admin registration is in progress. Please retry.'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
     if password != confirm_password:
@@ -189,12 +192,26 @@ def admin_register(request):
         message = str(error)
         return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
 
-    user = User.objects.create_user(
-        username=username,
-        email=email,
-        password=password,
-        is_staff=True,
-    )
+    try:
+        with db_transaction.atomic():
+            # Lock at least one row to reduce race conditions in concurrent requests.
+            User.objects.select_for_update().order_by('id').first()
+
+            # Only allow registration if no admin accounts exist (first admin only).
+            if User.objects.filter(is_staff=True).exists():
+                return Response(
+                    {'error': 'Admin registration is closed. Contact an existing admin to grant you access.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                is_staff=True,
+            )
+    finally:
+        cache.delete(lock_key)
 
     refresh = RefreshToken.for_user(user)
     return Response({

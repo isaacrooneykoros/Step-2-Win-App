@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from PIL import Image, UnidentifiedImageError
 from .models import User
 from apps.admin_api.models import SupportTicket, SupportTicketMessage
 from apps.core.sanitizers import sanitize_username, sanitize_text
@@ -189,10 +190,21 @@ class ProfilePictureSerializer(serializers.Serializer):
         # Validate file size (max 5MB)
         if value.size > 5 * 1024 * 1024:
             raise serializers.ValidationError('Profile picture must be less than 5MB')
-        
-        # Validate file type
-        allowed_types = ['image/jpeg', 'image/png', 'image/webp']
-        if value.content_type not in allowed_types:
+
+        allowed_formats = {'JPEG', 'PNG', 'WEBP'}
+        try:
+            value.seek(0)
+            image = Image.open(value)
+            image.verify()
+            value.seek(0)
+            decoded = Image.open(value)
+            image_format = (decoded.format or '').upper()
+            decoded.close()
+            value.seek(0)
+        except (UnidentifiedImageError, OSError, ValueError):
+            raise serializers.ValidationError('Uploaded file is not a valid image')
+
+        if image_format not in allowed_formats:
             raise serializers.ValidationError('Only JPEG, PNG, and WebP images are allowed')
         
         return value

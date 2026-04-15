@@ -43,6 +43,12 @@ services:
         generateValue: true
       - key: APP_SIGNING_SECRET
         generateValue: true
+      - key: JWT_SIGNING_KEY
+        generateValue: true
+      - key: INTASEND_WEBHOOK_SECRET
+        sync: false
+      - key: TRUSTED_PROXY_IPS
+        sync: false
       # Auto-wired from managed services above — no manual copy-paste needed
       - key: DATABASE_URL
         fromDatabase:
@@ -68,7 +74,7 @@ services:
         sync: false       # Must include mobile app origins: https://localhost,capacitor://localhost
                           # and any web frontend origins, e.g. https://step-2-win-app.vercel.app
       - key: DJANGO_ADMIN_URL
-        value: admin-s2w-secure/
+        sync: false
       - key: ENABLE_DEFENDER
         value: "True"
       - key: ADMIN_REGISTRATION_CODE
@@ -118,6 +124,16 @@ services:
           name: step2win-backend
           type: web
           envVarKey: APP_SIGNING_SECRET
+      - key: JWT_SIGNING_KEY
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: JWT_SIGNING_KEY
+      - key: INTASEND_WEBHOOK_SECRET
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: INTASEND_WEBHOOK_SECRET
       - key: DATABASE_URL
         fromDatabase:
           name: step2win-db
@@ -137,7 +153,10 @@ services:
       - key: ALLOWED_HOSTS
         sync: false
       - key: DJANGO_ADMIN_URL
-        value: admin-s2w-secure/
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: DJANGO_ADMIN_URL
       - key: ENABLE_DEFENDER
         value: "True"
       - key: POCHIPAY_EMAIL
@@ -178,6 +197,16 @@ services:
           name: step2win-backend
           type: web
           envVarKey: APP_SIGNING_SECRET
+      - key: JWT_SIGNING_KEY
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: JWT_SIGNING_KEY
+      - key: INTASEND_WEBHOOK_SECRET
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: INTASEND_WEBHOOK_SECRET
       - key: DATABASE_URL
         fromDatabase:
           name: step2win-db
@@ -197,7 +226,10 @@ services:
       - key: ALLOWED_HOSTS
         sync: false
       - key: DJANGO_ADMIN_URL
-        value: admin-s2w-secure/
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: DJANGO_ADMIN_URL
       - key: ENABLE_DEFENDER
         value: "True"
       - key: SENTRY_DSN

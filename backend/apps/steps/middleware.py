@@ -44,7 +44,10 @@ class HMACSignatureMiddleware:
 
         body_hash = hashlib.sha256(request.body).hexdigest()
         message = f"{user_id}:{timestamp}:{body_hash}"
-        secret = getattr(settings, 'APP_SIGNING_SECRET', '').encode()
+        signing_secret = getattr(settings, 'APP_SIGNING_SECRET', '')
+        if not signing_secret:
+            return {'valid': False, 'code': 'SIGNING_SECRET_NOT_CONFIGURED'}
+        secret = signing_secret.encode()
         expected = hmac.new(secret, message.encode(), hashlib.sha256).hexdigest()
 
         if not hmac.compare_digest(sig, expected):

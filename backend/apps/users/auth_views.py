@@ -27,10 +27,12 @@ UserModel = get_user_model()
 
 def get_client_ip(request) -> str:
     """Extract the real client IP, accounting for proxies."""
+    remote_addr = (request.META.get('REMOTE_ADDR') or '').strip()
+    trusted_proxies = set(getattr(settings, 'TRUSTED_PROXY_IPS', []) or [])
     x_forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded:
+    if x_forwarded and remote_addr in trusted_proxies:
         return x_forwarded.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR', '')
+    return remote_addr
 
 
 class CustomLoginView(TokenObtainPairView):

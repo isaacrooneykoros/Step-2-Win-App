@@ -8,8 +8,11 @@ from rest_framework.throttling import UserRateThrottle
 from drf_spectacular.utils import extend_schema, inline_serializer
 from django.contrib.auth import authenticate
 from django.db import transaction
+from django.conf import settings
 from django.utils.text import slugify
-from decimal import Decimal
+from django.utils import timezone
+import hashlib
+import hmac
 import json
 import requests
 from .models import User
@@ -24,7 +27,12 @@ from .serializers import (
     UserSupportTicketMessageSerializer,
 )
 from apps.admin_api.models import SupportTicket, SupportTicketMessage
-from apps.core.throttles import LoginRateThrottle, RegisterRateThrottle
+from apps.core.throttles import (
+    DeviceBindRateThrottle,
+    LoginRateThrottle,
+    ProfilePictureUploadRateThrottle,
+    RegisterRateThrottle,
+)
 
 
 class WalletThrottle(UserRateThrottle):
@@ -54,14 +62,9 @@ def register(request):
     """
     serializer = RegisterSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    
+
     user = serializer.save()
-    
-    # Give new users a starting balance for testing/demo
-    from decimal import Decimal
-    user.wallet_balance = Decimal('50.00')
-    user.save()
-    
+
     # Generate JWT tokens
     refresh = RefreshToken.for_user(user)
     
@@ -204,7 +207,6 @@ def google_auth(request):
             email=email,
             first_name=payload.get('given_name', ''),
             last_name=payload.get('family_name', ''),
-            wallet_balance=Decimal('50.00'),
             is_active=True,
         )
         user.set_unusable_password()
@@ -290,17 +292,31 @@ class ProfileView(generics.RetrieveUpdateAPIView):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([ProfilePictureUploadRateThrottle])
 def upload_profile_picture(request):
     """
     Upload a profile picture for the current user
     """
     from .serializers import ProfilePictureSerializer
-    from django.utils import timezone
-    
+
     serializer = ProfilePictureSerializer(data=request.FILES)
     serializer.is_valid(raise_exception=True)
-    
+
     user = request.user
+    cooldown_minutes = int(getattr(settings, 'PROFILE_PICTURE_COOLDOWN_MINUTES', 10))
+    if user.last_profile_picture_update:
+        seconds_since_last = (timezone.now() - user.last_profile_picture_update).total_seconds()
+        if seconds_since_last < cooldown_minutes * 60:
+            wait_seconds = int(cooldown_minutes * 60 - seconds_since_last)
+            return Response(
+                {
+                    'error': (
+                        f'Profile picture can only be changed every {cooldown_minutes} minutes. '
+                        f'Try again in {wait_seconds} seconds.'
+                    )
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
     
     # Delete old profile picture if it exists
     if user.profile_picture:
@@ -364,12 +380,14 @@ def delete_profile_picture(request):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([DeviceBindRateThrottle])
 def bind_device(request):
     """
     Bind a device to user account for step tracking
     """
-    device_id = request.data.get('device_id')
+    device_id = str(request.data.get('device_id', '')).strip()
     platform = request.data.get('platform')
+    device_signature = (request.data.get('device_signature') or '').strip()
     
     if not device_id:
         return Response(
@@ -381,6 +399,38 @@ def bind_device(request):
         return Response(
             {'error': 'platform must be android or ios'}, 
             status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Enforce high-entropy, non-guessable device IDs.
+    if len(device_id) < 32:
+        return Response(
+            {'error': 'device_id must be at least 32 characters'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    signing_secret = (getattr(settings, 'APP_SIGNING_SECRET', '') or '').strip()
+    if not signing_secret:
+        return Response(
+            {'error': 'Device binding is unavailable due to server configuration'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    if not device_signature:
+        return Response(
+            {'error': 'device_signature required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    signature_payload = f"{request.user.id}:{device_id}:{platform}"
+    expected_signature = hmac.new(
+        signing_secret.encode(),
+        signature_payload.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(device_signature, expected_signature):
+        return Response(
+            {'error': 'Invalid device signature'},
+            status=status.HTTP_403_FORBIDDEN,
         )
     
     # Check if device is already bound to another account

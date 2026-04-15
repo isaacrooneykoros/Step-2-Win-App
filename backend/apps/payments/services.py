@@ -10,6 +10,7 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ImproperlyConfigured
 from django.db import models, transaction as db_transaction
 from django.utils import timezone
 
@@ -32,7 +33,7 @@ class PaymentsServiceError(Exception):
 def verify_intasend_signature(request, callback_name: str) -> None:
     secret = (getattr(settings, 'INTASEND_WEBHOOK_SECRET', '') or '').strip()
     if not secret:
-        return
+        raise ImproperlyConfigured('INTASEND_WEBHOOK_SECRET is not configured; webhook callbacks are disabled.')
 
     provided_sig = (request.headers.get('X-IntaSend-Signature', '') or '').strip()
     if not provided_sig:
