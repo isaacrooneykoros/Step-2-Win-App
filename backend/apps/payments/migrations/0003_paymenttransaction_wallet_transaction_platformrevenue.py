@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('payments', '0002_withdrawalrequest'),
-        ('wallet', '0002_wallettransaction_reference_id'),  # Ensure wallet app is migrated first
+        ('wallet', '0002_update_withdrawal_statuses'),
         ('challenges', '0001_initial'),
     ]
 
