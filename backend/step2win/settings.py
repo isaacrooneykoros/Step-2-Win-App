@@ -1,5 +1,6 @@
 import os
 import secrets
+import sys
 from pathlib import Path
 from datetime import timedelta
 from celery.schedules import crontab
@@ -10,6 +11,15 @@ from django.core.exceptions import ImproperlyConfigured
 
 load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+_MANAGE_PY_BOOTSTRAP_COMMANDS = {
+    'check',
+    'collectstatic',
+    'migrate',
+    'showmigrations',
+}
+_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and sys.argv[0].endswith('manage.py') else ''
+_ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS
 
 ENVIRONMENT = os.getenv('DJANGO_ENV', 'development').strip().lower()
 DEBUG = os.getenv('DEBUG', 'False').strip().lower() == 'true'
@@ -33,8 +43,10 @@ if not DEBUG:
 USE_REDIS = os.getenv('USE_REDIS', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 APP_SIGNING_SECRET = os.environ.get('APP_SIGNING_SECRET', '')
-if not APP_SIGNING_SECRET:
+if not APP_SIGNING_SECRET and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
     raise ImproperlyConfigured('APP_SIGNING_SECRET environment variable is required.')
+if not APP_SIGNING_SECRET:
+    APP_SIGNING_SECRET = SECRET_KEY
 
 INSTALLED_APPS = [
     'daphne',
@@ -233,7 +245,7 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN':        True,
     'ALGORITHM':                'HS256',
-    'SIGNING_KEY':              os.getenv('JWT_SIGNING_KEY', ''),
+    'SIGNING_KEY':              os.getenv('JWT_SIGNING_KEY', '').strip(),
     'AUTH_HEADER_TYPES':        ('Bearer',),
     'USER_ID_FIELD':            'id',
     'USER_ID_CLAIM':            'user_id',
@@ -241,8 +253,10 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM':         'token_type',
 }
 
-if not SIMPLE_JWT['SIGNING_KEY']:
+if not SIMPLE_JWT['SIGNING_KEY'] and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
     raise ImproperlyConfigured('JWT_SIGNING_KEY environment variable is required.')
+if not SIMPLE_JWT['SIGNING_KEY']:
+    SIMPLE_JWT['SIGNING_KEY'] = SECRET_KEY
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Step2Win API',
@@ -423,7 +437,7 @@ INTASEND_API_KEY = os.getenv('INTASEND_API_KEY', '')          # Secret/Token key
 INTASEND_PUBLISHABLE_KEY = os.getenv('INTASEND_PUBLISHABLE_KEY', '')  # Publishable key
 INTASEND_WEBHOOK_SECRET = os.getenv('INTASEND_WEBHOOK_SECRET', '')    # Webhook challenge secret
 INTASEND_TEST_MODE = os.getenv('INTASEND_TEST_MODE', 'False').strip().lower() == 'true'
-if not INTASEND_WEBHOOK_SECRET:
+if not INTASEND_WEBHOOK_SECRET and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
     raise ImproperlyConfigured('INTASEND_WEBHOOK_SECRET environment variable is required.')
 
 TRUSTED_PROXY_IPS = [
