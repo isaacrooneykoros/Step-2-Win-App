@@ -338,6 +338,25 @@ def upload_profile_picture(request):
 
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
+@extend_schema(
+    request=None,
+    responses={
+        200: inline_serializer(
+            name='DeleteProfilePictureResponse',
+            fields={
+                'status': serializers.CharField(),
+                'message': serializers.CharField(),
+            },
+        ),
+        400: inline_serializer(
+            name='DeleteProfilePictureError',
+            fields={
+                'status': serializers.CharField(),
+                'message': serializers.CharField(),
+            },
+        ),
+    },
+)
 def delete_profile_picture(request):
     """
     Delete the current user's profile picture

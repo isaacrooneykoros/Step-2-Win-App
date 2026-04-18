@@ -34,9 +34,8 @@ if settings.DEBUG:
         path('api/redoc/',  SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
     ]
 
-# Serve media files in development
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Serve media files (needed for profile image previews in hosted environments)
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 # Custom admin site configuration
 admin.site.site_header = 'Step2Win Administration'

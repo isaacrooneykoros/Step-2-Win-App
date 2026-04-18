@@ -53,6 +53,13 @@ const PROFILE_PICTURE_MAX_BYTES = 10 * 1024 * 1024;
 const PROFILE_PICTURE_ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
 const PROFILE_PICTURE_ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'];
 
+function withCacheBuster(url: string | null | undefined, version?: number): string {
+  if (!url) return '';
+  const stamp = version ?? Date.now();
+  const hasQuery = url.includes('?');
+  return `${url}${hasQuery ? '&' : '?'}v=${stamp}`;
+}
+
 function formatProfileErrorMessage(raw: string): string {
   const message = String(raw || '').trim();
   const lower = message.toLowerCase();
@@ -152,7 +159,7 @@ export function SettingsPage() {
         profile_picture: data.profile_picture ?? null,
       };
       setProfile(normalized);
-      setProfilePreview(data.profile_picture_url || '');
+      setProfilePreview(withCacheBuster(data.profile_picture_url));
       setRemoveProfilePicture(false);
       setProfileError('');
     } catch (err) {
@@ -212,7 +219,7 @@ export function SettingsPage() {
         ...updated,
         profile_picture: updated.profile_picture ?? null,
       });
-      setProfilePreview(updated.profile_picture_url || '');
+      setProfilePreview(withCacheBuster(updated.profile_picture_url));
       setRemoveProfilePicture(false);
       if (profilePictureInputRef.current) {
         profilePictureInputRef.current.value = '';
@@ -223,7 +230,7 @@ export function SettingsPage() {
       const looksLikeImageError = /profile_picture|image/i.test(message);
       if (looksLikeImageError) {
         setProfile((prev) => prev ? { ...prev, profile_picture: null } : prev);
-        setProfilePreview(profile.profile_picture_url || '');
+        setProfilePreview(withCacheBuster(profile.profile_picture_url));
         setRemoveProfilePicture(false);
         if (profilePictureInputRef.current) {
           profilePictureInputRef.current.value = '';
@@ -254,7 +261,7 @@ export function SettingsPage() {
     if (file.size > PROFILE_PICTURE_MAX_BYTES) {
       setProfileError('Image is too large. Please choose a file smaller than 10MB.');
       updateProfileField('profile_picture', null);
-      setProfilePreview(profile.profile_picture_url || '');
+      setProfilePreview(withCacheBuster(profile.profile_picture_url));
       if (profilePictureInputRef.current) {
         profilePictureInputRef.current.value = ''; 
       }
@@ -266,7 +273,7 @@ export function SettingsPage() {
     if (!mimeAllowed && !extensionAllowed) {
       setProfileError('Please choose a JPEG, PNG, WebP, HEIC, or HEIF image.');
       updateProfileField('profile_picture', null);
-      setProfilePreview(profile.profile_picture_url || '');
+      setProfilePreview(withCacheBuster(profile.profile_picture_url));
       if (profilePictureInputRef.current) {
         profilePictureInputRef.current.value = '';
       }

@@ -79,7 +79,12 @@ class IsAdminUser(permissions.BasePermission):
 
 
 @extend_schema(
-    responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
+    request=AdminProfileSerializer,
+    responses={
+        200: AdminProfileSerializer,
+        400: OpenApiTypes.OBJECT,
+        403: OpenApiTypes.OBJECT,
+    },
 )
 @api_view(['GET', 'PATCH'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])

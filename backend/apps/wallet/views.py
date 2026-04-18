@@ -34,13 +34,13 @@ class WithdrawalRequestDisplaySerializer(serializers.Serializer):
     created_at = serializers.CharField()
     updated_at = serializers.CharField()
 
-    def get_destination(self, obj):
+    def get_destination(self, obj) -> str:
         return obj.destination_display
 
-    def get_mpesa_ref(self, obj):
+    def get_mpesa_ref(self, obj) -> str:
         return obj.mpesa_reference
 
-    def get_fail_reason(self, obj):
+    def get_fail_reason(self, obj) -> str:
         return obj.fail_reason or obj.rejection_reason
 
 
