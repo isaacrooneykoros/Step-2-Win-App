@@ -16,6 +16,7 @@ class AdminProfileSerializer(serializers.ModelSerializer):
     """Serializer for the currently authenticated admin profile."""
 
     profile_picture_url = serializers.SerializerMethodField()
+    remove_profile_picture = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
         model = User
@@ -27,6 +28,7 @@ class AdminProfileSerializer(serializers.ModelSerializer):
             'first_name',
             'last_name',
             'profile_picture',
+            'remove_profile_picture',
             'profile_picture_url',
             'is_staff',
             'is_superuser',
@@ -98,6 +100,13 @@ class AdminProfileSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.profile_picture.url)
             return obj.profile_picture.url
         return None
+
+    def update(self, instance, validated_data):
+        remove_picture = validated_data.pop('remove_profile_picture', False)
+        if remove_picture and instance.profile_picture:
+            instance.profile_picture.delete(save=False)
+            instance.profile_picture = None
+        return super().update(instance, validated_data)
 
 
 class AdminNotificationSerializer(serializers.Serializer):

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { adminApi } from '../services/adminApi';
 import { Settings, DollarSign, Award, Bell, Shield, Zap, Save, AlertTriangle, X } from 'lucide-react';
 import type { AdminProfile } from '../types/admin';
@@ -60,10 +60,22 @@ export function SettingsPage() {
   const [profileSuccessMsg, setProfileSuccessMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [removeProfilePicture, setRemoveProfilePicture] = useState(false);
+  const [profileOnlyView, setProfileOnlyView] = useState(false);
+  const profilePictureInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     loadSettings();
     loadProfile();
+  }, []);
+
+  useEffect(() => {
+    const syncHashView = () => {
+      setProfileOnlyView(window.location.hash === '#profile');
+    };
+    syncHashView();
+    window.addEventListener('hashchange', syncHashView);
+    return () => window.removeEventListener('hashchange', syncHashView);
   }, []);
 
   useEffect(() => {
@@ -98,6 +110,7 @@ export function SettingsPage() {
       };
       setProfile(normalized);
       setProfilePreview(data.profile_picture_url || '');
+      setRemoveProfilePicture(false);
       setProfileError('');
     } catch (err) {
       setProfileError((err as Error).message);
@@ -140,13 +153,15 @@ export function SettingsPage() {
 
     try {
       const payload = new FormData();
-      payload.append('username', profile.username);
       payload.append('email', profile.email);
       if (profile.phone_number) payload.append('phone_number', profile.phone_number);
       if (profile.first_name !== undefined) payload.append('first_name', profile.first_name || '');
       if (profile.last_name !== undefined) payload.append('last_name', profile.last_name || '');
       if (profile.profile_picture instanceof File) {
         payload.append('profile_picture', profile.profile_picture);
+      }
+      if (removeProfilePicture) {
+        payload.append('remove_profile_picture', 'true');
       }
 
       const updated = await adminApi.updateMyProfile(payload);
@@ -155,9 +170,23 @@ export function SettingsPage() {
         profile_picture: updated.profile_picture ?? null,
       });
       setProfilePreview(updated.profile_picture_url || '');
+      setRemoveProfilePicture(false);
+      if (profilePictureInputRef.current) {
+        profilePictureInputRef.current.value = '';
+      }
       showProfileSuccess('Admin profile updated successfully');
     } catch (err) {
-      setProfileError((err as Error).message);
+      const message = (err as Error).message;
+      const looksLikeImageError = /profile_picture|image/i.test(message);
+      if (looksLikeImageError) {
+        setProfile((prev) => prev ? { ...prev, profile_picture: null } : prev);
+        setProfilePreview(profile.profile_picture_url || '');
+        setRemoveProfilePicture(false);
+        if (profilePictureInputRef.current) {
+          profilePictureInputRef.current.value = '';
+        }
+      }
+      setProfileError(message);
     } finally {
       setProfileSaving(false);
     }
@@ -179,8 +208,21 @@ export function SettingsPage() {
       updateProfileField('profile_picture', null);
       return;
     }
+    setRemoveProfilePicture(false);
+    setProfileError('');
     updateProfileField('profile_picture', file);
     setProfilePreview(URL.createObjectURL(file));
+  };
+
+  const handleRemoveProfilePicture = () => {
+    if (!profile) return;
+    setProfileError('');
+    setRemoveProfilePicture(true);
+    updateProfileField('profile_picture', null);
+    setProfilePreview('');
+    if (profilePictureInputRef.current) {
+      profilePictureInputRef.current.value = '';
+    }
   };
 
   if (!settings || !formData || !profile) {
@@ -255,12 +297,20 @@ export function SettingsPage() {
             <label className="inline-flex items-center justify-center w-full px-4 py-3 rounded-xl border border-surface-border text-ink-primary cursor-pointer hover:bg-surface-elevated transition-colors">
               Choose Picture
               <input
+                ref={profilePictureInputRef}
                 type="file"
                 accept="image/*"
                 className="hidden"
                 onChange={(e) => handleProfilePictureChange(e.target.files?.[0] ?? null)}
               />
             </label>
+            <button
+              type="button"
+              onClick={handleRemoveProfilePicture}
+              className="inline-flex items-center justify-center w-full px-4 py-3 rounded-xl border border-down/40 text-down hover:bg-down/10 transition-colors"
+            >
+              Remove Picture
+            </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -269,7 +319,7 @@ export function SettingsPage() {
               <input
                 type="text"
                 value={profile.username}
-                onChange={(e) => updateProfileField('username', e.target.value)}
+                readOnly
                 className="w-full px-4 py-2.5 bg-surface-input border border-surface-border rounded-xl text-ink-primary focus:outline-none focus:border-info transition-colors"
               />
             </div>
@@ -325,6 +375,8 @@ export function SettingsPage() {
         </div>
       </div>
 
+      {!profileOnlyView && (
+      <>
       {/* Header */}
       <div
         className="rounded-2xl p-8"
@@ -723,6 +775,8 @@ export function SettingsPage() {
           {saving ? 'Saving Settings...' : 'Save All Changes'}
         </button>
       </div>
+      </>
+      )}
     </div>
   );
 }

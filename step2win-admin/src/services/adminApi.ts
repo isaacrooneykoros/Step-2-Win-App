@@ -51,6 +51,35 @@ function safeParseJson(value: string): unknown | null {
   }
 }
 
+function normalizeErrorText(value: string): string {
+  return value
+    .replace(/ErrorDetail\(string='([^']+)'(?:,\s*code='[^']*')?\)/g, '$1')
+    .replace(/[{}\[\]']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function firstErrorMessage(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) {
+    return normalizeErrorText(value);
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const msg = firstErrorMessage(item);
+      if (msg) return msg;
+    }
+    return null;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    for (const nested of Object.values(record)) {
+      const msg = firstErrorMessage(nested);
+      if (msg) return msg;
+    }
+  }
+  return null;
+}
+
 function extractErrorMessage(rawText: string): string {
   if (!rawText) {
     return 'Request failed';
@@ -58,7 +87,8 @@ function extractErrorMessage(rawText: string): string {
 
   const parsed = safeParseJson(rawText);
   if (!parsed || typeof parsed !== 'object') {
-    return rawText;
+    const normalized = normalizeErrorText(rawText);
+    return normalized || 'Request failed';
   }
   const parsedRecord = parsed as Record<string, unknown>;
   const details =
@@ -88,26 +118,13 @@ function extractErrorMessage(rawText: string): string {
     return msg;
   }
 
-  const fieldError = Object.entries(parsedRecord).find(([, value]) => {
-    if (typeof value === 'string' && value.trim()) {
-      return true;
-    }
-    if (Array.isArray(value)) {
-      return value.some((item) => typeof item === 'string' && item.trim());
-    }
-    return false;
-  });
+  const fieldError = Object.entries(parsedRecord).find(([, value]) => firstErrorMessage(value));
 
   if (fieldError) {
     const [field, value] = fieldError;
-    if (typeof value === 'string' && value.trim()) {
-      return `${field}: ${value}`;
-    }
-    if (Array.isArray(value)) {
-      const first = value.find((item) => typeof item === 'string' && item.trim());
-      if (typeof first === 'string') {
-        return `${field}: ${first}`;
-      }
+    const first = firstErrorMessage(value);
+    if (first) {
+      return `${field}: ${first}`;
     }
   }
 
