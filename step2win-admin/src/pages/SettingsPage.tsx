@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { adminApi } from '../services/adminApi';
-import { Settings, DollarSign, Award, Bell, Shield, Zap, Save, AlertTriangle } from 'lucide-react';
+import { Settings, DollarSign, Award, Bell, Shield, Zap, Save, AlertTriangle, X } from 'lucide-react';
 import type { AdminProfile } from '../types/admin';
 
 interface SystemSettings {
@@ -54,8 +54,10 @@ export function SettingsPage() {
   const [formData, setFormData] = useState<SystemSettings | null>(null);
   const [profile, setProfile] = useState<AdminProfileForm | null>(null);
   const [profilePreview, setProfilePreview] = useState('');
-  const [error, setError] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
+  const [settingsError, setSettingsError] = useState('');
+  const [profileError, setProfileError] = useState('');
+  const [settingsSuccessMsg, setSettingsSuccessMsg] = useState('');
+  const [profileSuccessMsg, setProfileSuccessMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
 
@@ -64,13 +66,26 @@ export function SettingsPage() {
     loadProfile();
   }, []);
 
+  useEffect(() => {
+    if (!profileError) return;
+    const timer = window.setTimeout(() => setProfileError(''), 8000);
+    return () => window.clearTimeout(timer);
+  }, [profileError]);
+
+  useEffect(() => {
+    if (!settingsError) return;
+    const timer = window.setTimeout(() => setSettingsError(''), 8000);
+    return () => window.clearTimeout(timer);
+  }, [settingsError]);
+
   const loadSettings = async () => {
     try {
       const data = await adminApi.getSettings() as SystemSettings;
       setSettings(data);
       setFormData(data);
+      setSettingsError('');
     } catch (err) {
-      setError((err as Error).message);
+      setSettingsError((err as Error).message);
     }
   };
 
@@ -83,29 +98,35 @@ export function SettingsPage() {
       };
       setProfile(normalized);
       setProfilePreview(data.profile_picture_url || '');
+      setProfileError('');
     } catch (err) {
-      setError((err as Error).message);
+      setProfileError((err as Error).message);
     }
   };
 
-  const showSuccess = (msg: string) => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(''), 3000);
+  const showSettingsSuccess = (msg: string) => {
+    setSettingsSuccessMsg(msg);
+    setTimeout(() => setSettingsSuccessMsg(''), 3000);
+  };
+
+  const showProfileSuccess = (msg: string) => {
+    setProfileSuccessMsg(msg);
+    setTimeout(() => setProfileSuccessMsg(''), 3000);
   };
 
   const handleSave = async () => {
     if (!formData) return;
     
     setSaving(true);
-    setError('');
+    setSettingsError('');
     
     try {
       const updated = await adminApi.updateSettings(formData as Record<string, unknown>) as SystemSettings;
       setSettings(updated);
       setFormData(updated);
-      showSuccess('Settings saved successfully');
+      showSettingsSuccess('Settings saved successfully');
     } catch (err) {
-      setError((err as Error).message);
+      setSettingsError((err as Error).message);
     } finally {
       setSaving(false);
     }
@@ -115,7 +136,7 @@ export function SettingsPage() {
     if (!profile) return;
 
     setProfileSaving(true);
-    setError('');
+    setProfileError('');
 
     try {
       const payload = new FormData();
@@ -134,9 +155,9 @@ export function SettingsPage() {
         profile_picture: updated.profile_picture ?? null,
       });
       setProfilePreview(updated.profile_picture_url || '');
-      showSuccess('Admin profile updated successfully');
+      showProfileSuccess('Admin profile updated successfully');
     } catch (err) {
-      setError((err as Error).message);
+      setProfileError((err as Error).message);
     } finally {
       setProfileSaving(false);
     }
@@ -190,6 +211,31 @@ export function SettingsPage() {
             {profileSaving ? 'Saving Profile...' : 'Save Profile'}
           </button>
         </div>
+
+        {profileError && (
+          <div className="mb-4 rounded-xl border border-down/40 bg-down/10 p-4" role="alert">
+            <div className="flex items-start justify-between gap-3">
+              <AlertTriangle size={18} className="mt-0.5 text-down" />
+              <div className="flex-1">
+                <p className="font-semibold text-down">Profile update failed</p>
+                <p className="text-sm text-down/90">{profileError}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProfileError('')}
+                className="rounded-lg p-1 text-down/80 hover:bg-down/20 hover:text-down transition-colors"
+                aria-label="Close profile warning"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+        {profileSuccessMsg && (
+          <div className="mb-4 rounded-xl border border-up/30 bg-up/10 p-4">
+            <p className="font-medium text-up">{profileSuccessMsg}</p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-[220px,1fr] gap-6 items-start">
           <div className="space-y-4">
@@ -314,15 +360,29 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {/* Messages */}
-      {error && (
-        <div className="bg-down/10 border border-down/30 rounded-xl p-4">
-          <p className="text-down font-medium">{error}</p>
+      {/* Settings Messages */}
+      {settingsError && (
+        <div className="rounded-xl border border-down/40 bg-down/10 p-4" role="alert">
+          <div className="flex items-start justify-between gap-3">
+            <AlertTriangle size={18} className="mt-0.5 text-down" />
+            <div className="flex-1">
+              <p className="font-semibold text-down">Settings update failed</p>
+              <p className="text-sm text-down/90">{settingsError}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSettingsError('')}
+              className="rounded-lg p-1 text-down/80 hover:bg-down/20 hover:text-down transition-colors"
+              aria-label="Close settings warning"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
       )}
-      {successMsg && (
+      {settingsSuccessMsg && (
         <div className="bg-up/10 border border-up/30 rounded-xl p-4">
-          <p className="text-up font-medium">{successMsg}</p>
+          <p className="text-up font-medium">{settingsSuccessMsg}</p>
         </div>
       )}
 
