@@ -34,6 +34,7 @@ from apps.core.throttles import (
     ProfilePictureUploadRateThrottle,
     RegisterRateThrottle,
 )
+from apps.core.url_utils import build_absolute_media_url
 
 
 class WalletThrottle(UserRateThrottle):
@@ -331,7 +332,10 @@ def upload_profile_picture(request):
     
     return Response({
         'status': 'success',
-        'profile_picture_url': user.profile_picture.url if user.profile_picture else None,
+        'profile_picture_url': build_absolute_media_url(
+            user.profile_picture.url if user.profile_picture else None,
+            request=request,
+        ),
         'message': 'Profile picture uploaded successfully'
     }, status=status.HTTP_200_OK)
 

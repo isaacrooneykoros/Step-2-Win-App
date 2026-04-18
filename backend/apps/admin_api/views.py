@@ -37,6 +37,7 @@ from apps.payments.services import (
 from apps.payments.views import _notify_user
 from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiTypes
 from apps.core.throttles import AdminLoginRateThrottle
+from apps.core.url_utils import build_absolute_media_url
 
 from apps.admin_api.serializers import (
     AdminProfileSerializer,
@@ -56,10 +57,7 @@ User = get_user_model()
 def _admin_profile(user, request=None):
     profile_picture_url = None
     if getattr(user, 'profile_picture', None):
-        if request is not None:
-            profile_picture_url = request.build_absolute_uri(user.profile_picture.url)
-        else:
-            profile_picture_url = user.profile_picture.url
+        profile_picture_url = build_absolute_media_url(user.profile_picture.url, request=request)
 
     return {
         'id': user.id,
