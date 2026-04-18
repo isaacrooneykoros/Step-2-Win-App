@@ -6,8 +6,8 @@ from apps.wallet.models import WalletTransaction, Withdrawal
 from apps.gamification.models import Badge, UserBadge
 from apps.users.models import UserXP
 from apps.admin_api.models import SystemSettings, AuditLog, SupportTicket, SupportTicketMessage
+from apps.core.image_utils import validate_and_normalize_profile_picture
 from apps.core.sanitizers import sanitize_username
-from PIL import Image, UnidentifiedImageError
 
 User = get_user_model()
 
@@ -72,26 +72,7 @@ class AdminProfileSerializer(serializers.ModelSerializer):
         return value
 
     def validate_profile_picture(self, value):
-        if value.size > 10 * 1024 * 1024:
-            raise serializers.ValidationError('Profile picture must be less than 10MB')
-
-        allowed_formats = {'JPEG', 'PNG', 'WEBP'}
-        try:
-            value.seek(0)
-            image = Image.open(value)
-            image.verify()
-            value.seek(0)
-            decoded = Image.open(value)
-            image_format = (decoded.format or '').upper()
-            decoded.close()
-            value.seek(0)
-        except (UnidentifiedImageError, OSError, ValueError):
-            raise serializers.ValidationError('Uploaded file is not a valid image')
-
-        if image_format not in allowed_formats:
-            raise serializers.ValidationError('Only JPEG, PNG, and WebP images are allowed')
-
-        return value
+        return validate_and_normalize_profile_picture(value, max_mb=10)
 
     def get_profile_picture_url(self, obj) -> str | None:
         if obj.profile_picture:

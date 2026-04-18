@@ -50,18 +50,19 @@ interface AdminProfileForm extends Omit<AdminProfile, 'profile_picture'> {
 }
 
 const PROFILE_PICTURE_MAX_BYTES = 10 * 1024 * 1024;
-const PROFILE_PICTURE_ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const PROFILE_PICTURE_ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+const PROFILE_PICTURE_ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'];
 
 function formatProfileErrorMessage(raw: string): string {
   const message = String(raw || '').trim();
   const lower = message.toLowerCase();
 
   if (lower.includes('uploaded file is not a valid image')) {
-    return 'That file is not a valid image. Please choose a JPEG, PNG, or WebP photo.';
+    return 'That file is not a valid image. Please choose a JPEG, PNG, WebP, HEIC, or HEIF photo.';
   }
 
-  if (lower.includes('only jpeg, png, and webp images are allowed')) {
-    return 'Please choose a JPEG, PNG, or WebP image.';
+  if (lower.includes('only jpeg, png, webp, heic, and heif images are allowed')) {
+    return 'Please choose a JPEG, PNG, WebP, HEIC, or HEIF image.';
   }
 
   if (lower.includes('profile picture must be less than')) {
@@ -80,8 +81,12 @@ function formatProfileErrorMessage(raw: string): string {
     return 'That username is already taken.';
   }
 
-  if (lower.includes('profile_picture')) {
+  if (lower.includes('profile_picture') && lower.includes('image')) {
     return 'There was a problem with the photo you selected. Please choose a different image.';
+  }
+
+  if (lower.includes('profile_picture')) {
+    return 'There was a problem saving your profile photo. Please try a different image.';
   }
 
   return message || 'Something went wrong while saving your profile. Please try again.';
@@ -255,8 +260,11 @@ export function SettingsPage() {
       }
       return;
     }
-    if (!PROFILE_PICTURE_ALLOWED_TYPES.includes(file.type)) {
-      setProfileError('Please choose a JPEG, PNG, or WebP image.');
+    const extension = (file.name.split('.').pop() || '').toLowerCase();
+    const mimeAllowed = PROFILE_PICTURE_ALLOWED_TYPES.includes(file.type);
+    const extensionAllowed = PROFILE_PICTURE_ALLOWED_EXTENSIONS.includes(extension);
+    if (!mimeAllowed && !extensionAllowed) {
+      setProfileError('Please choose a JPEG, PNG, WebP, HEIC, or HEIF image.');
       updateProfileField('profile_picture', null);
       setProfilePreview(profile.profile_picture_url || '');
       if (profilePictureInputRef.current) {

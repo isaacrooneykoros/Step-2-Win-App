@@ -86,7 +86,19 @@ function extractErrorMessage(rawText: string): string {
   }
 
   const normalizedRawText = normalizeErrorText(rawText);
-  if (/profile_picture|uploaded file is not a valid image|profile picture must be less than/i.test(normalizedRawText)) {
+  if (/uploaded file is not a valid image/i.test(normalizedRawText)) {
+    return 'The selected file is not a valid image. Please choose a JPEG, PNG, WebP, HEIC, or HEIF photo.';
+  }
+
+  if (/only jpeg, png, webp|only jpeg, png, and webp images are allowed/i.test(normalizedRawText)) {
+    return 'Please choose a JPEG, PNG, WebP, HEIC, or HEIF image.';
+  }
+
+  if (/profile picture must be less than/i.test(normalizedRawText)) {
+    return 'Image is too large. Please choose a file smaller than 10MB.';
+  }
+
+  if (/profile_picture/i.test(normalizedRawText)) {
     return 'There was a problem with the photo you selected. Please choose a different image.';
   }
 
