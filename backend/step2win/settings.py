@@ -436,10 +436,8 @@ AUTH_USER_MODEL = 'users.User'
 # Get your API keys from https://payment.intasend.com (live) or https://sandbox.intasend.com (test)
 INTASEND_API_KEY = os.getenv('INTASEND_API_KEY', '')          # Secret/Token key
 INTASEND_PUBLISHABLE_KEY = os.getenv('INTASEND_PUBLISHABLE_KEY', '')  # Publishable key
-INTASEND_WEBHOOK_SECRET = os.getenv('INTASEND_WEBHOOK_SECRET', '')    # Webhook challenge secret
+INTASEND_WEBHOOK_SECRET = os.getenv('INTASEND_WEBHOOK_SECRET', '').strip() or SECRET_KEY    # Webhook challenge secret
 INTASEND_TEST_MODE = os.getenv('INTASEND_TEST_MODE', 'False').strip().lower() == 'true'
-if not INTASEND_WEBHOOK_SECRET and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
-    raise ImproperlyConfigured('INTASEND_WEBHOOK_SECRET environment variable is required.')
 
 TRUSTED_PROXY_IPS = [
     ip.strip()
