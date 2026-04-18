@@ -62,6 +62,10 @@ android/
 ios/
 .capacitor/
 
+# Private documentation and API specs (keep local, never push)
+docs/
+Step2Win API.yaml
+
 # Editor
 .vscode/
 .idea/
