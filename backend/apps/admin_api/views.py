@@ -2,7 +2,8 @@ import os
 import uuid
 import logging
 from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
+from rest_framework.decorators import action, api_view, permission_classes, throttle_classes, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework import serializers
 from django.conf import settings
@@ -82,6 +83,7 @@ class IsAdminUser(permissions.BasePermission):
 )
 @api_view(['GET', 'PATCH'])
 @permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def current_admin_profile(request):
     """Get or update the authenticated admin profile, including profile picture."""
     serializer_cls = AdminProfileSerializer

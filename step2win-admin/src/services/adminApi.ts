@@ -88,6 +88,29 @@ function extractErrorMessage(rawText: string): string {
     return msg;
   }
 
+  const fieldError = Object.entries(parsedRecord).find(([, value]) => {
+    if (typeof value === 'string' && value.trim()) {
+      return true;
+    }
+    if (Array.isArray(value)) {
+      return value.some((item) => typeof item === 'string' && item.trim());
+    }
+    return false;
+  });
+
+  if (fieldError) {
+    const [field, value] = fieldError;
+    if (typeof value === 'string' && value.trim()) {
+      return `${field}: ${value}`;
+    }
+    if (Array.isArray(value)) {
+      const first = value.find((item) => typeof item === 'string' && item.trim());
+      if (typeof first === 'string') {
+        return `${field}: ${first}`;
+      }
+    }
+  }
+
   return typeof parsedRecord.error === 'string' ? parsedRecord.error : 'Request failed';
 }
 
