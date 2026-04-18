@@ -199,6 +199,7 @@ STORAGES = {
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_BASE_URL = (os.getenv('MEDIA_BASE_URL') or os.getenv('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

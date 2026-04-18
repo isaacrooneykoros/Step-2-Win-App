@@ -5,6 +5,7 @@ from .models import User
 from apps.admin_api.models import SupportTicket, SupportTicketMessage
 from apps.core.image_utils import validate_and_normalize_profile_picture
 from apps.core.sanitizers import sanitize_username, sanitize_text
+from apps.core.url_utils import build_absolute_media_url
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -148,9 +149,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     def get_profile_picture_url(self, obj) -> str:
         if obj.profile_picture:
             request = self.context.get('request') if hasattr(self, 'context') else None
-            if request is not None:
-                return request.build_absolute_uri(obj.profile_picture.url)
-            return obj.profile_picture.url
+            return build_absolute_media_url(obj.profile_picture.url, request=request)
         return None
 
 

@@ -8,6 +8,7 @@ from apps.users.models import UserXP
 from apps.admin_api.models import SystemSettings, AuditLog, SupportTicket, SupportTicketMessage
 from apps.core.image_utils import validate_and_normalize_profile_picture
 from apps.core.sanitizers import sanitize_username
+from apps.core.url_utils import build_absolute_media_url
 
 User = get_user_model()
 
@@ -77,9 +78,7 @@ class AdminProfileSerializer(serializers.ModelSerializer):
     def get_profile_picture_url(self, obj) -> str | None:
         if obj.profile_picture:
             request = self.context.get('request') if hasattr(self, 'context') else None
-            if request is not None:
-                return request.build_absolute_uri(obj.profile_picture.url)
-            return obj.profile_picture.url
+            return build_absolute_media_url(obj.profile_picture.url, request=request)
         return None
 
     def update(self, instance, validated_data):
