@@ -28,6 +28,7 @@ from .serializers import (
 )
 from apps.admin_api.models import SupportTicket, SupportTicketMessage
 from apps.core.throttles import (
+    DashboardReadRateThrottle,
     DeviceBindRateThrottle,
     LoginRateThrottle,
     ProfilePictureUploadRateThrottle,
@@ -253,6 +254,7 @@ class ProfileView(generics.RetrieveUpdateAPIView):
     """
     serializer_class = UserProfileSerializer
     permission_classes = [IsAuthenticated]
+    throttle_classes = [DashboardReadRateThrottle]
     queryset = User.objects.all()
 
     def get_object(self):

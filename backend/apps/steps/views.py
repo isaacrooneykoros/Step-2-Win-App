@@ -9,7 +9,7 @@ from django.db import transaction
 from django.db.models import Avg, Max, Sum
 from django.utils import timezone
 from django_ratelimit.decorators import ratelimit
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import serializers
@@ -19,6 +19,7 @@ from asgiref.sync import async_to_sync
 
 from .anti_cheat import DAILY_STEP_CAP, run_anti_cheat
 from .daily_reset import update_streak
+from apps.core.throttles import DashboardReadRateThrottle
 from .models import FraudFlag, HealthRecord, SuspiciousActivity, TrustScore, HourlyStepRecord, LocationWaypoint
 from .serializers import HealthRecordSerializer, HealthSyncSerializer, HourlyStepSerializer, LocationWaypointSerializer
 
@@ -472,6 +473,7 @@ def sync_health(request):
 @extend_schema(responses={200: HealthRecordSerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([DashboardReadRateThrottle])
 def today_health(request):
     """Today's steps + distance + calories + active minutes."""
     today = timezone.now().date()
@@ -596,6 +598,7 @@ def health_history(request):
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([DashboardReadRateThrottle])
 def weekly_steps(request):
     """7-day step array for the home screen bar chart."""
     today = timezone.now().date()

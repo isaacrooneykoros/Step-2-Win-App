@@ -214,8 +214,8 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_THROTTLE_RATES': {
         # Global defaults
-        'anon':           '60/hour',
-        'user':           '500/hour',
+        'anon':           '300/hour',
+        'user':           '3000/hour',
         # Auth endpoints
         'login':          '5/minute',
         'admin_login':    '3/minute',
@@ -227,6 +227,7 @@ REST_FRAMEWORK = {
         # Activity endpoints
         'step_sync':      '10/minute',
         'chat':           '30/minute',
+        'dashboard_read': '180/minute',
         'profile_picture_upload': '10/hour',
         'device_bind':    '10/hour',
         # Legacy

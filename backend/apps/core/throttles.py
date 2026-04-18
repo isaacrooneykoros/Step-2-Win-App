@@ -54,3 +54,8 @@ class ProfilePictureUploadRateThrottle(UserRateThrottle):
 class DeviceBindRateThrottle(UserRateThrottle):
     """Throttle device binding attempts to reduce device-id probing."""
     scope = 'device_bind'
+
+
+class DashboardReadRateThrottle(UserRateThrottle):
+    """Higher-throughput read throttle for mobile dashboard polling endpoints."""
+    scope = 'dashboard_read'

@@ -172,12 +172,14 @@ class CustomRefreshView(TokenRefreshView):
 
     def post(self, request, *args, **kwargs):
         refresh_token = request.data.get('refresh')
+        old_jti = None
 
         # ── Check if this session has been force-revoked ──────────────────
         if refresh_token:
             try:
                 token = RefreshToken(refresh_token)
                 jti = token.get('jti')
+                old_jti = jti
 
                 session = DeviceSession.objects.filter(refresh_jti=jti).first()
                 if session and not session.is_active:
@@ -191,11 +193,8 @@ class CustomRefreshView(TokenRefreshView):
         response = super().post(request, *args, **kwargs)
 
         # ── Update session activity on successful refresh ─────────────────
-        if response.status_code == 200 and refresh_token:
+        if response.status_code == 200 and old_jti:
             try:
-                old_token = RefreshToken(refresh_token)
-                old_jti = old_token.get('jti')
-
                 new_refresh = response.data.get('refresh')
                 if new_refresh:
                     new_token = RefreshToken(new_refresh)
@@ -207,7 +206,7 @@ class CustomRefreshView(TokenRefreshView):
                         last_active_at=timezone.now(),
                     )
             except Exception as e:
-                logger.error(f'Session refresh update error: {e}')
+                logger.warning(f'Session refresh update warning: {e}')
 
         return response
 

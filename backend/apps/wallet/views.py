@@ -14,6 +14,7 @@ from .serializers import (
     WalletSummarySerializer
 )
 from apps.users.views import WalletThrottle
+from apps.core.throttles import DashboardReadRateThrottle
 from apps.payments.serializers import WithdrawalRequestInputSerializer
 from apps.payments.services import (
     PaymentsServiceError,
@@ -46,6 +47,7 @@ class WithdrawalRequestDisplaySerializer(serializers.Serializer):
 @extend_schema(responses={200: WalletSummarySerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([DashboardReadRateThrottle])
 def wallet_summary(request):
     """
     Get comprehensive wallet summary

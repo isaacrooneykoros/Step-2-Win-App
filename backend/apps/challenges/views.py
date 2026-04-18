@@ -1,5 +1,5 @@
 from rest_framework import generics, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework import serializers
@@ -21,6 +21,7 @@ from .serializers import (
     LobbyCardSerializer,
     SpectatorLeaderboardSerializer
 )
+from apps.core.throttles import DashboardReadRateThrottle
 
 
 class ChallengeListView(generics.ListAPIView):
@@ -320,6 +321,7 @@ class MyChallengesView(generics.ListAPIView):
     """
     serializer_class = ChallengeDetailSerializer
     permission_classes = [IsAuthenticated]
+    throttle_classes = [DashboardReadRateThrottle]
     
     def get_queryset(self):
         finalize_expired_challenges()
@@ -1135,6 +1137,7 @@ def challenge_results(request, pk):
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([DashboardReadRateThrottle])
 def my_recent_results(request):
     """
     Returns the user's most recent completed challenge result.
