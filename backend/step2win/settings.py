@@ -35,7 +35,7 @@ ALLOWED_HOSTS = [
 if not ALLOWED_HOSTS:
     raise ImproperlyConfigured('ALLOWED_HOSTS cannot be empty.')
 
-if not DEBUG:
+if not DEBUG and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
     if SECRET_KEY.startswith('django-insecure-') or len(SECRET_KEY) < 50:
         raise ImproperlyConfigured('Production SECRET_KEY must be random and at least 50 characters long.')
     if any(host in {'localhost', '127.0.0.1', 'testserver'} for host in ALLOWED_HOSTS):
@@ -407,7 +407,7 @@ if 'https://step-2-win-app.vercel.app' not in CSRF_TRUSTED_ORIGINS:
 ADMIN_URL = os.getenv('DJANGO_ADMIN_URL', '').strip()
 if not ADMIN_URL:
     ADMIN_URL = f"admin-{secrets.token_urlsafe(12).replace('-', '').replace('_', '').lower()}/"
-if not DEBUG and (ADMIN_URL == 'admin-s2w-secure/' or len(ADMIN_URL) < 12):
+if not DEBUG and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS and (ADMIN_URL == 'admin-s2w-secure/' or len(ADMIN_URL) < 12):
     raise ImproperlyConfigured('DJANGO_ADMIN_URL must be a non-default randomized path in production.')
 
 # ── django-axes brute force protection ───────────────────────────────────────

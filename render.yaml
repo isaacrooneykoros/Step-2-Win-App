@@ -67,14 +67,14 @@ services:
       - key: CELERY_RESULT_BACKEND
         value: django-db
       - key: ALLOWED_HOSTS
-        sync: false       # Set to your Render domain, e.g. step2win-backend.onrender.com
+        value: .onrender.com  # Safe default for Render hostnames; override with custom domains if needed.
       - key: CSRF_TRUSTED_ORIGINS
         sync: false       # e.g. https://step2win-backend.onrender.com,https://step-2-win-app.vercel.app
       - key: CORS_ALLOWED_ORIGINS
         sync: false       # Must include mobile app origins: https://localhost,capacitor://localhost
                           # and any web frontend origins, e.g. https://step-2-win-app.vercel.app
       - key: DJANGO_ADMIN_URL
-        sync: false
+        generateValue: true
       - key: ENABLE_DEFENDER
         value: "True"
       - key: ADMIN_REGISTRATION_CODE
@@ -151,7 +151,10 @@ services:
       - key: CELERY_RESULT_BACKEND
         value: django-db
       - key: ALLOWED_HOSTS
-        sync: false
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ALLOWED_HOSTS
       - key: DJANGO_ADMIN_URL
         fromService:
           name: step2win-backend
@@ -224,7 +227,10 @@ services:
       - key: CELERY_RESULT_BACKEND
         value: django-db
       - key: ALLOWED_HOSTS
-        sync: false
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ALLOWED_HOSTS
       - key: DJANGO_ADMIN_URL
         fromService:
           name: step2win-backend
