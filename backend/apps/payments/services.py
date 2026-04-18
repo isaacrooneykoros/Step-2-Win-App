@@ -54,31 +54,33 @@ def initiate_deposit(user, amount: Decimal, phone_number: str) -> PaymentTransac
     except ValueError as exc:
         raise PaymentsServiceError(str(exc), status_code=400) from exc
 
-    recent_pending = PaymentTransaction.objects.filter(
-        user=user,
-        type='deposit',
-        status__in=['initiated', 'pending'],
-        created_at__gte=timezone.now() - timedelta(minutes=5),
-    ).first()
-    if recent_pending:
-        raise PaymentsServiceError(
-            'You already have a pending deposit. Please wait for it to complete before initiating another.',
-            status_code=400,
+    with db_transaction.atomic():
+        user.__class__.objects.select_for_update().get(id=user.id)
+        recent_pending = PaymentTransaction.objects.select_for_update().filter(
+            user=user,
+            type='deposit',
+            status__in=['initiated', 'pending'],
+            created_at__gte=timezone.now() - timedelta(minutes=5),
+        ).first()
+        if recent_pending:
+            raise PaymentsServiceError(
+                'You already have a pending deposit. Please wait for it to complete before initiating another.',
+                status_code=400,
+            )
+
+        order_id = f'DEP-{uuid.uuid4().hex[:20].upper()}'
+        tracking_reference = intasend.generate_tracking_reference('DEP')
+
+        txn = PaymentTransaction.objects.create(
+            user=user,
+            type='deposit',
+            status='initiated',
+            amount_kes=amount,
+            order_id=order_id,
+            tracking_reference=tracking_reference,
+            phone_number=phone_number,
+            narration=f'Step2Win wallet deposit - {user.username}',
         )
-
-    order_id = f'DEP-{uuid.uuid4().hex[:20].upper()}'
-    tracking_reference = intasend.generate_tracking_reference('DEP')
-
-    txn = PaymentTransaction.objects.create(
-        user=user,
-        type='deposit',
-        status='initiated',
-        amount_kes=amount,
-        order_id=order_id,
-        tracking_reference=tracking_reference,
-        phone_number=phone_number,
-        narration=f'Step2Win wallet deposit - {user.username}',
-    )
 
     try:
         invoice = intasend.initiate_mpesa_collection(
@@ -212,6 +214,17 @@ def request_withdrawal(user, data: dict[str, Any]) -> WithdrawalRequest:
 
     with db_transaction.atomic():
         locked_user = user.__class__.objects.select_for_update().get(id=user.id)
+
+        existing_active = WithdrawalRequest.objects.select_for_update().filter(
+            user=user,
+            status__in=['pending_review', 'approved', 'processing'],
+        ).exists()
+        if existing_active:
+            raise PaymentsServiceError(
+                'You already have an active withdrawal request. Please wait for it to complete.',
+                status_code=400,
+            )
+
         if locked_user.wallet_balance < amount:
             raise PaymentsServiceError(
                 f'Insufficient balance. Available: KES {locked_user.wallet_balance}',
@@ -363,7 +376,23 @@ def approve_withdrawal_and_send(withdrawal: WithdrawalRequest, *, reviewer) -> t
 
 
 def log_callback(callback_type: str, payload: dict[str, Any], order_id: str = '') -> CallbackLog:
-    return CallbackLog.objects.create(type=callback_type, raw_payload=payload, order_id=order_id)
+    payload_text = str(payload)
+    try:
+        import json
+        payload_text = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+    except Exception:
+        pass
+
+    payload_hash = hashlib.sha256(payload_text.encode('utf-8')).hexdigest()
+    log, _ = CallbackLog.objects.get_or_create(
+        type=callback_type,
+        order_id=order_id,
+        payload_hash=payload_hash,
+        defaults={
+            'raw_payload': payload,
+        },
+    )
+    return log
 
 
 def process_deposit_callback(payload: dict[str, Any]) -> None:

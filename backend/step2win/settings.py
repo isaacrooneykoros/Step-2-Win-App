@@ -41,6 +41,11 @@ if not DEBUG and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
         raise ImproperlyConfigured('Production SECRET_KEY must be random and at least 50 characters long.')
     if any(host in {'localhost', '127.0.0.1', 'testserver'} for host in ALLOWED_HOSTS):
         raise ImproperlyConfigured('Production ALLOWED_HOSTS cannot contain localhost/testserver values.')
+
+if ENVIRONMENT == 'production' and os.getenv('USE_SQLITE', 'False').strip().lower() == 'true':
+    raise ImproperlyConfigured('SQLite is not allowed in production. Configure PostgreSQL DATABASE_URL/DATABASE_POOL_URL.')
+if ENVIRONMENT == 'production' and not os.getenv('REDIS_URL', '').strip():
+    raise ImproperlyConfigured('REDIS_URL is required in production for throttling/locks/channels/celery.')
 USE_REDIS = os.getenv('USE_REDIS', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 APP_SIGNING_SECRET = os.environ.get('APP_SIGNING_SECRET', '')
@@ -143,17 +148,36 @@ else:
 
 USE_SQLITE = os.getenv('USE_SQLITE', 'False') == 'True'
 DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
+DATABASE_POOL_URL = os.getenv('DATABASE_POOL_URL', '').strip()
+ACTIVE_DATABASE_URL = DATABASE_POOL_URL or DATABASE_URL
+DB_CONN_MAX_AGE = int(os.getenv('DB_CONN_MAX_AGE', '120'))
+DB_CONNECT_TIMEOUT = int(os.getenv('DB_CONNECT_TIMEOUT', '5'))
+DB_STATEMENT_TIMEOUT_MS = int(os.getenv('DB_STATEMENT_TIMEOUT_MS', '15000'))
+DB_IDLE_IN_TX_TIMEOUT_MS = int(os.getenv('DB_IDLE_IN_TX_TIMEOUT_MS', '15000'))
+DB_APPLICATION_NAME = os.getenv('DB_APPLICATION_NAME', 'step2win-api')
 
-if DATABASE_URL:
+
+def _postgres_extra_options() -> dict:
+    return {
+        'connect_timeout': DB_CONNECT_TIMEOUT,
+        'options': (
+            f'-c statement_timeout={DB_STATEMENT_TIMEOUT_MS} '
+            f'-c idle_in_transaction_session_timeout={DB_IDLE_IN_TX_TIMEOUT_MS}'
+        ),
+        'application_name': DB_APPLICATION_NAME,
+    }
+
+if ACTIVE_DATABASE_URL:
     # Render Postgres should always use SSL, including local development against remote DB.
-    require_ssl = (not DEBUG) or ('render.com' in DATABASE_URL)
+    require_ssl = (not DEBUG) or ('render.com' in ACTIVE_DATABASE_URL)
     DATABASES = {
         'default': dj_database_url.parse(
-            DATABASE_URL,
-            conn_max_age=600,
+            ACTIVE_DATABASE_URL,
+            conn_max_age=DB_CONN_MAX_AGE,
             ssl_require=require_ssl,
         )
     }
+    DATABASES['default'].setdefault('OPTIONS', {}).update(_postgres_extra_options())
 elif USE_SQLITE:
     DATABASES = {
         'default': {
@@ -170,7 +194,8 @@ else:
             'PASSWORD': os.getenv('DB_PASSWORD', ''),
             'HOST': os.getenv('DB_HOST', 'localhost'),
             'PORT': os.getenv('DB_PORT', '5432'),
-            'CONN_MAX_AGE': 600,
+            'CONN_MAX_AGE': DB_CONN_MAX_AGE,
+            'OPTIONS': _postgres_extra_options(),
         }
     }
 
@@ -345,6 +370,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.users.tasks.check_wallet_balance_consistency',
         'schedule': crontab(hour=2, minute=30),  # 2:30 AM every night
     },
+    'reconcile-financial-integrity': {
+        'task': 'apps.payments.tasks.reconcile_financial_integrity_task',
+        'schedule': crontab(minute='*/10'),  # every 10 minutes
+    },
     'cleanup-inactive-sessions': {
         'task': 'apps.users.tasks.cleanup_inactive_sessions',
         'schedule': crontab(hour=3, minute=0),  # 3AM every night
@@ -486,6 +515,12 @@ MIN_CHALLENGES_JOINED_TO_CREATE_PAID_CHALLENGE = int(
 
 # Wallet balance management
 MAX_LOCKED_BALANCE_PERCENT = int(os.getenv('MAX_LOCKED_BALANCE_PERCENT', '80'))  # Max 80% of wallet can be locked
+
+# Reconciliation alert thresholds
+RECON_MAX_STUCK_PROCESSING = int(os.getenv('RECON_MAX_STUCK_PROCESSING', '10'))
+RECON_MAX_UNPROCESSED_CALLBACKS = int(os.getenv('RECON_MAX_UNPROCESSED_CALLBACKS', '5'))
+RECON_MAX_NEGATIVE_BALANCE_USERS = int(os.getenv('RECON_MAX_NEGATIVE_BALANCE_USERS', '0'))
+RECON_MAX_CALLBACK_FAILURE_RATE_PCT = float(os.getenv('RECON_MAX_CALLBACK_FAILURE_RATE_PCT', '5.0'))
 
 # ── Sentry error monitoring ───────────────────────────────────────────────────
 if os.getenv('SENTRY_DSN'):

@@ -9,6 +9,7 @@ import type {
   AdminUser,
   AdminWithdrawal,
   DashboardOverview,
+  OpsMonitoringResponse,
   SupportAdminUser,
   SupportTicket,
   SupportTicketDetailResponse,
@@ -410,6 +411,7 @@ export const adminApi = {
 
   // Fraud Management
   getFraudOverview: async () => request<FraudOverview>('/api/admin/fraud/'),
+  getOpsMonitoring: async () => request<OpsMonitoringResponse>('/api/admin/monitoring/ops/'),
   actionFraudFlag: async (
     flagId: number,
     action:

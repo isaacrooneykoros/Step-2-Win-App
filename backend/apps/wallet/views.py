@@ -13,8 +13,8 @@ from .serializers import (
     DepositSerializer,
     WalletSummarySerializer
 )
-from apps.users.views import WalletThrottle
-from apps.core.throttles import DashboardReadRateThrottle
+from apps.core.throttles import DashboardReadRateThrottle, DepositRateThrottle, WithdrawalRateThrottle
+from apps.core.idempotency import acquire_idempotency_slot
 from apps.payments.serializers import WithdrawalRequestInputSerializer
 from apps.payments.services import (
     PaymentsServiceError,
@@ -123,7 +123,7 @@ class TransactionListView(generics.ListAPIView):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-@throttle_classes([WalletThrottle])
+@throttle_classes([DepositRateThrottle])
 def deposit(request):
     """
     Initiate a production deposit using the payment lifecycle.
@@ -133,6 +133,15 @@ def deposit(request):
     """
     serializer = DepositSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+
+    idem_key = request.headers.get('X-Idempotency-Key')
+    if not acquire_idempotency_slot(
+        scope='wallet_deposit',
+        user_id=request.user.id,
+        idempotency_key=idem_key,
+        ttl_seconds=180,
+    ):
+        return Response({'error': 'Duplicate request'}, status=status.HTTP_409_CONFLICT)
     
     amount = serializer.validated_data['amount']
     try:
@@ -166,13 +175,22 @@ def deposit(request):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-@throttle_classes([WalletThrottle])
+@throttle_classes([WithdrawalRateThrottle])
 def withdraw(request):
     """
     Instantly initiate M-Pesa withdrawal to user's phone number.
     Includes automated security checks (rate limiting, velocity, amount caps).
     """
     try:
+        idem_key = request.headers.get('X-Idempotency-Key')
+        if not acquire_idempotency_slot(
+            scope='wallet_withdrawal',
+            user_id=request.user.id,
+            idempotency_key=idem_key,
+            ttl_seconds=180,
+        ):
+            return Response({'error': 'Duplicate request'}, status=status.HTTP_409_CONFLICT)
+
         serializer = WithdrawalRequestInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         withdrawal = create_withdrawal_request(request.user, serializer.validated_data)

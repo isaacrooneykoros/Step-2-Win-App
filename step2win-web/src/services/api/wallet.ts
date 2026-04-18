@@ -7,6 +7,23 @@ import type {
   WithdrawForm,
 } from '../../types';
 
+const createIdempotencyKey = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
+
+const lastActionAt: Record<string, number> = {};
+const ensureDebounced = (action: string, minIntervalMs: number = 1500): void => {
+  const now = Date.now();
+  const last = lastActionAt[action] || 0;
+  if (now - last < minIntervalMs) {
+    throw new Error('Please wait a moment before trying again.');
+  }
+  lastActionAt[action] = now;
+};
+
 export const walletService = {
   /**
    * Get wallet summary
@@ -46,12 +63,17 @@ export const walletService = {
     transaction_id: number;
     amount: string;
   }> => {
+    ensureDebounced('wallet:deposit');
     const response = await api.post<{
       status: string;
       balance: string;
       transaction_id: number;
       amount: string;
-    }>('/api/wallet/deposit/', data);
+    }>('/api/wallet/deposit/', data, {
+      headers: {
+        'X-Idempotency-Key': createIdempotencyKey(),
+      },
+    });
     return response.data;
   },
 
@@ -64,12 +86,17 @@ export const walletService = {
     amount: string;
     message: string;
   }> => {
+    ensureDebounced('wallet:withdraw');
     const response = await api.post<{
       status: string;
       reference_number: string;
       amount: string;
       message: string;
-    }>('/api/wallet/withdraw/', data);
+    }>('/api/wallet/withdraw/', data, {
+      headers: {
+        'X-Idempotency-Key': createIdempotencyKey(),
+      },
+    });
     return response.data;
   },
 

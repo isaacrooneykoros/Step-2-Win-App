@@ -38,6 +38,8 @@ from apps.payments.views import _notify_user
 from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiTypes
 from apps.core.throttles import AdminLoginRateThrottle
 from apps.core.url_utils import build_absolute_media_url
+from apps.core.locks import acquire_lock, release_lock
+from apps.payments.reconciliation import run_financial_reconciliation
 
 from apps.admin_api.serializers import (
     AdminProfileSerializer,
@@ -2023,18 +2025,25 @@ def retry_payout(request, txn_id):
 
     txn = get_object_or_404(PaymentTransaction, id=txn_id, type='payout')
 
-    if txn.status == 'completed':
-        return Response({'error': 'Transaction already completed'}, status=400)
-
-    if not txn.tracking_reference:
-        return Response({'error': 'No tracking reference available — cannot check status'}, status=400)
+    lock_key = f'admin:retry_payout:{txn_id}'
+    if not acquire_lock(lock_key, ttl_seconds=20):
+        return Response({'error': 'Another retry check is in progress for this payout.'}, status=429)
 
     try:
-        status_data = intasend.get_disbursement_status(txn.tracking_reference)
-        return Response({'status': 'Status retrieved', 'result': status_data})
-    except Exception as e:
-        logger.error(f'Retry payout status check failed | txn={txn_id}: {e}')
-        return Response({'error': 'Failed to retrieve disbursement status from IntaSend.'}, status=502)
+        if txn.status == 'completed':
+            return Response({'error': 'Transaction already completed'}, status=400)
+
+        if not txn.tracking_reference:
+            return Response({'error': 'No tracking reference available — cannot check status'}, status=400)
+
+        try:
+            status_data = intasend.get_disbursement_status(txn.tracking_reference)
+            return Response({'status': 'Status retrieved', 'result': status_data})
+        except Exception as e:
+            logger.error(f'Retry payout status check failed | txn={txn_id}: {e}')
+            return Response({'error': 'Failed to retrieve disbursement status from IntaSend.'}, status=502)
+    finally:
+        release_lock(lock_key)
 
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
@@ -2113,6 +2122,10 @@ def approve_withdrawal(request, withdrawal_id):
     Admin approves a withdrawal. This immediately sends it to IntaSend.
     IntaSend generates a tracking_id which is stored in the withdrawal record.
     """
+    lock_key = f'admin:approve_withdrawal:{withdrawal_id}'
+    if not acquire_lock(lock_key, ttl_seconds=45):
+        return Response({'error': 'Another admin is already processing this withdrawal.'}, status=429)
+
     try:
         withdrawal = get_object_or_404(WithdrawalRequest, id=withdrawal_id)
         withdrawal, tracking_id = approve_withdrawal_and_send(withdrawal, reviewer=request.user)
@@ -2137,6 +2150,8 @@ def approve_withdrawal(request, withdrawal_id):
         logger.error(f'IntaSend call failed after approval | id={withdrawal_id}: {e}')
 
         return Response({'error': 'Disbursement failed. Balance refunded to user.'}, status=502)
+    finally:
+        release_lock(lock_key)
 
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT})
@@ -2174,15 +2189,34 @@ def retry_failed_withdrawal(request, withdrawal_id):
     Returns the current status from IntaSend.
     To re-send a failed withdrawal, use approve_withdrawal on a new request.
     """
+    lock_key = f'admin:retry_withdrawal:{withdrawal_id}'
+    if not acquire_lock(lock_key, ttl_seconds=20):
+        return Response({'error': 'Another retry check is in progress for this withdrawal.'}, status=429)
+
     withdrawal = get_object_or_404(WithdrawalRequest, id=withdrawal_id)
 
-    if not withdrawal.tracking_reference:
-        return Response({'error': 'No tracking reference — cannot check status'}, status=400)
-
     try:
-        status_data = intasend.get_disbursement_status(withdrawal.tracking_reference)
-        return Response({'message': 'Status retrieved', 'result': status_data})
+        if not withdrawal.tracking_reference:
+            return Response({'error': 'No tracking reference — cannot check status'}, status=400)
 
-    except Exception as e:
-        logger.error(f'Withdrawal status check failed | id={withdrawal_id}: {e}')
-        return Response({'error': 'Failed to retrieve withdrawal status from IntaSend.'}, status=502)
+        try:
+            status_data = intasend.get_disbursement_status(withdrawal.tracking_reference)
+            return Response({'message': 'Status retrieved', 'result': status_data})
+
+        except Exception as e:
+            logger.error(f'Withdrawal status check failed | id={withdrawal_id}: {e}')
+            return Response({'error': 'Failed to retrieve withdrawal status from IntaSend.'}, status=502)
+    finally:
+        release_lock(lock_key)
+
+
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+def ops_monitoring_dashboard(request):
+    """
+    Aggregated operational monitoring metrics for admin dashboards.
+    Includes fraud load, withdrawal queue age, callback failures, and duplicate-request rejections.
+    """
+    result = run_financial_reconciliation(send_alerts=False)
+    return Response(result)

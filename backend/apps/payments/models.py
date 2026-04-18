@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.db.models import Q
 from django.conf import settings
 from auditlog.registry import auditlog
 from decimal import Decimal
@@ -70,6 +71,23 @@ class PaymentTransaction(models.Model):
     updated_at          = models.DateTimeField(auto_now=True)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['mpesa_reference'],
+                condition=Q(mpesa_reference__gt=''),
+                name='uniq_payment_mpesa_reference_non_empty',
+            ),
+            models.UniqueConstraint(
+                fields=['collection_id'],
+                condition=Q(collection_id__gt=''),
+                name='uniq_payment_collection_id_non_empty',
+            ),
+            models.UniqueConstraint(
+                fields=['request_id'],
+                condition=Q(request_id__gt=''),
+                name='uniq_payment_request_id_non_empty',
+            ),
+        ]
         indexes = [
             models.Index(fields=['user', '-created_at']),
             models.Index(fields=['order_id']),
@@ -92,10 +110,18 @@ class CallbackLog(models.Model):
     type        = models.CharField(max_length=20)  # 'deposit' or 'payout'
     raw_payload = models.JSONField()
     order_id    = models.CharField(max_length=100, blank=True)
+    payload_hash = models.CharField(max_length=64, blank=True, db_index=True)
     processed   = models.BooleanField(default=False)
     created_at  = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['type', 'order_id', 'payload_hash'],
+                condition=Q(payload_hash__gt=''),
+                name='uniq_callback_type_order_payload_hash',
+            ),
+        ]
         ordering = ['-created_at']
 
     def __str__(self):

@@ -2,6 +2,9 @@ from celery import shared_task
 import logging
 from django.utils import timezone
 from datetime import timedelta
+from django.conf import settings
+
+from .reconciliation import ReconciliationThresholds, run_financial_reconciliation
 
 logger = logging.getLogger(__name__)
 
@@ -187,3 +190,17 @@ def _reconcile_payout(txn, result):
         )
         txn.save(update_fields=['status', 'fail_reason', 'updated_at'])
         refund_failed_payout(txn, txn.fail_reason or 'Payout failed')
+
+
+@shared_task
+def reconcile_financial_integrity_task():
+    """
+    Runs periodic financial integrity checks and emits alerts when thresholds are breached.
+    """
+    thresholds = ReconciliationThresholds(
+        max_stuck_processing=int(getattr(settings, 'RECON_MAX_STUCK_PROCESSING', 10)),
+        max_unprocessed_callbacks=int(getattr(settings, 'RECON_MAX_UNPROCESSED_CALLBACKS', 5)),
+        max_negative_balance_users=int(getattr(settings, 'RECON_MAX_NEGATIVE_BALANCE_USERS', 0)),
+        max_callback_failure_rate_pct=float(getattr(settings, 'RECON_MAX_CALLBACK_FAILURE_RATE_PCT', 5.0)),
+    )
+    return run_financial_reconciliation(thresholds=thresholds, send_alerts=True)

@@ -54,6 +54,18 @@ services:
         fromDatabase:
           name: step2win-db
           property: connectionString
+      - key: DATABASE_POOL_URL
+        sync: false  # Preferred: point this at a pgBouncer/pooled Postgres endpoint
+      - key: DB_CONN_MAX_AGE
+        value: "120"
+      - key: DB_CONNECT_TIMEOUT
+        value: "5"
+      - key: DB_STATEMENT_TIMEOUT_MS
+        value: "15000"
+      - key: DB_IDLE_IN_TX_TIMEOUT_MS
+        value: "15000"
+      - key: DB_APPLICATION_NAME
+        value: "step2win-backend"
       - key: REDIS_URL
         fromService:
           type: redis
@@ -93,6 +105,16 @@ services:
         sync: false
       - key: SENTRY_DSN
         sync: false
+      - key: OPS_ALERT_WEBHOOK_URL
+        sync: false
+      - key: RECON_MAX_STUCK_PROCESSING
+        value: "10"
+      - key: RECON_MAX_UNPROCESSED_CALLBACKS
+        value: "5"
+      - key: RECON_MAX_NEGATIVE_BALANCE_USERS
+        value: "0"
+      - key: RECON_MAX_CALLBACK_FAILURE_RATE_PCT
+        value: "5.0"
 
   # ── Celery worker (requires paid Starter plan ~$7/mo on Render) ───────────
   # Background task processing: fraud scan, challenge finalization, etc.
@@ -138,6 +160,18 @@ services:
         fromDatabase:
           name: step2win-db
           property: connectionString
+      - key: DATABASE_POOL_URL
+        sync: false
+      - key: DB_CONN_MAX_AGE
+        value: "120"
+      - key: DB_CONNECT_TIMEOUT
+        value: "5"
+      - key: DB_STATEMENT_TIMEOUT_MS
+        value: "15000"
+      - key: DB_IDLE_IN_TX_TIMEOUT_MS
+        value: "15000"
+      - key: DB_APPLICATION_NAME
+        value: "step2win-celery-worker"
       - key: REDIS_URL
         fromService:
           type: redis
@@ -169,6 +203,8 @@ services:
       - key: POCHIPAY_WEBHOOK_SECRET
         sync: false
       - key: SENTRY_DSN
+        sync: false
+      - key: OPS_ALERT_WEBHOOK_URL
         sync: false
 
   # ── Celery beat scheduler(requires paid Starter plan ~$7/mo on Render) ───
@@ -214,6 +250,18 @@ services:
         fromDatabase:
           name: step2win-db
           property: connectionString
+      - key: DATABASE_POOL_URL
+        sync: false
+      - key: DB_CONN_MAX_AGE
+        value: "120"
+      - key: DB_CONNECT_TIMEOUT
+        value: "5"
+      - key: DB_STATEMENT_TIMEOUT_MS
+        value: "15000"
+      - key: DB_IDLE_IN_TX_TIMEOUT_MS
+        value: "15000"
+      - key: DB_APPLICATION_NAME
+        value: "step2win-celery-beat"
       - key: REDIS_URL
         fromService:
           type: redis
@@ -239,4 +287,6 @@ services:
       - key: ENABLE_DEFENDER
         value: "True"
       - key: SENTRY_DSN
+        sync: false
+      - key: OPS_ALERT_WEBHOOK_URL
         sync: false

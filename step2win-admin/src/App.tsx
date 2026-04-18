@@ -13,6 +13,7 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ActivityLogsPage } from './pages/ActivityLogsPage';
 import { SupportPage } from './pages/SupportPage';
+import { OpsMonitoringPage } from './pages/OpsMonitoringPage';
 import LegalDocumentsPage from './pages/LegalDocumentsPage';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import LoginPage from './pages/auth/LoginPage';
@@ -50,6 +51,7 @@ function App() {
           <Route path="reports" element={<ReportsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="activity" element={<ActivityLogsPage />} />
+          <Route path="monitoring/ops" element={<OpsMonitoringPage />} />
           <Route path="support" element={<SupportPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="legal" element={<LegalDocumentsPage />} />

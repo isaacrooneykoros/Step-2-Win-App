@@ -32,7 +32,8 @@ from .services import (
     verify_intasend_signature,
 )
 from .models import PaymentTransaction, CallbackLog, WithdrawalRequest
-from apps.core.throttles import DepositRateThrottle
+from apps.core.throttles import DepositRateThrottle, WithdrawalRateThrottle
+from apps.core.idempotency import acquire_idempotency_slot
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,15 @@ def initiate_deposit(request):
     """
     serializer = InitiateDepositSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+
+    idem_key = request.headers.get('X-Idempotency-Key')
+    if not acquire_idempotency_slot(
+        scope='payments_deposit',
+        user_id=request.user.id,
+        idempotency_key=idem_key,
+        ttl_seconds=180,
+    ):
+        return Response({'error': 'Duplicate request'}, status=status.HTTP_409_CONFLICT)
 
     try:
         txn = initiate_deposit_service(
@@ -367,6 +377,7 @@ def get_banks(request):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([WithdrawalRateThrottle])
 @ratelimit(key='user', rate='5/h', method='POST', block=True)
 def request_withdrawal(request):
     """
@@ -381,6 +392,15 @@ def request_withdrawal(request):
       7. Return confirmation to user
     """
     try:
+        idem_key = request.headers.get('X-Idempotency-Key')
+        if not acquire_idempotency_slot(
+            scope='payments_withdrawal',
+            user_id=request.user.id,
+            idempotency_key=idem_key,
+            ttl_seconds=180,
+        ):
+            return Response({'error': 'Duplicate request'}, status=status.HTTP_409_CONFLICT)
+
         serializer = WithdrawalRequestInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         withdrawal = create_withdrawal_request(request.user, serializer.validated_data)

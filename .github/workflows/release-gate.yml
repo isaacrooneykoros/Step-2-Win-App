@@ -49,7 +49,7 @@ jobs:
         working-directory: step2win-admin
 
       - name: Run release gate
-        run: python release_gate.py
+        run: python release_gate.py --mode ci
 
   android-build:
     runs-on: ubuntu-latest

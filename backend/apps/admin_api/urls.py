@@ -31,6 +31,7 @@ from apps.admin_api.views import (
     approve_withdrawal,
     reject_withdrawal,
     retry_failed_withdrawal,
+    ops_monitoring_dashboard,
 )
 
 router = DefaultRouter()
@@ -68,5 +69,6 @@ urlpatterns = [
     path('withdrawals/<uuid:withdrawal_id>/approve/', approve_withdrawal, name='approve-withdrawal'),
     path('withdrawals/<uuid:withdrawal_id>/reject/', reject_withdrawal, name='reject-withdrawal'),
     path('withdrawals/<uuid:withdrawal_id>/retry/', retry_failed_withdrawal, name='retry-failed-withdrawal'),
+    path('monitoring/ops/', ops_monitoring_dashboard, name='ops-monitoring-dashboard'),
     path('', include(router.urls)),
 ]

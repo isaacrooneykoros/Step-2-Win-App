@@ -264,3 +264,40 @@ export interface WithdrawalStats {
   failed_today: number;
   total_paid_today: string;
 }
+
+export interface OpsDuplicateGatewayReference {
+  mpesa_reference: string;
+  c: number;
+}
+
+export interface OpsMonitoringMetrics {
+  callback_total_24h: number;
+  callback_failures_24h: number;
+  callback_failure_rate_pct: number;
+  unprocessed_callbacks: number;
+  stuck_processing_withdrawals: number;
+  stuck_pending_payments: number;
+  negative_balance_users: number;
+  duplicate_gateway_references: OpsDuplicateGatewayReference[];
+  duplicate_request_rejections_today: Record<string, number>;
+  withdrawal_queue: {
+    count: number;
+    oldest_age_hours: number;
+  };
+  fraud_open_flags: number;
+}
+
+export interface OpsMonitoringThresholds {
+  max_stuck_processing: number;
+  max_unprocessed_callbacks: number;
+  max_negative_balance_users: number;
+  max_callback_failure_rate_pct: number;
+}
+
+export interface OpsMonitoringResponse {
+  timestamp: string;
+  metrics: OpsMonitoringMetrics;
+  thresholds: OpsMonitoringThresholds;
+  breaches: string[];
+  ok: boolean;
+}

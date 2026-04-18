@@ -36,6 +36,7 @@ const NAV_GROUPS = [
     label: 'SYSTEM',
     items: [
       { to: '/reports',       icon: FileBarChart,      label: 'Reports'        },
+      { to: '/monitoring/ops', icon: Activity,         label: 'Ops Monitoring' },
       { to: '/support',       icon: HeadphonesIcon,    label: 'Support'        },
       { to: '/badges',        icon: Trophy,            label: 'Badges'         },
       { to: '/fraud',         icon: Shield,            label: 'Anti-Cheat'     },
