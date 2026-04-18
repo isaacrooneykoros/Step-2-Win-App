@@ -187,9 +187,9 @@ class ProfilePictureSerializer(serializers.Serializer):
     profile_picture = serializers.ImageField(required=True)
     
     def validate_profile_picture(self, value):
-        # Validate file size (max 5MB)
-        if value.size > 5 * 1024 * 1024:
-            raise serializers.ValidationError('Profile picture must be less than 5MB')
+        # Validate file size (max 10MB)
+        if value.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError('Profile picture must be less than 10MB')
 
         allowed_formats = {'JPEG', 'PNG', 'WEBP'}
         try:

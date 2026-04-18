@@ -49,6 +49,37 @@ interface AdminProfileForm extends Omit<AdminProfile, 'profile_picture'> {
   profile_picture: File | string | null;
 }
 
+function formatProfileErrorMessage(raw: string): string {
+  const message = String(raw || '').trim();
+  const lower = message.toLowerCase();
+
+  if (lower.includes('uploaded file is not a valid image')) {
+    return 'That file is not a valid image. Please choose a JPEG, PNG, or WebP photo.';
+  }
+
+  if (lower.includes('only jpeg, png, and webp images are allowed')) {
+    return 'Please choose a JPEG, PNG, or WebP image.';
+  }
+
+  if (lower.includes('profile picture must be less than 10mb')) {
+    return 'Image is too large. Please choose a file smaller than 10MB.';
+  }
+
+  if (lower.includes('phone number must be at least 9 digits')) {
+    return 'Phone number is too short. Enter at least 9 digits.';
+  }
+
+  if (lower.includes('email already registered')) {
+    return 'That email is already in use by another account.';
+  }
+
+  if (lower.includes('username already taken')) {
+    return 'That username is already taken.';
+  }
+
+  return message || 'Something went wrong while saving your profile. Please try again.';
+}
+
 export function SettingsPage() {
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [formData, setFormData] = useState<SystemSettings | null>(null);
@@ -113,7 +144,7 @@ export function SettingsPage() {
       setRemoveProfilePicture(false);
       setProfileError('');
     } catch (err) {
-      setProfileError((err as Error).message);
+      setProfileError(formatProfileErrorMessage((err as Error).message));
     }
   };
 
@@ -186,7 +217,7 @@ export function SettingsPage() {
           profilePictureInputRef.current.value = '';
         }
       }
-      setProfileError(message);
+      setProfileError(formatProfileErrorMessage(message));
     } finally {
       setProfileSaving(false);
     }

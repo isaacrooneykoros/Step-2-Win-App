@@ -72,8 +72,8 @@ class AdminProfileSerializer(serializers.ModelSerializer):
         return value
 
     def validate_profile_picture(self, value):
-        if value.size > 5 * 1024 * 1024:
-            raise serializers.ValidationError('Profile picture must be less than 5MB')
+        if value.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError('Profile picture must be less than 10MB')
 
         allowed_formats = {'JPEG', 'PNG', 'WEBP'}
         try:
