@@ -39,6 +39,8 @@ class AdminUserSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id',
+            'wallet_balance',
+            'locked_balance',
             'total_steps',
             'challenges_won',
             'total_earned',

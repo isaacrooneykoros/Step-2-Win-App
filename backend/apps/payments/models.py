@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from django.conf import settings
 from auditlog.registry import auditlog
+from decimal import Decimal
 
 
 class PaymentTransaction(models.Model):
@@ -47,6 +48,13 @@ class PaymentTransaction(models.Model):
     fail_reason         = models.TextField(blank=True)
 
     # Links
+    wallet_transaction  = models.OneToOneField(
+                            'wallet.WalletTransaction',
+                            on_delete=models.SET_NULL,
+                            null=True, blank=True,
+                            related_name='payment_transaction',
+                            help_text='Linked wallet transaction for reconciliation'
+                          )
     challenge           = models.ForeignKey(
                             'challenges.Challenge',
                             on_delete=models.SET_NULL,
@@ -92,6 +100,37 @@ class CallbackLog(models.Model):
 
     def __str__(self):
         return f"Callback {self.type} | {self.order_id} | processed={self.processed}"
+
+
+class PlatformRevenue(models.Model):
+    """
+    Tracks platform revenue from challenge fees.
+    Fee = 5% of total_pool. Revenue is recorded when challenge finalizes.
+    
+    This separates platform income from user wallet transactions
+    for clean financial accounting.
+    """
+    challenge = models.ForeignKey(
+        'challenges.Challenge',
+        on_delete=models.PROTECT,
+        related_name='revenue_records'
+    )
+    amount_kes = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        help_text='5% fee from challenge.total_pool'
+    )
+    collected_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    narration = models.CharField(max_length=255)
+    metadata = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-collected_at']
+        indexes = [
+            models.Index(fields=['-collected_at']),
+        ]
+
+    def __str__(self):
+        return f"Revenue KES {self.amount_kes} from {self.challenge.name}"
 
 
 class WithdrawalRequest(models.Model):

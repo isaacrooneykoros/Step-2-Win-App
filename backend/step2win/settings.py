@@ -321,6 +321,18 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.payments.tasks.reconcile_pending_payments',
         'schedule': crontab(minute='*/30'),
     },
+    'process-unprocessed-callbacks': {
+        'task': 'apps.payments.tasks.process_unprocessed_callbacks',
+        'schedule': crontab(minute='*/5'),  # Every 5 minutes
+    },
+    'monitor-new-non-topup-funded-accounts': {
+        'task': 'apps.users.tasks.monitor_new_non_topup_funded_accounts',
+        'schedule': crontab(hour=2, minute=20),  # 2:20 AM every night
+    },
+    'check-wallet-balance-consistency': {
+        'task': 'apps.users.tasks.check_wallet_balance_consistency',
+        'schedule': crontab(hour=2, minute=30),  # 2:30 AM every night
+    },
     'cleanup-inactive-sessions': {
         'task': 'apps.users.tasks.cleanup_inactive_sessions',
         'schedule': crontab(hour=3, minute=0),  # 3AM every night
@@ -457,6 +469,9 @@ MIN_TRUST_SCORE_FOR_PAID_CHALLENGE = int(os.getenv('MIN_TRUST_SCORE_FOR_PAID_CHA
 MIN_CHALLENGES_JOINED_TO_CREATE_PAID_CHALLENGE = int(
     os.getenv('MIN_CHALLENGES_JOINED_TO_CREATE_PAID_CHALLENGE', '1')
 )
+
+# Wallet balance management
+MAX_LOCKED_BALANCE_PERCENT = int(os.getenv('MAX_LOCKED_BALANCE_PERCENT', '80'))  # Max 80% of wallet can be locked
 
 # ── Sentry error monitoring ───────────────────────────────────────────────────
 if os.getenv('SENTRY_DSN'):

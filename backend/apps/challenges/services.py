@@ -4,6 +4,71 @@ from django.db import models, transaction
 from django.utils import timezone
 
 
+def cancel_challenge(challenge, reason=''):
+    """
+    Cancel an active challenge and release all locked balances.
+    Creates refund transactions for all participants.
+    
+    Args:
+        challenge: Challenge instance to cancel
+        reason: Optional reason for cancellation
+    
+    Returns:
+        bool: True if cancelled successfully, False if not in 'active' status
+    """
+    from apps.challenges.models import Participant, ChallengeResult
+    from apps.users.models import User
+    from apps.wallet.models import WalletTransaction
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    with transaction.atomic():
+        challenge = challenge.__class__.objects.select_for_update().get(id=challenge.id)
+        if challenge.status != 'active':
+            logger.warning(f'Cannot cancel challenge {challenge.id}: status is {challenge.status}')
+            return False
+
+        logger.info(f'Cancelling challenge {challenge.id}: "{challenge.name}". Reason: {reason or "admin action"}')
+
+        # Release locked balance for all participants
+        participants = Participant.objects.filter(challenge=challenge).select_related('user')
+        for participant in participants:
+            user = User.objects.select_for_update().get(id=participant.user_id)
+            balance_before = user.wallet_balance
+
+            # Refund entry fee
+            user.wallet_balance += challenge.entry_fee
+            user.locked_balance -= challenge.entry_fee
+            user.save(update_fields=['wallet_balance', 'locked_balance', 'updated_at'])
+
+            # Create refund transaction
+            WalletTransaction.objects.create(
+                user=user,
+                type='refund',
+                amount=challenge.entry_fee,
+                balance_before=balance_before,
+                balance_after=user.wallet_balance,
+                description=(
+                    f'Challenge Cancelled: {challenge.name} — {reason or "Admin cancelled challenge"}'
+                ),
+                metadata={'challenge_id': challenge.id, 'reason': reason},
+            )
+
+            logger.info(f'Refunded KES {challenge.entry_fee} to {user.username} for cancelled challenge')
+
+        # Mark challenge as cancelled
+        challenge.status = 'cancelled'
+        challenge.save(update_fields=['status', 'updated_at'])
+
+        logger.info(
+            f'Challenge {challenge.id} cancelled. '
+            f'Refunded KES {challenge.entry_fee} to {participants.count()} participants.'
+        )
+
+        return True
+
+
 def finalize_challenge(challenge):
     """
     Finalize one active challenge using the tie resolution engine:
@@ -129,17 +194,15 @@ def finalize_challenge(challenge):
                 }
             )
 
-        # ── Record platform fee ────────────────────────────────────
+        # ── Record platform fee in PlatformRevenue (not orphan transaction) ────
         if not is_refund:
+            from apps.payments.models import PlatformRevenue
             platform_fee = challenge.total_pool * Decimal('0.05')
-            WalletTransaction.objects.create(
-                user=None,
-                type='fee',
-                amount=platform_fee,
-                balance_before=Decimal('0.00'),
-                balance_after=platform_fee,
-                description=f'Platform fee from challenge: {challenge.name}',
-                metadata={'challenge_id': challenge.id},
+            PlatformRevenue.objects.create(
+                challenge=challenge,
+                amount_kes=platform_fee,
+                narration=f'Platform fee from challenge: {challenge.name}',
+                metadata={'total_pool': str(challenge.total_pool)},
             )
 
         # ── Mark challenge completed ───────────────────────────────

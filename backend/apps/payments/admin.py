@@ -1,5 +1,20 @@
 from django.contrib import admin
-from .models import PaymentTransaction, CallbackLog, WithdrawalRequest
+from .models import PaymentTransaction, CallbackLog, WithdrawalRequest, PlatformRevenue
+
+
+@admin.register(PlatformRevenue)
+class PlatformRevenueAdmin(admin.ModelAdmin):
+    list_display = ['challenge', 'amount_kes', 'collected_at']
+    list_filter = ['collected_at']
+    search_fields = ['challenge__name']
+    readonly_fields = ['challenge', 'amount_kes', 'collected_at']
+    ordering = ['-collected_at']
+
+    def has_delete_permission(self, request, obj=None):
+        return False  # Never delete financial records
+
+    def has_add_permission(self, request):
+        return False  # Auto-created by finalize_challenge
 
 
 @admin.register(PaymentTransaction)

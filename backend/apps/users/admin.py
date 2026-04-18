@@ -55,7 +55,7 @@ class UserAdmin(BaseUserAdmin):
         }),
     )
     
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at', 'wallet_balance', 'locked_balance']
     
     def device_bound(self, obj):
         return obj.device_id is not None

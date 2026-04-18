@@ -1,7 +1,43 @@
 from celery import shared_task
 import logging
+from django.utils import timezone
+from datetime import timedelta
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task
+def process_unprocessed_callbacks():
+    """
+    Runs every 5 minutes.
+    Processes CallbackLog entries that were logged but not yet processed.
+    This handles cases where payment processing failed after logging the webhook.
+    """
+    from .models import CallbackLog
+    from .services import process_deposit_callback, process_payout_callback
+
+    # Find unprocessed callbacks older than 1 minute
+    cutoff = timezone.now() - timedelta(minutes=1)
+    unprocessed = CallbackLog.objects.filter(
+        processed=False,
+        created_at__lt=cutoff
+    ).order_by('created_at')[:100]  # Process max 100 per task
+
+    for log in unprocessed:
+        try:
+            logger.info(f'Reprocessing callback {log.id}: {log.type} order={log.order_id}')
+            if log.type == 'deposit':
+                process_deposit_callback(log.raw_payload)
+            elif log.type == 'payout':
+                process_payout_callback(log.raw_payload)
+            else:
+                logger.warning(f'Unknown callback type: {log.type}')
+                log.processed = True
+                log.save(update_fields=['processed'])
+        except Exception as e:
+            logger.error(f'Callback reprocessing failed {log.id}: {e}')
+            # Don't mark as processed - will retry
+            continue
 
 
 @shared_task
