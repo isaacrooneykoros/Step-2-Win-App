@@ -49,6 +49,9 @@ interface AdminProfileForm extends Omit<AdminProfile, 'profile_picture'> {
   profile_picture: File | string | null;
 }
 
+const PROFILE_PICTURE_MAX_BYTES = 10 * 1024 * 1024;
+const PROFILE_PICTURE_ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
 function formatProfileErrorMessage(raw: string): string {
   const message = String(raw || '').trim();
   const lower = message.toLowerCase();
@@ -241,6 +244,24 @@ export function SettingsPage() {
     if (!profile) return;
     if (!file) {
       updateProfileField('profile_picture', null);
+      return;
+    }
+    if (file.size > PROFILE_PICTURE_MAX_BYTES) {
+      setProfileError('Image is too large. Please choose a file smaller than 10MB.');
+      updateProfileField('profile_picture', null);
+      setProfilePreview(profile.profile_picture_url || '');
+      if (profilePictureInputRef.current) {
+        profilePictureInputRef.current.value = ''; 
+      }
+      return;
+    }
+    if (!PROFILE_PICTURE_ALLOWED_TYPES.includes(file.type)) {
+      setProfileError('Please choose a JPEG, PNG, or WebP image.');
+      updateProfileField('profile_picture', null);
+      setProfilePreview(profile.profile_picture_url || '');
+      if (profilePictureInputRef.current) {
+        profilePictureInputRef.current.value = '';
+      }
       return;
     }
     setRemoveProfilePicture(false);

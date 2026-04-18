@@ -85,10 +85,14 @@ function extractErrorMessage(rawText: string): string {
     return 'Request failed';
   }
 
+  const normalizedRawText = normalizeErrorText(rawText);
+  if (/profile_picture|uploaded file is not a valid image|profile picture must be less than/i.test(normalizedRawText)) {
+    return 'There was a problem with the photo you selected. Please choose a different image.';
+  }
+
   const parsed = safeParseJson(rawText);
   if (!parsed || typeof parsed !== 'object') {
-    const normalized = normalizeErrorText(rawText);
-    return normalized || 'Request failed';
+    return normalizedRawText || 'Request failed';
   }
   const parsedRecord = parsed as Record<string, unknown>;
   const details =
