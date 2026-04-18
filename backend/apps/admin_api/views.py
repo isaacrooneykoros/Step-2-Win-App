@@ -38,6 +38,8 @@ from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiTypes
 from apps.core.throttles import AdminLoginRateThrottle
 
 from apps.admin_api.serializers import (
+    AdminProfileSerializer,
+    AdminNotificationSerializer,
     AdminUserSerializer,
     AdminChallengeSerializer,
     AdminTransactionSerializer,
@@ -50,14 +52,134 @@ from apps.admin_api.serializers import (
 User = get_user_model()
 
 
-def _admin_profile(user):
+def _admin_profile(user, request=None):
+    profile_picture_url = None
+    if getattr(user, 'profile_picture', None):
+        if request is not None:
+            profile_picture_url = request.build_absolute_uri(user.profile_picture.url)
+        else:
+            profile_picture_url = user.profile_picture.url
+
     return {
         'id': user.id,
         'username': user.username,
         'email': user.email,
         'is_staff': user.is_staff,
         'is_active': user.is_active,
+        'profile_picture_url': profile_picture_url,
     }
+
+
+class IsAdminUser(permissions.BasePermission):
+    """Custom permission to check if user is admin"""
+
+    def has_permission(self, request, _view):
+        return request.user and request.user.is_staff
+
+
+@extend_schema(
+    responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
+)
+@api_view(['GET', 'PATCH'])
+@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+def current_admin_profile(request):
+    """Get or update the authenticated admin profile, including profile picture."""
+    serializer_cls = AdminProfileSerializer
+
+    if request.method == 'GET':
+        serializer = serializer_cls(request.user, context={'request': request})
+        return Response(serializer.data)
+
+    serializer = serializer_cls(
+        request.user,
+        data=request.data,
+        partial=True,
+        context={'request': request},
+    )
+    serializer.is_valid(raise_exception=True)
+    admin = serializer.save()
+
+    from apps.admin_api.models import AuditLog
+
+    AuditLog.log_action(
+        admin=request.user,
+        action='update',
+        resource_type='user',
+        resource_id=admin.id,
+        resource_name=admin.username,
+        description='Admin updated their own profile',
+        changes={
+            key: ('[file]' if hasattr(value, 'name') else value)
+            for key, value in serializer.validated_data.items()
+        },
+        request=request,
+    )
+
+    return Response(serializer_cls(admin, context={'request': request}).data)
+
+
+@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+def admin_notifications(request):
+    """Return the admin notification summary and recent actionable alerts."""
+    from apps.admin_api.models import AuditLog, SupportTicket
+
+    now = timezone.now()
+    recent_cutoff = now - timedelta(days=7)
+
+    open_support_count = SupportTicket.objects.filter(status__in=['open', 'in_progress']).count()
+    pending_withdrawal_count = WithdrawalRequest.objects.filter(status='pending_review').count()
+    open_support_tickets = SupportTicket.objects.filter(status__in=['open', 'in_progress']).order_by('-updated_at')[:5]
+    pending_withdrawals = WithdrawalRequest.objects.filter(status='pending_review').order_by('-created_at')[:5]
+    recent_audit_logs = AuditLog.objects.filter(created_at__gte=recent_cutoff).order_by('-created_at')[:5]
+
+    items: list[dict[str, object]] = []
+
+    for ticket in open_support_tickets:
+        items.append({
+            'type': 'support_ticket',
+            'title': f"Support ticket #{ticket.id} is {ticket.status}",
+            'message': ticket.subject,
+            'created_at': ticket.updated_at,
+            'action_url': f'/support?ticket={ticket.id}',
+            'severity': 'high' if ticket.priority in {'high', 'urgent'} else 'medium',
+        })
+
+    for withdrawal in pending_withdrawals:
+        items.append({
+            'type': 'withdrawal',
+            'title': f'Withdrawal #{withdrawal.id} needs review',
+            'message': f'KES {withdrawal.amount} pending {withdrawal.method} approval',
+            'created_at': withdrawal.created_at,
+            'action_url': '/withdrawals',
+            'severity': 'high',
+        })
+
+    for log in recent_audit_logs:
+        if log.action in {'settings_change', 'ban', 'unban', 'approve', 'reject', 'promote', 'demote'}:
+            items.append({
+                'type': 'audit_log',
+                'title': f'{log.resource_type.title()} {log.action.replace("_", " ")}',
+                'message': log.description,
+                'created_at': log.created_at,
+                'action_url': '/activity',
+                'severity': 'low',
+            })
+
+    items.sort(key=lambda item: item['created_at'], reverse=True)
+
+    summary = {
+        'total': len(items),
+        'open_support_tickets': open_support_count,
+        'pending_withdrawals': pending_withdrawal_count,
+        'recent_audit_items': sum(1 for log in recent_audit_logs if log.action in {'settings_change', 'ban', 'unban', 'approve', 'reject', 'promote', 'demote'}),
+    }
+
+    return Response({
+        'summary': summary,
+        'items': AdminNotificationSerializer(items, many=True).data,
+    })
 
 
 @extend_schema(
@@ -115,7 +237,7 @@ def admin_login(request):
     return Response({
         'access': str(refresh.access_token),
         'refresh': str(refresh),
-        'user': _admin_profile(user),
+        'user': _admin_profile(user, request=request),
     })
 
 
@@ -217,14 +339,8 @@ def admin_register(request):
     return Response({
         'access': str(refresh.access_token),
         'refresh': str(refresh),
-        'user': _admin_profile(user),
+        'user': _admin_profile(user, request=request),
     }, status=status.HTTP_201_CREATED)
-
-
-class IsAdminUser(permissions.BasePermission):
-    """Custom permission to check if user is admin"""
-    def has_permission(self, request, _view):
-        return request.user and request.user.is_staff
 
 
 class AdminUserViewSet(viewsets.ModelViewSet):
@@ -338,6 +454,36 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         
         user.save()
         serializer = AdminUserSerializer(user)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['patch'], url_path='me')
+    def update_me(self, request):
+        """Update the current admin profile through the users endpoint."""
+        serializer = AdminProfileSerializer(
+            request.user,
+            data=request.data,
+            partial=True,
+            context={'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+        admin = serializer.save()
+
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=request.user,
+            action='update',
+            resource_type='user',
+            resource_id=admin.id,
+            resource_name=admin.username,
+            description='Admin updated their own profile via admin user endpoint',
+            changes={
+                key: ('[file]' if hasattr(value, 'name') else value)
+                for key, value in serializer.validated_data.items()
+            },
+            request=request,
+        )
+
         return Response(serializer.data)
 
     @action(detail=True, methods=['delete'])

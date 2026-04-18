@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { adminApi } from '../services/adminApi';
 import { Settings, DollarSign, Award, Bell, Shield, Zap, Save, AlertTriangle } from 'lucide-react';
+import type { AdminProfile } from '../types/admin';
 
 interface SystemSettings {
   // Platform Fees
@@ -44,15 +45,23 @@ interface SystemSettings {
   [key: string]: unknown;
 }
 
+interface AdminProfileForm extends Omit<AdminProfile, 'profile_picture'> {
+  profile_picture: File | string | null;
+}
+
 export function SettingsPage() {
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [formData, setFormData] = useState<SystemSettings | null>(null);
+  const [profile, setProfile] = useState<AdminProfileForm | null>(null);
+  const [profilePreview, setProfilePreview] = useState('');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [saving, setSaving] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
 
   useEffect(() => {
     loadSettings();
+    loadProfile();
   }, []);
 
   const loadSettings = async () => {
@@ -60,6 +69,20 @@ export function SettingsPage() {
       const data = await adminApi.getSettings() as SystemSettings;
       setSettings(data);
       setFormData(data);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const loadProfile = async () => {
+    try {
+      const data = await adminApi.getMyProfile();
+      const normalized: AdminProfileForm = {
+        ...data,
+        profile_picture: data.profile_picture ?? null,
+      };
+      setProfile(normalized);
+      setProfilePreview(data.profile_picture_url || '');
     } catch (err) {
       setError((err as Error).message);
     }
@@ -88,12 +111,58 @@ export function SettingsPage() {
     }
   };
 
+  const handleProfileSave = async () => {
+    if (!profile) return;
+
+    setProfileSaving(true);
+    setError('');
+
+    try {
+      const payload = new FormData();
+      payload.append('username', profile.username);
+      payload.append('email', profile.email);
+      if (profile.phone_number) payload.append('phone_number', profile.phone_number);
+      if (profile.first_name !== undefined) payload.append('first_name', profile.first_name || '');
+      if (profile.last_name !== undefined) payload.append('last_name', profile.last_name || '');
+      if (profile.profile_picture instanceof File) {
+        payload.append('profile_picture', profile.profile_picture);
+      }
+
+      const updated = await adminApi.updateMyProfile(payload);
+      setProfile({
+        ...updated,
+        profile_picture: updated.profile_picture ?? null,
+      });
+      setProfilePreview(updated.profile_picture_url || '');
+      showSuccess('Admin profile updated successfully');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
   const updateField = (field: keyof SystemSettings, value: unknown) => {
     if (!formData) return;
     setFormData({ ...formData, [field]: value });
   };
 
-  if (!settings || !formData) {
+  const updateProfileField = (field: keyof AdminProfileForm, value: unknown) => {
+    if (!profile) return;
+    setProfile({ ...profile, [field]: value } as AdminProfileForm);
+  };
+
+  const handleProfilePictureChange = (file: File | null) => {
+    if (!profile) return;
+    if (!file) {
+      updateProfileField('profile_picture', null);
+      return;
+    }
+    updateProfileField('profile_picture', file);
+    setProfilePreview(URL.createObjectURL(file));
+  };
+
+  if (!settings || !formData || !profile) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-ink-secondary">Loading settings...</div>
@@ -103,6 +172,113 @@ export function SettingsPage() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Admin Profile */}
+      <div id="profile" className="bg-surface-card border border-surface-border rounded-2xl p-6">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-ink-primary">Admin Profile</h2>
+            <p className="text-ink-secondary text-sm mt-1">
+              Update your name, contact details, and profile picture.
+            </p>
+          </div>
+          <button
+            onClick={handleProfileSave}
+            disabled={profileSaving}
+            className="bg-prime text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 hover:bg-prime/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Save size={20} />
+            {profileSaving ? 'Saving Profile...' : 'Save Profile'}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[220px,1fr] gap-6 items-start">
+          <div className="space-y-4">
+            <div className="w-40 h-40 rounded-3xl overflow-hidden border border-surface-border bg-surface-input flex items-center justify-center">
+              {profilePreview || profile.profile_picture_url ? (
+                <img
+                  src={profilePreview || profile.profile_picture_url || ''}
+                  alt={profile.username}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="text-4xl font-bold text-white" style={{ background: 'linear-gradient(135deg, #22C55E, #16A34A)', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {profile.username?.slice(0, 2).toUpperCase()}
+                </div>
+              )}
+            </div>
+            <label className="inline-flex items-center justify-center w-full px-4 py-3 rounded-xl border border-surface-border text-ink-primary cursor-pointer hover:bg-surface-elevated transition-colors">
+              Choose Picture
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => handleProfilePictureChange(e.target.files?.[0] ?? null)}
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-ink-secondary mb-2">Username</label>
+              <input
+                type="text"
+                value={profile.username}
+                onChange={(e) => updateProfileField('username', e.target.value)}
+                className="w-full px-4 py-2.5 bg-surface-input border border-surface-border rounded-xl text-ink-primary focus:outline-none focus:border-info transition-colors"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-ink-secondary mb-2">Email</label>
+              <input
+                type="email"
+                value={profile.email}
+                onChange={(e) => updateProfileField('email', e.target.value)}
+                className="w-full px-4 py-2.5 bg-surface-input border border-surface-border rounded-xl text-ink-primary focus:outline-none focus:border-info transition-colors"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-ink-secondary mb-2">Phone Number</label>
+              <input
+                type="text"
+                value={profile.phone_number || ''}
+                onChange={(e) => updateProfileField('phone_number', e.target.value)}
+                className="w-full px-4 py-2.5 bg-surface-input border border-surface-border rounded-xl text-ink-primary focus:outline-none focus:border-info transition-colors"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-ink-secondary mb-2">First Name</label>
+              <input
+                type="text"
+                value={profile.first_name || ''}
+                onChange={(e) => updateProfileField('first_name', e.target.value)}
+                className="w-full px-4 py-2.5 bg-surface-input border border-surface-border rounded-xl text-ink-primary focus:outline-none focus:border-info transition-colors"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-ink-secondary mb-2">Last Name</label>
+              <input
+                type="text"
+                value={profile.last_name || ''}
+                onChange={(e) => updateProfileField('last_name', e.target.value)}
+                className="w-full px-4 py-2.5 bg-surface-input border border-surface-border rounded-xl text-ink-primary focus:outline-none focus:border-info transition-colors"
+              />
+            </div>
+            <div className="md:col-span-2 grid grid-cols-2 gap-4 p-4 rounded-xl bg-surface-input">
+              <div>
+                <p className="text-xs text-ink-muted uppercase tracking-wide">Role</p>
+                <p className="text-ink-primary font-semibold">Administrator</p>
+              </div>
+              <div>
+                <p className="text-xs text-ink-muted uppercase tracking-wide">Joined</p>
+                <p className="text-ink-primary font-semibold">
+                  {profile.date_joined ? new Date(profile.date_joined).toLocaleDateString() : '—'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Header */}
       <div
         className="rounded-2xl p-8"

@@ -46,11 +46,12 @@ const NAV_GROUPS = [
 
 interface SidebarProps {
   badges?: Record<string, number>
-  adminUser?: { username: string; email: string } | null
+  adminUser?: { username: string; email: string; profile_picture_url?: string | null } | null
   onLogout?: () => void
+  onOpenProfile?: () => void
 }
 
-export default function Sidebar({ badges = {}, adminUser, onLogout }: SidebarProps) {
+export default function Sidebar({ badges = {}, adminUser, onLogout, onOpenProfile }: SidebarProps) {
   // Initialize state from localStorage (lazy initialization)
   const [collapsed, setCollapsed] = useState(() => {
     const saved = localStorage.getItem('sidebar-collapsed')
@@ -163,13 +164,24 @@ export default function Sidebar({ badges = {}, adminUser, onLogout }: SidebarPro
         style={{ borderTop: '1px solid #1C1F2E' }}>
         {!collapsed ? (
           <div className="fade-in">
-            <div className="flex items-center gap-3 px-3 py-2 rounded-xl mb-1"
+            <button
+              type="button"
+              onClick={onOpenProfile}
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl mb-1 text-left"
               style={{ background: '#111318' }}>
-              <div className="w-8 h-8 rounded-full flex items-center justify-center
-                              shrink-0 text-xs font-bold text-white"
-                style={{ background: 'linear-gradient(135deg, #22C55E, #16A34A)' }}>
-                {adminUser?.username?.slice(0, 2).toUpperCase() ?? 'AD'}
-              </div>
+              {adminUser?.profile_picture_url ? (
+                <img
+                  src={adminUser.profile_picture_url}
+                  alt={adminUser.username ?? 'Admin'}
+                  className="w-8 h-8 rounded-full object-cover shrink-0"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full flex items-center justify-center
+                                shrink-0 text-xs font-bold text-white"
+                  style={{ background: 'linear-gradient(135deg, #22C55E, #16A34A)' }}>
+                  {adminUser?.username?.slice(0, 2).toUpperCase() ?? 'AD'}
+                </div>
+              )}
               <div className="flex-1 min-w-0">
                 <p className="text-ink-primary text-xs font-semibold truncate">
                   {adminUser?.username ?? 'Admin'}
@@ -178,7 +190,7 @@ export default function Sidebar({ badges = {}, adminUser, onLogout }: SidebarPro
                   {adminUser?.email ?? 'admin@step2win.co.ke'}
                 </p>
               </div>
-            </div>
+            </button>
             <button
               onClick={onLogout}
               className="w-full flex items-center justify-center gap-2 py-2 rounded-xl

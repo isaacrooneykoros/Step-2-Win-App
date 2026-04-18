@@ -120,6 +120,7 @@ export interface AdminAuthUser {
   email: string;
   is_staff: boolean;
   is_active: boolean;
+  profile_picture_url?: string | null;
 }
 
 export interface AdminAuthResponse {
@@ -165,6 +166,44 @@ export interface SupportAdminUser {
   id: number;
   username: string;
   email: string;
+}
+
+export interface AdminProfile {
+  id: number;
+  username: string;
+  email: string;
+  phone_number?: string | null;
+  first_name?: string;
+  last_name?: string;
+  profile_picture?: string | null;
+  profile_picture_url?: string | null;
+  is_staff: boolean;
+  is_superuser?: boolean;
+  date_joined?: string;
+  last_login?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AdminNotificationItem {
+  type: 'support_ticket' | 'withdrawal' | 'audit_log';
+  title: string;
+  message: string;
+  created_at: string;
+  action_url?: string;
+  severity?: 'low' | 'medium' | 'high';
+}
+
+export interface AdminNotificationSummary {
+  total: number;
+  open_support_tickets: number;
+  pending_withdrawals: number;
+  recent_audit_items: number;
+}
+
+export interface AdminNotificationsResponse {
+  summary: AdminNotificationSummary;
+  items: AdminNotificationItem[];
 }
 
 export interface FraudFlag {

@@ -1,12 +1,114 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from apps.challenges.models import Challenge
 from apps.wallet.models import WalletTransaction, Withdrawal
 from apps.gamification.models import Badge, UserBadge
 from apps.users.models import UserXP
 from apps.admin_api.models import SystemSettings, AuditLog, SupportTicket, SupportTicketMessage
+from apps.core.sanitizers import sanitize_username
+from PIL import Image, UnidentifiedImageError
 
 User = get_user_model()
+
+
+class AdminProfileSerializer(serializers.ModelSerializer):
+    """Serializer for the currently authenticated admin profile."""
+
+    profile_picture_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            'id',
+            'username',
+            'email',
+            'phone_number',
+            'first_name',
+            'last_name',
+            'profile_picture',
+            'profile_picture_url',
+            'is_staff',
+            'is_superuser',
+            'date_joined',
+            'last_login',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'is_staff',
+            'is_superuser',
+            'date_joined',
+            'last_login',
+            'created_at',
+            'updated_at',
+            'profile_picture_url',
+        ]
+
+    def validate_username(self, value):
+        try:
+            cleaned = sanitize_username(value)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError(error.message)
+        if User.objects.exclude(pk=self.instance.pk if self.instance else None).filter(username=cleaned).exists():
+            raise serializers.ValidationError('Username already taken')
+        return cleaned
+
+    def validate_email(self, value):
+        normalized = str(value).lower().strip()
+        if User.objects.exclude(pk=self.instance.pk if self.instance else None).filter(email=normalized).exists():
+            raise serializers.ValidationError('Email already registered')
+        return normalized
+
+    def validate_phone_number(self, value):
+        phone_clean = value.replace('+', '').replace('-', '').replace(' ', '')
+        if not phone_clean.isdigit() or len(phone_clean) < 9:
+            raise serializers.ValidationError('Phone number must be at least 9 digits')
+        if User.objects.exclude(pk=self.instance.pk if self.instance else None).filter(phone_number=value).exists():
+            raise serializers.ValidationError('Phone number already registered')
+        return value
+
+    def validate_profile_picture(self, value):
+        if value.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError('Profile picture must be less than 5MB')
+
+        allowed_formats = {'JPEG', 'PNG', 'WEBP'}
+        try:
+            value.seek(0)
+            image = Image.open(value)
+            image.verify()
+            value.seek(0)
+            decoded = Image.open(value)
+            image_format = (decoded.format or '').upper()
+            decoded.close()
+            value.seek(0)
+        except (UnidentifiedImageError, OSError, ValueError):
+            raise serializers.ValidationError('Uploaded file is not a valid image')
+
+        if image_format not in allowed_formats:
+            raise serializers.ValidationError('Only JPEG, PNG, and WebP images are allowed')
+
+        return value
+
+    def get_profile_picture_url(self, obj) -> str | None:
+        if obj.profile_picture:
+            request = self.context.get('request') if hasattr(self, 'context') else None
+            if request is not None:
+                return request.build_absolute_uri(obj.profile_picture.url)
+            return obj.profile_picture.url
+        return None
+
+
+class AdminNotificationSerializer(serializers.Serializer):
+    """Serializer for admin notification feed items."""
+
+    type = serializers.CharField()
+    title = serializers.CharField()
+    message = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    action_url = serializers.CharField(required=False, allow_blank=True)
+    severity = serializers.CharField(required=False)
 
 
 class AdminUserSerializer(serializers.ModelSerializer):

@@ -3,6 +3,8 @@ import type {
   AdminChallenge,
   AdminAuthResponse,
   AdminAuthUser,
+  AdminNotificationsResponse,
+  AdminProfile,
   AdminTransaction,
   AdminUser,
   AdminWithdrawal,
@@ -32,6 +34,7 @@ function setAuthSession(payload: AdminAuthResponse) {
     email: payload.user.email,
     is_staff: payload.user.is_staff,
     is_superuser: (payload.user as { is_superuser?: boolean }).is_superuser ?? false,
+    profile_picture_url: (payload.user as { profile_picture_url?: string | null }).profile_picture_url ?? null,
   };
   useAuthStore.getState().setAuth(payload.access, payload.refresh, normalizedUser);
 }
@@ -125,11 +128,15 @@ async function refreshAdminAccessToken(): Promise<string | null> {
 
 async function request<T>(path: string, options?: RequestInit, hasRetried = false): Promise<T> {
   const token = getAuthToken();
+  const bodyIsFormData = typeof FormData !== 'undefined' && options?.body instanceof FormData;
   const mergedHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...((options?.headers as Record<string, string> | undefined) || {}),
   };
+
+  if (!bodyIsFormData) {
+    mergedHeaders['Content-Type'] = mergedHeaders['Content-Type'] || 'application/json';
+  }
 
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -200,6 +207,15 @@ export const adminApi = {
     return (user as unknown as AdminAuthUser) ?? null;
   },
   clearAuthSession,
+
+  getMyProfile: async () => request<AdminProfile>('/api/admin/profile/'),
+  updateMyProfile: async (data: Record<string, unknown> | FormData) =>
+    request<AdminProfile>('/api/admin/profile/', {
+      method: 'PATCH',
+      body: data instanceof FormData ? data : JSON.stringify(data),
+      headers: data instanceof FormData ? {} : { 'Content-Type': 'application/json' },
+    }),
+  getNotifications: async () => request<AdminNotificationsResponse>('/api/admin/notifications/'),
 
   // Overview & Dashboard (enhanced for Vault UI)
   getOverview: (days: number = 7) => 

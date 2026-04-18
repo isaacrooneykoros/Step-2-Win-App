@@ -13,6 +13,7 @@ export interface AdminUser {
   email: string;
   is_staff: boolean;
   is_superuser?: boolean;
+  profile_picture_url?: string | null;
 }
 
 interface AuthState {

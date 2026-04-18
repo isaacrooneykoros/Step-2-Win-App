@@ -8,6 +8,8 @@ from apps.admin_api.views import (
     AdminDashboardViewSet,
     admin_login,
     admin_register,
+    current_admin_profile,
+    admin_notifications,
     get_system_settings,
     update_system_settings,
     get_audit_logs,
@@ -43,6 +45,8 @@ app_name = 'admin_api'
 urlpatterns = [
     path('auth/login/', admin_login, name='admin-login'),
     path('auth/register/', admin_register, name='admin-register'),
+    path('profile/', current_admin_profile, name='admin-profile'),
+    path('notifications/', admin_notifications, name='admin-notifications'),
     path('settings/', get_system_settings, name='get-settings'),
     path('settings/update/', update_system_settings, name='update-settings'),
     path('audit-logs/', get_audit_logs, name='audit-logs'),
