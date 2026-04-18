@@ -1,6 +1,7 @@
 import os
 import secrets
 import sys
+import hashlib
 from pathlib import Path
 from datetime import timedelta
 from celery.schedules import crontab
@@ -400,10 +401,14 @@ if 'https://step-2-win-app.vercel.app' not in CSRF_TRUSTED_ORIGINS:
 
 # ── Django admin URL — obscured to resist automated scanning ─────────────────
 ADMIN_URL = os.getenv('DJANGO_ADMIN_URL', '').strip()
+if ADMIN_URL and not ADMIN_URL.endswith('/'):
+    ADMIN_URL = f'{ADMIN_URL}/'
 if not ADMIN_URL:
     ADMIN_URL = f"admin-{secrets.token_urlsafe(12).replace('-', '').replace('_', '').lower()}/"
-if not DEBUG and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS and (ADMIN_URL == 'admin-s2w-secure/' or len(ADMIN_URL) < 12):
-    raise ImproperlyConfigured('DJANGO_ADMIN_URL must be a non-default randomized path in production.')
+if not DEBUG and (ADMIN_URL == 'admin-s2w-secure/' or len(ADMIN_URL) < 12):
+    # Keep startup healthy even if legacy env values persist on the host.
+    derived = hashlib.sha256(SECRET_KEY.encode('utf-8')).hexdigest()[:24]
+    ADMIN_URL = f'admin-{derived}/'
 
 # ── django-axes brute force protection ───────────────────────────────────────
 AXES_FAILURE_LIMIT                        = 5
