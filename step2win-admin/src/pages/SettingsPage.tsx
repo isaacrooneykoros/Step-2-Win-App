@@ -61,8 +61,8 @@ function formatProfileErrorMessage(raw: string): string {
     return 'Please choose a JPEG, PNG, or WebP image.';
   }
 
-  if (lower.includes('profile picture must be less than 10mb')) {
-    return 'Image is too large. Please choose a file smaller than 10MB.';
+  if (lower.includes('profile picture must be less than')) {
+    return 'Image is too large. Please choose a smaller photo.';
   }
 
   if (lower.includes('phone number must be at least 9 digits')) {
@@ -75,6 +75,10 @@ function formatProfileErrorMessage(raw: string): string {
 
   if (lower.includes('username already taken')) {
     return 'That username is already taken.';
+  }
+
+  if (lower.includes('profile_picture')) {
+    return 'There was a problem with the photo you selected. Please choose a different image.';
   }
 
   return message || 'Something went wrong while saving your profile. Please try again.';
