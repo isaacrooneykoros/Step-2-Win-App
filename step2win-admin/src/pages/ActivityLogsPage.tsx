@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { adminApi } from '../services/adminApi';
-import { History, Search, Filter, Calendar, User, Activity, AlertCircle, X } from 'lucide-react';
+import { History, Search, Filter, Calendar, User, Activity, AlertCircle, X, Download, Copy } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { StatCard } from '../components/StatCard';
 import { StatusBadge } from '../components/StatusBadge';
@@ -34,6 +35,7 @@ interface AuditLogsResponse {
 }
 
 export function ActivityLogsPage() {
+  const navigate = useNavigate();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState('');
@@ -50,6 +52,25 @@ export function ActivityLogsPage() {
   
   // Selected log for viewing details
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+
+  const exportLogsCSV = () => {
+    const headers = ['created_at', 'admin_username', 'action', 'resource_type', 'resource_id', 'resource_name', 'description', 'ip_address'];
+    const rows = [
+      headers,
+      ...logs.map((log) => headers.map((header) => {
+        const value = log[header as keyof AuditLog];
+        return String(value ?? '');
+      })),
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `activity-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const loadLogs = useCallback(async () => {
     setLoading(true);
@@ -146,6 +167,43 @@ export function ActivityLogsPage() {
       <PageHeader
         title="Activity Logs"
         subtitle={`${total} total activities`}
+        actions={(
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              onClick={exportLogsCSV}
+              style={{
+                padding: '8px 14px',
+                background: '#00f5e9',
+                color: '#091120',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <Download size={16} /> Export CSV
+            </button>
+            <button
+              onClick={() => navigate('/users')}
+              style={{
+                padding: '8px 14px',
+                background: '#1a2332',
+                color: '#fff',
+                border: '1px solid #2d3748',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: 500,
+              }}
+            >
+              Users
+            </button>
+          </div>
+        )}
       />
 
       {/* Error Message */}
@@ -406,7 +464,13 @@ export function ActivityLogsPage() {
             </thead>
             <tbody>
               {logs.map((log) => (
-                <tr key={log.id} style={{ borderBottom: '1px solid #21263A', transition: 'background 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.background = '#13161F'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                <tr
+                  key={log.id}
+                  style={{ borderBottom: '1px solid #21263A', transition: 'background 0.2s', cursor: 'pointer' }}
+                  onClick={() => setSelectedLog(log)}
+                  onMouseEnter={(e) => e.currentTarget.style.background = '#13161F'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
                   <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '13px', whiteSpace: 'nowrap' }}>
                     {formatDate(log.created_at)}
                   </td>
@@ -436,26 +500,24 @@ export function ActivityLogsPage() {
                     {log.ip_address || '-'}
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                    {log.changes && (
-                      <button
-                        onClick={() => setSelectedLog(log)}
-                        style={{
-                          padding: '4px 12px',
-                          background: '#0e7490',
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          fontWeight: 500,
-                          transition: 'background 0.2s',
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#0891b2'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = '#0e7490'}
-                      >
-                        Details
-                      </button>
-                    )}
+                    <button
+                      onClick={() => setSelectedLog(log)}
+                      style={{
+                        padding: '4px 12px',
+                        background: '#0e7490',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: 500,
+                        transition: 'background 0.2s',
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#0891b2'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = '#0e7490'}
+                    >
+                      Details
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -594,7 +656,28 @@ export function ActivityLogsPage() {
 
               <div style={{ marginBottom: '24px' }}>
                 <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>IP Address</p>
-                <p style={{ color: '#fff', fontFamily: 'monospace', fontSize: '13px' }}>{selectedLog.ip_address || '-'}</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <p style={{ color: '#fff', fontFamily: 'monospace', fontSize: '13px', margin: 0 }}>{selectedLog.ip_address || '-'}</p>
+                  {selectedLog.ip_address && (
+                    <button
+                      onClick={() => void navigator.clipboard.writeText(selectedLog.ip_address || '')}
+                      style={{
+                        padding: '4px 10px',
+                        background: 'rgba(255,255,255,0.06)',
+                        color: '#fff',
+                        border: '1px solid #2d3748',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <Copy size={12} /> Copy IP
+                    </button>
+                  )}
+                </div>
               </div>
 
               {selectedLog.resource_name && (

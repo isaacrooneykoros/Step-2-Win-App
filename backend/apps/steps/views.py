@@ -20,6 +20,7 @@ from asgiref.sync import async_to_sync
 from .anti_cheat import DAILY_STEP_CAP, run_anti_cheat
 from .daily_reset import update_streak
 from apps.core.throttles import DashboardReadRateThrottle
+from apps.admin_api.realtime import broadcast_admin_steps_update
 from .models import FraudFlag, HealthRecord, SuspiciousActivity, TrustScore, HourlyStepRecord, LocationWaypoint
 from .serializers import HealthRecordSerializer, HealthSyncSerializer, HourlyStepSerializer, LocationWaypointSerializer
 
@@ -452,6 +453,8 @@ def sync_health(request):
         'trust_score': trust.score,
         'trust_status': trust.status,
         'flags_raised': anti_flags_count,
+        'user_id': user.id,
+        'username': user.username,
     })
 
     channel_layer = get_channel_layer()
@@ -466,6 +469,27 @@ def sync_health(request):
             )
         except Exception:
             pass
+
+    try:
+        broadcast_admin_steps_update({
+            'user_id': user.id,
+            'username': user.username,
+            'date': payload.get('date'),
+            'synced_at': payload.get('synced_at'),
+            'steps': payload.get('steps', 0),
+            'approved_steps': approved_steps,
+            'submitted_steps': submitted_steps,
+            'source': payload.get('source'),
+            'distance_km': payload.get('distance_km'),
+            'calories_active': payload.get('calories_active'),
+            'active_minutes': payload.get('active_minutes'),
+            'is_suspicious': is_suspicious,
+            'trust_score': trust.score,
+            'trust_status': trust.status,
+            'flags_raised': anti_flags_count,
+        })
+    except Exception:
+        pass
 
     return Response(payload)
 

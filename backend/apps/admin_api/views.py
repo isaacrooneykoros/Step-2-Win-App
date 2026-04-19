@@ -463,6 +463,39 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         serializer = AdminUserSerializer(user)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['post'])
+    def reset_steps(self, request, pk=None):
+        """Reset a user's lifetime step counters."""
+        user = self.get_object()
+
+        before_steps = user.total_steps
+        before_best_day_steps = user.best_day_steps
+
+        user.total_steps = 0
+        user.best_day_steps = 0
+        user.save(update_fields=['total_steps', 'best_day_steps', 'updated_at'])
+
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=request.user,
+            action='update',
+            resource_type='user',
+            resource_id=user.id,
+            resource_name=user.username,
+            description=f'Admin reset step counters for {user.username}',
+            changes={
+                'total_steps': {'old': before_steps, 'new': 0},
+                'best_day_steps': {'old': before_best_day_steps, 'new': 0},
+            },
+            request=request,
+        )
+
+        return Response({
+            'status': f'Step counters reset for {user.username}',
+            'user': AdminUserSerializer(user).data,
+        })
+
     @action(detail=False, methods=['patch'], url_path='me')
     def update_me(self, request):
         """Update the current admin profile through the users endpoint."""

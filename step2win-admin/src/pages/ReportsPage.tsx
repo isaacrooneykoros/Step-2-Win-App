@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Download, FileBarChart2, DollarSign, Users, Activity, TrendingUp, Calendar } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Download, FileBarChart2, DollarSign, Users, Activity, TrendingUp, Calendar, RefreshCw, ArrowRight } from 'lucide-react';
 import { adminApi } from '../services/adminApi';
 import { LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { formatKES } from '../utils/currency';
@@ -75,6 +76,7 @@ interface TransactionReport {
 }
 
 export function ReportsPage() {
+  const navigate = useNavigate();
   const [revenueData, setRevenueData] = useState<RevenueReport | null>(null);
   const [retentionData, setRetentionData] = useState<RetentionReport | null>(null);
   const [challengeData, setChallengeData] = useState<ChallengeReport | null>(null);
@@ -107,6 +109,32 @@ export function ReportsPage() {
   useEffect(() => {
     loadReports();
   }, [loadReports]);
+
+  const exportSummaryCSV = () => {
+    const rows = [
+      ['section', 'metric', 'value'],
+      ['revenue', 'platform_fees', revenueData?.summary.platform_fees ?? ''],
+      ['revenue', 'total_deposits', revenueData?.summary.total_deposits ?? ''],
+      ['revenue', 'total_payouts', revenueData?.summary.total_payouts ?? ''],
+      ['revenue', 'net_revenue', revenueData?.summary.net_revenue ?? ''],
+      ['retention', 'total_users', retentionData?.summary.total_users ?? ''],
+      ['retention', 'active_users', retentionData?.summary.active_users ?? ''],
+      ['retention', 'overall_retention', retentionData?.summary.overall_retention ?? ''],
+      ['challenges', 'total_challenges', challengeData?.summary.total_challenges ?? ''],
+      ['challenges', 'completion_rate', challengeData?.summary.completion_rate ?? ''],
+      ['transactions', 'total_volume', transactionData?.summary.total_volume ?? ''],
+      ['transactions', 'total_transactions', transactionData?.summary.total_transactions ?? ''],
+      ['transactions', 'avg_transaction_value', transactionData?.summary.avg_transaction_value ?? ''],
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `reports-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const exportToCSV = (data: Record<string, unknown>[], filename: string) => {
     const headers = Object.keys(data[0] || {});
@@ -154,6 +182,92 @@ export function ReportsPage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => void loadReports()}
+            style={{
+              padding: '8px 14px',
+              background: '#1a2332',
+              border: '1px solid #2d3748',
+              borderRadius: '6px',
+              color: '#fff',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <RefreshCw size={16} /> Refresh
+          </button>
+          <button
+            type="button"
+            onClick={exportSummaryCSV}
+            style={{
+              padding: '8px 14px',
+              background: '#00f5e9',
+              color: '#091120',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <Download size={16} /> Summary CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/transactions')}
+            style={{
+              padding: '8px 14px',
+              background: '#1a2332',
+              border: '1px solid #2d3748',
+              borderRadius: '6px',
+              color: '#fff',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            Transactions <ArrowRight size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/withdrawals')}
+            style={{
+              padding: '8px 14px',
+              background: '#1a2332',
+              border: '1px solid #2d3748',
+              borderRadius: '6px',
+              color: '#fff',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            Withdrawals <ArrowRight size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/analytics')}
+            style={{
+              padding: '8px 14px',
+              background: '#1a2332',
+              border: '1px solid #2d3748',
+              borderRadius: '6px',
+              color: '#fff',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            Analytics <ArrowRight size={14} />
+          </button>
           <Calendar size={16} style={{ color: '#64748b' }} />
           <select
             value={timePeriod}

@@ -30,3 +30,20 @@ def broadcast_support_ticket(ticket_id: int, ticket_payload: dict):
             'ticket': ticket_payload,
         },
     )
+
+
+def _admin_steps_group_name() -> str:
+    return 'admin_steps_live'
+
+
+def broadcast_admin_steps_update(step_payload: dict):
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+    async_to_sync(channel_layer.group_send)(
+        _admin_steps_group_name(),
+        {
+            'type': 'admin.steps.update',
+            'payload': step_payload,
+        },
+    )

@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Users, Trophy, TrendingUp, Clock,
+  Users, Trophy, TrendingUp, Clock, RefreshCw,
 } from 'lucide-react'
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
@@ -65,10 +66,11 @@ function PeriodSelector({
 
 export function DashboardPage() {
   const [period, setPeriod] = useState('7D')
+  const navigate = useNavigate()
   const days = period === '7D' ? 7 : period === '30D' ? 30 : 90
 
   // Fetch overview data with dynamic days parameter
-  const { data: stats, isLoading, error } = useQuery({
+  const { data: stats, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['admin', 'overview', days],
     queryFn:  () => adminApi.getOverview(days),
     refetchInterval: 60_000,  // auto-refresh every minute
@@ -92,10 +94,11 @@ export function DashboardPage() {
           {error instanceof Error ? error.message : 'An error occurred'}
         </p>
         <button
-          onClick={() => window.location.reload()}
-          className="px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+          onClick={() => void refetch()}
+          className="px-4 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
           style={{ background: '#7C6FF7', color: '#fff' }}>
-          Reload Dashboard
+          <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
+          {isFetching ? 'Refreshing...' : 'Refresh Dashboard'}
         </button>
       </div>
     )
@@ -108,7 +111,24 @@ export function DashboardPage() {
       <PageHeader
         title="Dashboard"
         subtitle={`Welcome back. Here's your platform overview · ${today}`}
-        actions={<PeriodSelector value={period} onChange={setPeriod} />}
+        actions={(
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void refetch()}
+              className="px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-2"
+              style={{ background: '#13161F', border: '1px solid #21263A', color: '#D4DEFF' }}>
+              <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+            <button
+              onClick={() => navigate('/reports')}
+              className="px-3 py-2 rounded-xl text-xs font-semibold"
+              style={{ background: '#13161F', border: '1px solid #21263A', color: '#D4DEFF' }}>
+              Reports
+            </button>
+            <PeriodSelector value={period} onChange={setPeriod} />
+          </div>
+        )}
       />
 
       {/* ── STAT CARDS ROW ── */}

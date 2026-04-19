@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Users, UserCheck, UserX,
@@ -12,6 +12,8 @@ import { ConfirmModal }  from '../components/ConfirmModal'
 import { SlideOver }     from '../components/SlideOver'
 import { DetailRow }     from '../components/DetailRow'
 import api from '../services/api/client'
+import { API_BASE } from '../config/network'
+import { useAuthStore } from '../store/authStore'
 import { format } from 'date-fns'
 
 interface User {
@@ -75,6 +77,30 @@ interface UserStats {
   active_spark: number[]
 }
 
+interface LiveStepUpdate {
+  user_id: number
+  username: string
+  date: string
+  synced_at: string
+  steps: number
+  approved_steps: number
+  submitted_steps: number
+  source?: string | null
+  distance_km?: number | null
+  calories_active?: number | null
+  active_minutes?: number | null
+  is_suspicious: boolean
+  trust_score: number
+  trust_status: string
+  flags_raised: number
+}
+
+interface UserEditDraft {
+  username: string
+  email: string
+  phone_number: string
+}
+
 interface ActionBtnProps {
   icon: React.ElementType
   color: string
@@ -84,6 +110,8 @@ interface ActionBtnProps {
 
 export function UsersPage() {
   const qc = useQueryClient()
+  const accessToken = useAuthStore((state) => state.accessToken)
+  const wsRef = useRef<WebSocket | null>(null)
 
   // ── Table state ──────────────────────────────────────────────────────
   const [search,   setSearch]   = useState('')
@@ -98,6 +126,12 @@ export function UsersPage() {
   const [drawerOpen,  setDrawerOpen]  = useState(false)
   const [confirmBan,  setConfirmBan]  = useState<User | null>(null)
   const [confirmDel,  setConfirmDel]  = useState<User | null>(null)
+  const [confirmReset, setConfirmReset] = useState<User | null>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editError, setEditError] = useState('')
+  const [editDraft, setEditDraft] = useState<UserEditDraft>({ username: '', email: '', phone_number: '' })
+  const [liveConnected, setLiveConnected] = useState(false)
+  const [liveUpdate, setLiveUpdate] = useState<LiveStepUpdate | null>(null)
 
   // ── Data ─────────────────────────────────────────────────────────────
   const { data, isLoading } = useQuery<UsersData>({
@@ -142,12 +176,147 @@ export function UsersPage() {
     onSuccess:  () => { qc.invalidateQueries({ queryKey: ['admin', 'users'] }); setConfirmDel(null) },
   })
 
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      if (!selected) {
+        throw new Error('No user selected')
+      }
+
+      const payload = {
+        username: editDraft.username.trim(),
+        email: editDraft.email.trim(),
+        phone_number: editDraft.phone_number.trim(),
+      }
+
+      const response = await api.patch<User>(`/api/admin/users/${selected.id}/update_user/`, payload)
+      return response.data
+    },
+    onSuccess: (updatedUser) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] })
+      setSelected(updatedUser)
+      setIsEditing(false)
+      setEditError('')
+    },
+    onError: (err) => {
+      setEditError(err instanceof Error ? err.message : 'Failed to save user changes.')
+    },
+  })
+
+  const resetStepsMut = useMutation({
+    mutationFn: async (user: User) => {
+      const response = await api.post<{ status: string; user: User }>(`/api/admin/users/${user.id}/reset_steps/`)
+      return response.data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] })
+      if (selected && data.user.id === selected.id) {
+        setSelected((current) => (current ? { ...current, total_steps: data.user.total_steps } : current))
+      }
+      setConfirmReset(null)
+    },
+  })
+
   const handleSort = (key: string) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('desc') }
   }
 
-  const openDrawer = (user: User) => { setSelected(user); setDrawerOpen(true) }
+  const openDrawer = (user: User, editing = false) => {
+    setSelected(user)
+    setEditDraft({
+      username: user.username,
+      email: user.email,
+      phone_number: user.phone_number || '',
+    })
+    setIsEditing(editing)
+    setEditError('')
+    setDrawerOpen(true)
+  }
+  const selectedLiveSnapshot = selected && liveUpdate?.user_id === selected.id ? liveUpdate : null
+
+  useEffect(() => {
+    if (!selected) {
+      setIsEditing(false)
+      setEditError('')
+      return
+    }
+
+    if (!isEditing) {
+      setEditDraft({
+        username: selected.username,
+        email: selected.email,
+        phone_number: selected.phone_number || '',
+      })
+    }
+  }, [isEditing, selected])
+
+  useEffect(() => {
+    if (!accessToken) {
+      setLiveConnected(false)
+      return
+    }
+
+    const wsBase = API_BASE.replace(/^http/, 'ws').replace(/\/$/, '')
+    const socket = new WebSocket(`${wsBase}/ws/admin/steps/live/?token=${encodeURIComponent(accessToken)}`)
+    wsRef.current = socket
+
+    socket.onopen = () => {
+      setLiveConnected(true)
+    }
+
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data)
+        if (message.type !== 'admin.steps.update' || !message.payload) {
+          return
+        }
+
+        const payload = message.payload as LiveStepUpdate
+        setLiveUpdate(payload)
+
+        qc.setQueriesData<UsersData>({ queryKey: ['admin', 'users'] }, (current) => {
+          if (!current?.results) {
+            return current
+          }
+
+          return {
+            ...current,
+            results: current.results.map((user) => (
+              user.id === payload.user_id
+                ? { ...user, total_steps: payload.steps ?? payload.approved_steps ?? user.total_steps }
+                : user
+            )),
+          }
+        })
+
+        setSelected((current) => {
+          if (!current || current.id !== payload.user_id) {
+            return current
+          }
+
+          return {
+            ...current,
+            total_steps: payload.steps ?? payload.approved_steps ?? current.total_steps,
+          }
+        })
+      } catch {
+        // Ignore malformed websocket payloads.
+      }
+    }
+
+    socket.onerror = () => {
+      setLiveConnected(false)
+    }
+
+    socket.onclose = () => {
+      setLiveConnected(false)
+    }
+
+    return () => {
+      socket.close()
+      wsRef.current = null
+    }
+  }, [accessToken, qc])
 
   // ── Table columns ────────────────────────────────────────────────────
   const columns = [
@@ -237,10 +406,10 @@ export function UsersPage() {
             onClick={() => openDrawer(u)} />
           {/* Edit */}
           <ActionBtn icon={Edit2} color="#7C6FF7" title="Edit user"
-            onClick={() => openDrawer(u)} />
+            onClick={() => openDrawer(u, true)} />
           {/* Reset steps */}
           <ActionBtn icon={RotateCcw} color="#F5A623" title="Reset steps"
-            onClick={() => {}} />
+            onClick={() => setConfirmReset(u)} />
           {/* Ban / Unban */}
           {u.is_banned
             ? <ActionBtn icon={RotateCcw} color="#22D3A0" title="Unban user"
@@ -282,6 +451,16 @@ export function UsersPage() {
               <option value="user">User</option>
               <option value="admin">Admin</option>
             </select>
+            <span
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold"
+              style={{
+                background: liveConnected ? 'rgba(34,211,160,0.12)' : 'rgba(148,163,184,0.12)',
+                color: liveConnected ? '#22D3A0' : '#94A3B8',
+                border: `1px solid ${liveConnected ? 'rgba(34,211,160,0.24)' : 'rgba(148,163,184,0.24)'}`,
+              }}>
+              <span className="w-2 h-2 rounded-full" style={{ background: liveConnected ? '#22D3A0' : '#94A3B8' }} />
+              {liveConnected ? 'Live step feed' : 'Live feed offline'}
+            </span>
           </div>
         }
       />
@@ -319,11 +498,76 @@ export function UsersPage() {
       {/* User detail drawer */}
       <SlideOver
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title={selected?.username ?? 'User Details'}
+        onClose={() => { setDrawerOpen(false); setIsEditing(false); setEditError('') }}
+        title={isEditing ? `Edit ${selected?.username ?? 'User'}` : (selected?.username ?? 'User Details')}
         subtitle={selected?.email}>
         {selected && (
           <div>
+            {isEditing && (
+              <div className="mb-5 p-4 rounded-xl" style={{ background: 'rgba(124,111,247,0.08)', border: '1px solid rgba(124,111,247,0.22)' }}>
+                <p className="text-sm font-semibold" style={{ color: '#7C6FF7' }}>Editing user profile</p>
+                <p className="text-xs text-ink-muted mt-1">Update username, email, or phone number. The change saves to the admin API.</p>
+                {editError && (
+                  <p className="text-xs mt-2" style={{ color: '#F06060' }}>{editError}</p>
+                )}
+                <div className="space-y-3 mt-4">
+                  <label className="block">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Username</span>
+                    <input
+                      value={editDraft.username}
+                      onChange={(e) => setEditDraft((current) => ({ ...current, username: e.target.value }))}
+                      className="mt-1 w-full px-3 py-2 rounded-xl text-sm outline-none"
+                      style={{ background: '#13161F', border: '1px solid #21263A', color: '#F0F2F8' }}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Email</span>
+                    <input
+                      type="email"
+                      value={editDraft.email}
+                      onChange={(e) => setEditDraft((current) => ({ ...current, email: e.target.value }))}
+                      className="mt-1 w-full px-3 py-2 rounded-xl text-sm outline-none"
+                      style={{ background: '#13161F', border: '1px solid #21263A', color: '#F0F2F8' }}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Phone Number</span>
+                    <input
+                      value={editDraft.phone_number}
+                      onChange={(e) => setEditDraft((current) => ({ ...current, phone_number: e.target.value }))}
+                      className="mt-1 w-full px-3 py-2 rounded-xl text-sm outline-none"
+                      style={{ background: '#13161F', border: '1px solid #21263A', color: '#F0F2F8' }}
+                    />
+                  </label>
+                </div>
+                <div className="flex items-center gap-2 mt-4">
+                  <button
+                    onClick={() => saveMut.mutate()}
+                    disabled={saveMut.isPending}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+                    style={{ background: '#7C6FF7' }}>
+                    {saveMut.isPending ? 'Saving...' : 'Save changes'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsEditing(false)
+                      setEditError('')
+                      if (selected) {
+                        setEditDraft({
+                          username: selected.username,
+                          email: selected.email,
+                          phone_number: selected.phone_number || '',
+                        })
+                      }
+                    }}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold"
+                    style={{ background: 'rgba(255,255,255,0.04)', color: '#F0F2F8' }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             {(() => {
               const issues = getProfileIssues(selected)
               const isValid = issues.length === 0
@@ -415,8 +659,59 @@ export function UsersPage() {
             <DetailRow label="Challenges Won"    value={selected.challenges_won ?? 0} />
             <DetailRow label="Current Streak"    value={`${selected.current_streak ?? 0} days`} />
 
+            <h4 className="text-ink-muted text-xs font-semibold uppercase tracking-wider mb-3 mt-5">
+              Live Steps
+            </h4>
+            {selectedLiveSnapshot ? (
+              <div
+                className="rounded-xl p-4 mb-2"
+                style={{ background: 'rgba(79,156,249,0.08)', border: '1px solid rgba(79,156,249,0.18)' }}>
+                <p className="text-2xl font-black text-ink-primary">
+                  {Number(selectedLiveSnapshot.steps ?? 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-ink-muted mt-1">
+                  Synced {selectedLiveSnapshot.synced_at ? format(new Date(selectedLiveSnapshot.synced_at), 'HH:mm:ss') : 'just now'}
+                </p>
+                <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
+                  <div className="rounded-lg p-2" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                    <p className="text-ink-muted">Submitted</p>
+                    <p className="text-ink-primary font-semibold">{Number(selectedLiveSnapshot.submitted_steps ?? 0).toLocaleString()}</p>
+                  </div>
+                  <div className="rounded-lg p-2" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                    <p className="text-ink-muted">Trust</p>
+                    <p className="text-ink-primary font-semibold">{selectedLiveSnapshot.trust_status}</p>
+                  </div>
+                  <div className="rounded-lg p-2" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                    <p className="text-ink-muted">Flags</p>
+                    <p className="text-ink-primary font-semibold">{selectedLiveSnapshot.flags_raised}</p>
+                  </div>
+                  <div className="rounded-lg p-2" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                    <p className="text-ink-muted">Suspicious</p>
+                    <p className="text-ink-primary font-semibold">{selectedLiveSnapshot.is_suspicious ? 'Yes' : 'No'}</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl p-4 mb-2" style={{ background: 'rgba(148,163,184,0.08)', border: '1px solid rgba(148,163,184,0.16)' }}>
+                <p className="text-sm text-ink-primary font-semibold">Waiting for the next sync</p>
+                <p className="text-xs text-ink-muted mt-1">Open this user’s device and trigger a step sync to see live updates here.</p>
+              </div>
+            )}
+
             {/* Actions */}
             <div className="mt-6 space-y-2">
+              <button
+                onClick={() => setIsEditing((value) => !value)}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold"
+                style={{ background: 'rgba(124,111,247,0.12)', color: '#7C6FF7', border: '1px solid rgba(124,111,247,0.22)' }}>
+                {isEditing ? 'Close editor' : 'Edit details'}
+              </button>
+              <button
+                onClick={() => setConfirmReset(selected)}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold"
+                style={{ background: 'rgba(245,166,35,0.12)', color: '#F5A623', border: '1px solid rgba(245,166,35,0.22)' }}>
+                Reset steps
+              </button>
               {selected.is_banned ? (
                 <button
                   onClick={() => { unbanMut.mutate(selected.id); setDrawerOpen(false) }}
@@ -457,6 +752,15 @@ export function UsersPage() {
         title="Delete User"
         message={`Permanently delete "${confirmDel?.username}"? This cannot be undone. Their wallet balance will be refunded first.`}
         confirmLabel="Delete Permanently" variant="danger" />
+
+      {/* Reset steps confirm */}
+      <ConfirmModal
+        open={!!confirmReset} onClose={() => setConfirmReset(null)}
+        onConfirm={() => { if (confirmReset) resetStepsMut.mutate(confirmReset) }}
+        loading={resetStepsMut.isPending}
+        title="Reset Step Counters"
+        message={`Reset lifetime step counters for "${confirmReset?.username}"? This clears total steps and best day steps, but keeps the account and step history records.`}
+        confirmLabel="Reset Steps" variant="warning" />
     </div>
   )
 }

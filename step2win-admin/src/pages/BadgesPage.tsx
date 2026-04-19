@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Award, Users, Trophy, Zap, Target, Calendar } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { Award, Users, Trophy, Zap, Target, Calendar, X, Copy } from 'lucide-react';
 import { adminApi } from '../services/adminApi';
 import type { AdminBadge } from '../types/admin';
 
@@ -7,6 +7,9 @@ export function BadgesPage() {
   const [badges, setBadges] = useState<AdminBadge[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedBadge, setSelectedBadge] = useState<AdminBadge | null>(null);
+  const [copiedLabel, setCopiedLabel] = useState('');
 
   useEffect(() => {
     adminApi
@@ -47,6 +50,30 @@ export function BadgesPage() {
         return 'bg-up/10 text-up';
       default:
         return 'bg-surface-input text-ink-muted';
+    }
+  };
+
+  const filteredBadges = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    if (!query) {
+      return badges;
+    }
+
+    return badges.filter((badge) => (
+      badge.name.toLowerCase().includes(query)
+      || badge.description.toLowerCase().includes(query)
+      || badge.slug.toLowerCase().includes(query)
+      || badge.badge_type.toLowerCase().includes(query)
+    ));
+  }, [badges, searchTerm]);
+
+  const copyToClipboard = async (label: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedLabel(label);
+      window.setTimeout(() => setCopiedLabel(''), 2000);
+    } catch {
+      setCopiedLabel('');
     }
   };
 
@@ -109,31 +136,48 @@ export function BadgesPage() {
             </div>
           </div>
         </div>
+        <div className="mt-6 flex flex-col md:flex-row md:items-center gap-3">
+          <input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Search badges, slugs, or types..."
+            className="flex-1 rounded-xl px-4 py-3 bg-white/10 text-white placeholder-white/60 border border-white/10 outline-none"
+          />
+          <div className="text-white/75 text-sm font-medium">
+            {filteredBadges.length} badge{filteredBadges.length === 1 ? '' : 's'} visible
+          </div>
+        </div>
       </div>
 
       {/* Badges Grid */}
-      {badges.length === 0 ? (
+      {filteredBadges.length === 0 ? (
         <div className="bg-surface-card border border-surface-border rounded-2xl p-12 text-center">
           <Award size={48} className="text-ink-muted mx-auto mb-4" />
           <h3 className="text-ink-primary text-xl font-semibold mb-2">No Badges Yet</h3>
           <p className="text-ink-secondary">
-            Run <code className="bg-surface-input px-2 py-1 rounded">python manage.py populate_badges</code> to create initial badges
+            {searchTerm
+              ? 'No badges match your search.'
+              : <>
+                  Run <code className="bg-surface-input px-2 py-1 rounded">python manage.py populate_badges</code> to create initial badges
+                </>
+            }
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {badges.map((badge) => (
+          {filteredBadges.map((badge) => (
             <div
               key={badge.id}
-              className="bg-surface-card border border-surface-border rounded-2xl p-6 hover:border-info/30 transition-all duration-200"
+              className="bg-surface-card border border-surface-border rounded-2xl p-6 hover:border-info/30 transition-all duration-200 cursor-pointer"
               style={{
                 boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
               }}
+              onClick={() => setSelectedBadge(badge)}
             >
               {/* Badge Icon */}
               <div className="flex items-start gap-4 mb-4">
                 <div
-                  className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl flex-shrink-0"
+                  className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl shrink-0"
                   style={{
                     backgroundColor: badge.color + '20',
                     border: `2px solid ${badge.color}40`,
@@ -167,8 +211,94 @@ export function BadgesPage() {
                   {badge.users_earned}
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setSelectedBadge(badge);
+                }}
+                className="mt-4 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors"
+                style={{ background: '#191C28', border: '1px solid #21263A', color: '#D4DEFF' }}
+              >
+                Inspect Badge
+              </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {selectedBadge && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.72)' }}>
+          <div className="w-full max-w-lg rounded-2xl border border-surface-border bg-surface-card shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-surface-border">
+              <div>
+                <p className="text-ink-primary text-lg font-semibold">Badge Details</p>
+                <p className="text-ink-muted text-xs">Copy badge identifiers or inspect metadata</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedBadge(null)}
+                className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                <X size={14} color="#7B82A0" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="flex items-start gap-4">
+                <div
+                  className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl shrink-0"
+                  style={{ backgroundColor: selectedBadge.color + '20', border: `2px solid ${selectedBadge.color}40` }}>
+                  {selectedBadge.icon}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-ink-primary font-bold text-xl truncate">{selectedBadge.name}</h3>
+                  <p className="text-ink-muted text-sm mt-1">{selectedBadge.description}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                  <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Slug</p>
+                  <p className="text-ink-primary font-semibold text-sm break-all">{selectedBadge.slug}</p>
+                </div>
+                <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                  <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Type</p>
+                  <p className="text-ink-primary font-semibold text-sm">{selectedBadge.badge_type}</p>
+                </div>
+                <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                  <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Awarded</p>
+                  <p className="text-ink-primary font-semibold text-sm">{selectedBadge.users_earned}</p>
+                </div>
+                <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                  <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Badge ID</p>
+                  <p className="text-ink-primary font-semibold text-sm mono">{selectedBadge.id}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void copyToClipboard('Badge slug copied', selectedBadge.slug)}
+                  className="inline-flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold"
+                  style={{ background: '#191C28', border: '1px solid #21263A', color: '#D4DEFF' }}>
+                  <Copy size={14} />
+                  Copy Slug
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyToClipboard('Badge ID copied', String(selectedBadge.id))}
+                  className="inline-flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold"
+                  style={{ background: '#191C28', border: '1px solid #21263A', color: '#D4DEFF' }}>
+                  <Copy size={14} />
+                  Copy ID
+                </button>
+                {copiedLabel && (
+                  <span className="text-up text-xs font-semibold">{copiedLabel}</span>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

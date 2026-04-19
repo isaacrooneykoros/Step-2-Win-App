@@ -5,6 +5,7 @@ import { ChevronLeft, History, Footprints, MapPin, Flame, PartyPopper } from 'lu
 import { stepsService } from '../services/api';
 import type { StepsPeriod } from '../types';
 import { StepStatChips } from '../components/ui/StepStatChips';
+import { useStepsSyncStore } from '../store/stepsSyncStore';
 
 // Time filter options
 const PERIODS: { key: StepsPeriod; label: string }[] = [
@@ -19,6 +20,8 @@ const PERIODS: { key: StepsPeriod; label: string }[] = [
 export default function StepsDetailScreen() {
   const navigate = useNavigate();
   const [period, setPeriod] = useState<StepsPeriod>('1w');
+  const isStepsSocketConnected = useStepsSyncStore((state) => state.isStepsSocketConnected);
+  const lastStepsUpdateAt = useStepsSyncStore((state) => state.lastStepsUpdateAt);
 
   // Fetch summary stats
   const { data: summary, isLoading: isLoadingSummary } = useQuery({
@@ -117,6 +120,24 @@ export default function StepsDetailScreen() {
           calories={summary.today_calories}
           activeMins={summary.today_active_mins}
         />
+
+        <div
+          className="mt-4 inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold"
+          style={{
+            background: isStepsSocketConnected ? 'rgba(52,211,153,0.12)' : 'rgba(148,163,184,0.12)',
+            color: isStepsSocketConnected ? '#10B981' : '#64748B',
+          }}
+        >
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ background: isStepsSocketConnected ? '#10B981' : '#94A3B8' }}
+          />
+          {isStepsSocketConnected && lastStepsUpdateAt
+            ? `Live synced ${new Date(lastStepsUpdateAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+            : isStepsSocketConnected
+              ? 'Live step sync connected'
+              : 'Live step sync reconnecting'}
+        </div>
       </div>
 
       {/*  PERIOD FILTER + BAR CHART  */}

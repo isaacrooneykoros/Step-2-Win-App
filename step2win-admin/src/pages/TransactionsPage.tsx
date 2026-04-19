@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { ArrowLeftRight, ArrowDownCircle, ArrowUpCircle, Receipt } from 'lucide-react';
+import { ArrowLeftRight, ArrowDownCircle, ArrowUpCircle, Receipt, X, Copy } from 'lucide-react';
 import { adminApi } from '../services/adminApi';
 import type { AdminTransaction } from '../types/admin';
 import { formatKES } from '../utils/currency';
@@ -14,6 +14,8 @@ export function TransactionsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortKey, setSortKey] = useState<string>('created_at');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [selectedTransaction, setSelectedTransaction] = useState<AdminTransaction | null>(null);
+  const [copiedLabel, setCopiedLabel] = useState('');
 
   useEffect(() => {
     adminApi
@@ -120,6 +122,16 @@ export function TransactionsPage() {
     );
   };
 
+  const copyToClipboard = async (label: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedLabel(label);
+      window.setTimeout(() => setCopiedLabel(''), 2000);
+    } catch {
+      setCopiedLabel('');
+    }
+  };
+
   const columns = [
     {
       key: 'user',
@@ -177,9 +189,23 @@ export function TransactionsPage() {
       key: 'reference',
       label: 'Reference',
       render: (tx: AdminTransaction) => (
-        <div style={{ color: '#64748b', fontSize: '12px', fontFamily: 'monospace' }}>
+        <button
+          type="button"
+          onClick={() => {
+            if (tx.reference_id) {
+              void copyToClipboard('Reference copied', tx.reference_id)
+            }
+          }}
+          disabled={!tx.reference_id}
+          style={{
+            color: tx.reference_id ? '#64748b' : '#4b5563',
+            fontSize: '12px',
+            fontFamily: 'monospace',
+            cursor: tx.reference_id ? 'pointer' : 'default',
+          }}
+        >
           {tx.reference_id || '-'}
-        </div>
+        </button>
       ),
     },
     {
@@ -266,7 +292,78 @@ export function TransactionsPage() {
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={handleSort}
+        onRowClick={(tx) => setSelectedTransaction(tx)}
       />
+
+      {selectedTransaction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+          <div className="w-full max-w-2xl rounded-2xl border border-[#21263A] bg-[#13161F] shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#21263A]">
+              <div>
+                <p className="text-ink-primary text-lg font-semibold">Transaction Details</p>
+                <p className="text-ink-muted text-xs">Drill-down view with quick copy actions</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedTransaction(null)}
+                className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                <X size={14} color="#7B82A0" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-5">
+              <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">User</p>
+                <p className="text-ink-primary font-semibold">{selectedTransaction.user_username || 'System'}</p>
+                <p className="text-ink-muted text-xs mt-1">ID: {selectedTransaction.user ?? 'n/a'}</p>
+              </div>
+              <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Amount</p>
+                <p className="text-ink-primary font-semibold mono">
+                  {parseFloat(selectedTransaction.amount) > 0 ? '+' : ''}{formatKES(selectedTransaction.amount)}
+                </p>
+                <p className="text-ink-muted text-xs mt-1">Type: {selectedTransaction.type}</p>
+              </div>
+              <div className="rounded-xl p-4 md:col-span-2" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Description</p>
+                <p className="text-ink-secondary text-sm">{selectedTransaction.description || '-'}</p>
+              </div>
+              <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Balance Before</p>
+                <p className="text-ink-primary font-semibold mono">{formatKES(selectedTransaction.balance_before)}</p>
+              </div>
+              <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Balance After</p>
+                <p className="text-ink-primary font-semibold mono">{formatKES(selectedTransaction.balance_after)}</p>
+              </div>
+              <div className="rounded-xl p-4 md:col-span-2" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Reference</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-ink-secondary mono text-sm break-all">{selectedTransaction.reference_id || '—'}</p>
+                  {selectedTransaction.reference_id && (
+                    <button
+                      type="button"
+                      onClick={() => void copyToClipboard('Reference copied', selectedTransaction.reference_id || '')}
+                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold"
+                      style={{ background: '#191C28', border: '1px solid #21263A', color: '#D4DEFF' }}>
+                      <Copy size={13} />
+                      Copy
+                    </button>
+                  )}
+                </div>
+                {copiedLabel && (
+                  <p className="text-up text-xs mt-2">{copiedLabel}</p>
+                )}
+              </div>
+              <div className="rounded-xl p-4 md:col-span-2" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
+                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Created</p>
+                <p className="text-ink-secondary text-sm">{new Date(selectedTransaction.created_at).toLocaleString()}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
