@@ -44,6 +44,9 @@ export default function ProfileScreen() {
   };
 
   const trustScore = currentUser?.trust_score ?? 100;
+  const moderationAction = currentUser?.moderation_last_action || null;
+  const moderationReviewedAt = currentUser?.moderation_reviewed_at || null;
+  const moderationMessage = currentUser?.moderation_message || '';
   const standingLabel = useMemo(() => {
     if (trustScore >= 85) return 'Good Standing';
     if (trustScore >= 65) return 'Review Needed';
@@ -153,6 +156,30 @@ export default function ProfileScreen() {
           </button>
         </div>
       </div>
+
+      {(moderationAction || moderationMessage) && (
+        <div className="px-4 pb-4">
+          <div className="card rounded-3xl p-4 border border-border">
+            <div className="flex items-center gap-2 mb-2">
+              <ShieldCheck size={16} className="text-accent-blue" />
+              <p className="text-sm font-semibold text-text-primary">Moderation Update</p>
+            </div>
+            <p className="text-xs text-text-secondary leading-relaxed">
+              {moderationMessage || 'Your flagged step activity was reviewed by the admin team.'}
+            </p>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <span className="text-[11px] text-text-muted uppercase tracking-wide">
+                Decision: {String(moderationAction || 'reviewed').replace('_', ' ')}
+              </span>
+              <span className="text-[11px] text-text-muted">
+                {moderationReviewedAt
+                  ? new Date(moderationReviewedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                  : ''}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="px-4 pb-4">
         <div className="card rounded-3xl p-4">

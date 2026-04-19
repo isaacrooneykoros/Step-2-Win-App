@@ -12,6 +12,7 @@ export function AdminFraudPage() {
   const [actionInProgress, setActionInProgress] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterSeverity, setFilterSeverity] = useState<'all' | 'critical' | 'high' | 'medium' | 'low'>('all');
+  const [actionNote, setActionNote] = useState('');
   
   // Confirmation modal state
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
@@ -50,11 +51,14 @@ export function AdminFraudPage() {
       | 'unrestrict'
       | 'unsuspend'
       | 'unban'
+    ,
+    adminNote?: string
   ) => {
     setActionInProgress(true);
     try {
-      await adminApi.actionFraudFlag(flagId, action);
+      await adminApi.actionFraudFlag(flagId, action, adminNote?.trim() || undefined);
       setSelectedFlag(null);
+      setActionNote('');
       await loadFraudData();
     } catch (error) {
       console.error('Action failed:', error);
@@ -73,10 +77,11 @@ export function AdminFraudPage() {
   const confirmAndExecute = async () => {
     if (pendingAction && pendingFlagId !== null) {
       setConfirmModalOpen(false);
-      await handleAction(pendingFlagId, pendingAction);
+      await handleAction(pendingFlagId, pendingAction, actionNote);
       setPendingAction(null);
       setPendingFlagId(null);
       setPendingUsername('');
+      setActionNote('');
     }
   };
 
@@ -85,7 +90,14 @@ export function AdminFraudPage() {
     setPendingAction(null);
     setPendingFlagId(null);
     setPendingUsername('');
+    setActionNote('');
   };
+
+  useEffect(() => {
+    if (selectedFlag) {
+      setActionNote('');
+    }
+  }, [selectedFlag?.id]);
 
   // Filter flags based on search and severity
   const filteredFlags = overview?.recent_flags.filter((flag) => {
@@ -739,8 +751,30 @@ export function AdminFraudPage() {
                   paddingTop: '8px',
                   borderTop: '2px solid #1C1F2E'
                 }}>
+                  <div style={{ width: '100%' }}>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#7B82A0', fontWeight: 600, marginBottom: '6px' }}>
+                      Admin Note (optional)
+                    </label>
+                    <textarea
+                      value={actionNote}
+                      onChange={(event) => setActionNote(event.target.value.slice(0, 500))}
+                      placeholder="Write a message the user will see in their Moderation Update card..."
+                      rows={3}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        background: '#0C1117',
+                        border: '1px solid #21263A',
+                        borderRadius: '8px',
+                        color: '#F0F2F8',
+                        fontSize: '13px',
+                        resize: 'vertical'
+                      }}
+                    />
+                    <p style={{ fontSize: '11px', color: '#7B82A0', marginTop: '6px' }}>{actionNote.length}/500</p>
+                  </div>
                   <button
-                    onClick={() => handleAction(selectedFlag.id, 'dismiss')}
+                    onClick={() => handleAction(selectedFlag.id, 'dismiss', actionNote)}
                     disabled={actionInProgress}
                     style={{
                       flex: '1',
@@ -766,7 +800,7 @@ export function AdminFraudPage() {
                     <Check size={16} /> Dismiss
                   </button>
                   <button
-                    onClick={() => handleAction(selectedFlag.id, 'warn')}
+                    onClick={() => handleAction(selectedFlag.id, 'warn', actionNote)}
                     disabled={actionInProgress}
                     style={{
                       flex: '1',
@@ -788,7 +822,7 @@ export function AdminFraudPage() {
                     Warn
                   </button>
                   <button
-                    onClick={() => handleAction(selectedFlag.id, 'restrict')}
+                    onClick={() => handleAction(selectedFlag.id, 'restrict', actionNote)}
                     disabled={actionInProgress}
                     style={{
                       flex: '1',
@@ -810,7 +844,7 @@ export function AdminFraudPage() {
                     Restrict
                   </button>
                   <button
-                    onClick={() => handleAction(selectedFlag.id, 'suspend')}
+                    onClick={() => handleAction(selectedFlag.id, 'suspend', actionNote)}
                     disabled={actionInProgress}
                     style={{
                       flex: '1',
@@ -832,7 +866,7 @@ export function AdminFraudPage() {
                     Suspend
                   </button>
                   <button
-                    onClick={() => handleAction(selectedFlag.id, 'ban')}
+                    onClick={() => handleAction(selectedFlag.id, 'ban', actionNote)}
                     disabled={actionInProgress}
                     style={{
                       flex: '1',
@@ -915,6 +949,29 @@ export function AdminFraudPage() {
                   This will restore their trust score to 65 and remove step reduction penalties.
                 </p>
               )}
+
+              <div style={{ marginTop: '14px' }}>
+                <label style={{ display: 'block', fontSize: '12px', color: '#7B82A0', fontWeight: 600, marginBottom: '6px' }}>
+                  Admin Note (optional)
+                </label>
+                <textarea
+                  value={actionNote}
+                  onChange={(event) => setActionNote(event.target.value.slice(0, 500))}
+                  placeholder="Optional note shown to the user in their moderation update"
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    background: '#0C1117',
+                    border: '1px solid #21263A',
+                    borderRadius: '8px',
+                    color: '#F0F2F8',
+                    fontSize: '13px',
+                    resize: 'vertical'
+                  }}
+                />
+                <p style={{ fontSize: '11px', color: '#7B82A0', marginTop: '6px' }}>{actionNote.length}/500</p>
+              </div>
 
               <div style={{ 
                 display: 'flex',

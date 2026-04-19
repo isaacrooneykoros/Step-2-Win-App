@@ -2120,12 +2120,16 @@ def action_flag(request, flag_id):
     from apps.steps.models import FraudFlag, TrustScore
 
     action = request.data.get('action')
+    admin_note = str(request.data.get('admin_note') or '').strip()
+
     valid_actions = {
         'dismiss', 'warn', 'restrict', 'suspend', 'ban',
         'unrestrict', 'unsuspend', 'unban'
     }
     if action not in valid_actions:
         return Response({'error': 'Invalid action'}, status=400)
+    if len(admin_note) > 500:
+        return Response({'error': 'admin_note must be 500 characters or fewer'}, status=400)
 
     flag = get_object_or_404(FraudFlag, id=flag_id)
     flag.reviewed = True
@@ -2135,6 +2139,10 @@ def action_flag(request, flag_id):
         'admin_action': action,
         'reviewed_at': timezone.now().isoformat(),
     })
+    if admin_note:
+        details['admin_note'] = admin_note
+    else:
+        details.pop('admin_note', None)
     flag.details = details
     flag.save(update_fields=['reviewed', 'actioned', 'details'])
 

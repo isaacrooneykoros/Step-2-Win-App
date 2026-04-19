@@ -453,10 +453,12 @@ export const adminApi = {
       | 'unrestrict'
       | 'unsuspend'
       | 'unban'
+    ,
+    adminNote?: string
   ) =>
     request<{ status: string; flag_id: number; action: string }>(`/api/admin/fraud/${flagId}/action/`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, admin_note: adminNote || undefined }),
     }),
 
   // Support System

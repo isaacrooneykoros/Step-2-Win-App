@@ -28,6 +28,9 @@ export interface User {
   member_since: string;
   trust_score?: number;
   trust_status?: 'GOOD' | 'WARN' | 'REVIEW' | 'RESTRICT' | 'SUSPEND' | 'BAN';
+  moderation_last_action?: 'dismiss' | 'warn' | 'restrict' | 'suspend' | 'ban' | 'unrestrict' | 'unsuspend' | 'unban' | null;
+  moderation_reviewed_at?: string | null;
+  moderation_message?: string;
   profile_picture?: string | null;
   profile_picture_url?: string | null;
   created_at: string;

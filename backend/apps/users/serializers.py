@@ -82,6 +82,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
     player_rank = serializers.SerializerMethodField()
     member_since = serializers.SerializerMethodField()
     profile_picture_url = serializers.SerializerMethodField()
+    moderation_last_action = serializers.SerializerMethodField()
+    moderation_reviewed_at = serializers.SerializerMethodField()
+    moderation_message = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -93,7 +96,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'daily_goal', 'stride_length_cm', 'weight_kg',
             'calibration_quality', 'calibration_variance_pct', 'last_calibrated_at',
             'win_rate', 'avg_payout_kes', 'player_rank', 'member_since',
-            'trust_score', 'trust_status', 'profile_picture', 'profile_picture_url', 'created_at'
+            'trust_score', 'trust_status',
+            'moderation_last_action', 'moderation_reviewed_at', 'moderation_message',
+            'profile_picture', 'profile_picture_url', 'created_at'
         ]
         read_only_fields = [
             'wallet_balance', 'locked_balance', 'total_steps', 
@@ -151,6 +156,61 @@ class UserProfileSerializer(serializers.ModelSerializer):
             request = self.context.get('request') if hasattr(self, 'context') else None
             return build_absolute_media_url(obj.profile_picture.url, request=request)
         return None
+
+    def _latest_moderation_flag(self, obj):
+        cached = getattr(obj, '_latest_moderation_flag_cache', None)
+        if cached is not None:
+            return cached
+
+        from apps.steps.models import FraudFlag
+
+        latest = (
+            FraudFlag.objects
+            .filter(user=obj, reviewed=True)
+            .order_by('-created_at')
+            .first()
+        )
+        setattr(obj, '_latest_moderation_flag_cache', latest)
+        return latest
+
+    def get_moderation_last_action(self, obj) -> str | None:
+        flag = self._latest_moderation_flag(obj)
+        if not flag:
+            return None
+        details = flag.details if isinstance(flag.details, dict) else {}
+        action = details.get('admin_action')
+        return str(action) if action else None
+
+    def get_moderation_reviewed_at(self, obj) -> str | None:
+        flag = self._latest_moderation_flag(obj)
+        if not flag:
+            return None
+        details = flag.details if isinstance(flag.details, dict) else {}
+        reviewed_at = details.get('reviewed_at')
+        return str(reviewed_at) if reviewed_at else None
+
+    def get_moderation_message(self, obj) -> str:
+        flag = self._latest_moderation_flag(obj)
+        if not flag:
+            return ''
+
+        details = flag.details if isinstance(flag.details, dict) else {}
+        action = str(details.get('admin_action') or '').strip().lower()
+        custom_note = str(details.get('admin_note') or '').strip()
+        if custom_note:
+            return custom_note
+
+        defaults = {
+            'dismiss': 'Your flagged step activity was reviewed and no penalty was applied.',
+            'warn': 'Your flagged step activity was reviewed and a warning was issued.',
+            'restrict': 'Your flagged step activity was reviewed and your account is now restricted.',
+            'suspend': 'Your flagged step activity was reviewed and your account is suspended from challenges.',
+            'ban': 'Your flagged step activity was reviewed and your account has been banned.',
+            'unrestrict': 'Your account restriction has been removed after review.',
+            'unsuspend': 'Your suspension has been lifted after review.',
+            'unban': 'Your account ban has been lifted after review.',
+        }
+        return defaults.get(action, 'Your flagged step activity has been reviewed by the admin team.')
 
 
 class ChangePasswordSerializer(serializers.Serializer):
