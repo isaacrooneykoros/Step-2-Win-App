@@ -398,6 +398,36 @@ export const adminApi = {
     const query = searchParams.toString();
     return request(`/api/admin/audit-logs/${query ? `?${query}` : ''}`);
   },
+
+  // Steps Logs
+  getStepsLogs: async (params?: {
+    search?: string;
+    from_date?: string;
+    to_date?: string;
+    suspicious?: 'true' | 'false';
+    order?: 'asc' | 'desc';
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          searchParams.append(key, String(value));
+        }
+      });
+    }
+    const query = searchParams.toString();
+    return request(`/api/admin/steps/logs/${query ? `?${query}` : ''}`);
+  },
+  getStepsHourlyBreakdown: async (params: { user_id: number; date?: string }) => {
+    const searchParams = new URLSearchParams();
+    searchParams.append('user_id', String(params.user_id));
+    if (params.date) {
+      searchParams.append('date', params.date);
+    }
+    return request(`/api/admin/steps/hourly/?${searchParams.toString()}`);
+  },
   
   // Advanced Reports
   getRevenueReport: async (days: number = 30) => 

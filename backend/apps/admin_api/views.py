@@ -9,7 +9,7 @@ from rest_framework import serializers
 from django.conf import settings
 from django.utils import timezone
 from django.db import transaction as db_transaction
-from django.db.models import Sum
+from django.db.models import Sum, Count, Min, Max, Q
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.shortcuts import get_object_or_404
@@ -26,7 +26,7 @@ from apps.users.models import UserXP
 from apps.challenges.models import Challenge, Participant
 from apps.wallet.models import WalletTransaction, Withdrawal
 from apps.gamification.models import Badge, UserBadge, XPEvent
-from apps.steps.models import HealthRecord
+from apps.steps.models import HealthRecord, HourlyStepRecord
 from apps.payments.models import WithdrawalRequest
 from apps.payments import intasend
 from apps.payments.services import (
@@ -1319,6 +1319,166 @@ def get_audit_logs(request):
     return Response({
         'total': total,
         'results': serializer.data,
+    })
+
+
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+def get_steps_logs(request):
+    """Get historical step logs for all users with pagination and filters."""
+
+    logs = HealthRecord.objects.select_related('user').all()
+
+    search = request.query_params.get('search', '').strip()
+    if search:
+        logs = logs.filter(
+            Q(user__username__icontains=search)
+            | Q(user__email__icontains=search)
+        )
+
+    from_date = request.query_params.get('from_date')
+    if from_date:
+        logs = logs.filter(date__gte=from_date)
+
+    to_date = request.query_params.get('to_date')
+    if to_date:
+        logs = logs.filter(date__lte=to_date)
+
+    suspicious = request.query_params.get('suspicious')
+    if suspicious in {'true', 'false'}:
+        logs = logs.filter(is_suspicious=(suspicious == 'true'))
+
+    order = request.query_params.get('order', 'asc').lower()
+    if order == 'desc':
+        logs = logs.order_by('-date', '-synced_at', '-id')
+    else:
+        logs = logs.order_by('date', 'synced_at', 'id')
+
+    try:
+        limit = max(1, min(500, int(request.query_params.get('limit', 100))))
+        offset = max(0, int(request.query_params.get('offset', 0)))
+    except ValueError:
+        return Response({'error': 'Invalid pagination parameters'}, status=status.HTTP_400_BAD_REQUEST)
+
+    total = logs.count()
+    aggregate = logs.aggregate(
+        total_steps=Sum('steps'),
+        users_with_logs=Count('user_id', distinct=True),
+        first_log_at=Min('date'),
+        last_log_at=Max('date'),
+    )
+
+    paged_logs = logs[offset:offset + limit]
+    results = []
+    for row in paged_logs:
+        results.append({
+            'id': row.id,
+            'user_id': row.user_id,
+            'username': row.user.username,
+            'email': row.user.email,
+            'date': row.date,
+            'synced_at': row.synced_at,
+            'source': row.source,
+            'steps': row.steps,
+            'distance_km': row.distance_km,
+            'calories_active': row.calories_active,
+            'active_minutes': row.active_minutes,
+            'is_suspicious': row.is_suspicious,
+        })
+
+    return Response({
+        'total': total,
+        'results': results,
+        'summary': {
+            'total_steps': int(aggregate.get('total_steps') or 0),
+            'users_with_logs': int(aggregate.get('users_with_logs') or 0),
+            'first_log_at': aggregate.get('first_log_at'),
+            'last_log_at': aggregate.get('last_log_at'),
+        },
+    })
+
+
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+def get_steps_hourly_breakdown(request):
+    """Get server-side hourly steps breakdown for a user/day."""
+
+    user_id = request.query_params.get('user_id')
+    if not user_id:
+        return Response({'error': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        return Response({'error': 'user_id must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+    date = request.query_params.get('date')
+    if date:
+        target_date = date
+    else:
+        latest = HourlyStepRecord.objects.filter(user_id=user_id_int).order_by('-date').first()
+        if not latest:
+            return Response({
+                'user_id': user_id_int,
+                'date': None,
+                'hours': [],
+                'summary': {
+                    'total_steps': 0,
+                    'total_distance_km': 0.0,
+                    'total_calories': 0.0,
+                },
+            })
+        target_date = latest.date
+
+    hourly_qs = (
+        HourlyStepRecord.objects
+        .filter(user_id=user_id_int, date=target_date)
+        .values('hour')
+        .annotate(
+            steps=Sum('steps'),
+            distance_km=Sum('distance_km'),
+            calories=Sum('calories'),
+        )
+        .order_by('hour')
+    )
+
+    by_hour = {
+        int(item['hour']): {
+            'steps': int(item['steps'] or 0),
+            'distance_km': float(item['distance_km'] or 0.0),
+            'calories': float(item['calories'] or 0.0),
+        }
+        for item in hourly_qs
+    }
+
+    hours = []
+    total_steps = 0
+    total_distance = 0.0
+    total_calories = 0.0
+    for hour in range(24):
+        data = by_hour.get(hour, {'steps': 0, 'distance_km': 0.0, 'calories': 0.0})
+        total_steps += data['steps']
+        total_distance += data['distance_km']
+        total_calories += data['calories']
+        hours.append({
+            'hour': hour,
+            'label': f'{hour:02d}:00',
+            'steps': data['steps'],
+            'distance_km': round(data['distance_km'], 3),
+            'calories': round(data['calories'], 2),
+        })
+
+    return Response({
+        'user_id': user_id_int,
+        'date': target_date,
+        'hours': hours,
+        'summary': {
+            'total_steps': total_steps,
+            'total_distance_km': round(total_distance, 3),
+            'total_calories': round(total_calories, 2),
+        },
     })
 
 

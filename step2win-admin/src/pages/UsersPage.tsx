@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import {
   Users, UserCheck, UserX,
   Edit2, Ban, Trash2, Eye, RotateCcw,
@@ -112,6 +113,7 @@ export function UsersPage() {
   const qc = useQueryClient()
   const accessToken = useAuthStore((state) => state.accessToken)
   const wsRef = useRef<WebSocket | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   // ── Table state ──────────────────────────────────────────────────────
   const [search,   setSearch]   = useState('')
@@ -317,6 +319,25 @@ export function UsersPage() {
       wsRef.current = null
     }
   }, [accessToken, qc])
+
+  useEffect(() => {
+    const openUserId = Number(searchParams.get('openUserId'))
+    if (!Number.isFinite(openUserId) || openUserId <= 0) {
+      return
+    }
+
+    const target = data?.results?.find((user) => user.id === openUserId)
+    if (!target) {
+      return
+    }
+
+    openDrawer(target)
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.delete('openUserId')
+      return next
+    }, { replace: true })
+  }, [data?.results, searchParams, setSearchParams])
 
   // ── Table columns ────────────────────────────────────────────────────
   const columns = [

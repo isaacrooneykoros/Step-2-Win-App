@@ -19,6 +19,7 @@ const NAV_GROUPS = [
     label: 'MANAGEMENT',
     items: [
       { to: '/users',        icon: Users,             label: 'Users'          },
+      { to: '/steps',        icon: Footprints,        label: 'Steps Logs'     },
       { to: '/challenges',   icon: Trophy,            label: 'Challenges'     },
       { to: '/transactions', icon: ArrowLeftRight,    label: 'Transactions'   },
       { to: '/withdrawals',  icon: Banknote,          label: 'Withdrawals', badgeKey: 'pendingWithdrawals' },

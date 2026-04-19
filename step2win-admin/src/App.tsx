@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AdminLayout } from './components/AdminLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { UsersPage } from './pages/UsersPage';
+import { StepsPage } from './pages/StepsPage';
 import { ChallengesPage } from './pages/ChallengesPage';
 import { TransactionsPage } from './pages/TransactionsPage';
 import { AdminWithdrawalsPage } from './pages/AdminWithdrawalsPage';
@@ -41,6 +42,7 @@ function App() {
           <Route index element={<DashboardPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="users" element={<UsersPage />} />
+          <Route path="steps" element={<StepsPage />} />
           <Route path="challenges" element={<ChallengesPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
