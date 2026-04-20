@@ -172,3 +172,88 @@ class LocationWaypoint(models.Model):
 
     def __str__(self):
         return f"{self.user.username} | {self.recorded_at} | ({self.latitude:.4f}, {self.longitude:.4f})"
+
+
+class IntervalVerificationResult(models.Model):
+    """Stores anti-cheat v2 decision output for one normalized interval."""
+
+    MODE_CHOICES = [
+        ('active', 'Active'),
+        ('shadow', 'Shadow'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='interval_verification_results',
+    )
+    date = models.DateField(db_index=True)
+    interval_start = models.DateTimeField()
+    interval_end = models.DateTimeField()
+    source_platform = models.CharField(max_length=40, blank=True)
+    source_device = models.CharField(max_length=80, blank=True)
+    source_app = models.CharField(max_length=80, blank=True)
+    raw_steps = models.IntegerField(default=0)
+    normalized_steps = models.IntegerField(default=0)
+    verified_steps = models.IntegerField(default=0)
+    risk_score = models.FloatField(default=0.0)
+    confidence_score = models.FloatField(default=0.0)
+    verification_status = models.CharField(max_length=20, default='accept')
+    review_state = models.CharField(max_length=20, default='none')
+    payout_state = models.CharField(max_length=20, default='eligible')
+    rule_hits_json = models.JSONField(default=list)
+    explainability_json = models.JSONField(default=dict)
+    trust_score_before = models.IntegerField(default=100)
+    trust_score_after = models.IntegerField(default=100)
+    mode = models.CharField(max_length=12, choices=MODE_CHOICES, default='active')
+    verification_version = models.CharField(max_length=32, default='v2')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'date', 'mode'], name='steps_int_usr_mode_idx'),
+            models.Index(fields=['review_state', 'payout_state', '-created_at'], name='steps_int_rev_pay_idx'),
+            models.Index(fields=['verification_status', '-created_at'], name='steps_int_status_idx'),
+        ]
+        ordering = ['-created_at']
+
+
+class DailyVerificationSummary(models.Model):
+    """Stores anti-cheat v2 daily aggregate decision per user/date/mode."""
+
+    MODE_CHOICES = [
+        ('active', 'Active'),
+        ('shadow', 'Shadow'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='daily_verification_summaries',
+    )
+    date = models.DateField(db_index=True)
+    raw_steps_total = models.IntegerField(default=0)
+    verified_steps_total = models.IntegerField(default=0)
+    suspicious_steps_total = models.IntegerField(default=0)
+    interval_count = models.IntegerField(default=0)
+    accepted_count = models.IntegerField(default=0)
+    review_count = models.IntegerField(default=0)
+    rejected_count = models.IntegerField(default=0)
+    risk_score = models.FloatField(default=0.0)
+    review_state = models.CharField(max_length=20, default='none')
+    payout_state = models.CharField(max_length=20, default='eligible')
+    trust_score_before = models.IntegerField(default=100)
+    trust_score_after = models.IntegerField(default=100)
+    mode = models.CharField(max_length=12, choices=MODE_CHOICES, default='active')
+    verification_version = models.CharField(max_length=32, default='v2')
+    audit_snapshot = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('user', 'date', 'mode')]
+        indexes = [
+            models.Index(fields=['user', 'date', 'mode'], name='steps_day_usr_mode_idx'),
+            models.Index(fields=['review_state', 'payout_state', '-updated_at'], name='steps_day_rev_pay_idx'),
+        ]
+        ordering = ['-date', '-updated_at']

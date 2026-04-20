@@ -17,11 +17,26 @@ from drf_spectacular.utils import extend_schema, inline_serializer
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
-from .anti_cheat import DAILY_STEP_CAP, run_anti_cheat
+from .anti_cheat import (
+    DAILY_STEP_CAP,
+    VerificationConfig,
+    decision_to_check_result,
+    evaluate_daily_submission,
+    run_anti_cheat,
+)
 from .daily_reset import update_streak
 from apps.core.throttles import DashboardReadRateThrottle
 from apps.admin_api.realtime import broadcast_admin_steps_update
-from .models import FraudFlag, HealthRecord, SuspiciousActivity, TrustScore, HourlyStepRecord, LocationWaypoint
+from .models import (
+    DailyVerificationSummary,
+    FraudFlag,
+    HealthRecord,
+    HourlyStepRecord,
+    IntervalVerificationResult,
+    LocationWaypoint,
+    SuspiciousActivity,
+    TrustScore,
+)
 from .serializers import HealthRecordSerializer, HealthSyncSerializer, HourlyStepSerializer, LocationWaypointSerializer
 
 logger = logging.getLogger(__name__)
@@ -79,6 +94,73 @@ def _acquire_periodic_lock(lock_key: str, ttl_seconds: int) -> bool:
         return _redis.set(lock_key, '1', nx=True, ex=ttl_seconds) is not None
     except Exception:
         return cache.add(lock_key, '1', timeout=ttl_seconds)
+
+
+def _persist_verification_artifacts(*, user, day, decision, mode: str, version: str, trust_before: int, trust_after: int) -> None:
+    """Persist interval and daily anti-cheat v2 decisions for audit/ops."""
+    try:
+        DailyVerificationSummary.objects.update_or_create(
+            user=user,
+            date=day,
+            mode=mode,
+            defaults={
+                'raw_steps_total': decision.raw_steps_total,
+                'verified_steps_total': decision.verified_steps_total,
+                'suspicious_steps_total': decision.suspicious_steps_total,
+                'interval_count': decision.interval_count,
+                'accepted_count': decision.accepted_count,
+                'review_count': decision.review_count,
+                'rejected_count': decision.rejected_count,
+                'risk_score': decision.risk_score,
+                'review_state': decision.review_state.value,
+                'payout_state': decision.payout_state.value,
+                'trust_score_before': trust_before,
+                'trust_score_after': trust_after,
+                'verification_version': version,
+                'audit_snapshot': decision.audit_snapshot,
+            },
+        )
+
+        IntervalVerificationResult.objects.filter(user=user, date=day, mode=mode).delete()
+        IntervalVerificationResult.objects.bulk_create([
+            IntervalVerificationResult(
+                user=user,
+                date=day,
+                interval_start=d.interval.interval_start,
+                interval_end=d.interval.interval_end,
+                source_platform=d.interval.source_platform,
+                source_device=d.interval.source_device or '',
+                source_app=d.interval.source_app or '',
+                raw_steps=d.interval.raw_steps,
+                normalized_steps=d.interval.normalized_steps,
+                verified_steps=d.verified_steps,
+                risk_score=d.risk_score,
+                confidence_score=d.confidence_score,
+                verification_status=d.status.value,
+                review_state=d.review_state.value,
+                payout_state=d.payout_state.value,
+                rule_hits_json=[
+                    {
+                        'rule_code': hit.rule_code,
+                        'severity': hit.severity.value,
+                        'risk_level': hit.risk_level.value,
+                        'rule_score': hit.rule_score,
+                        'weight': hit.weight,
+                        'message': hit.message,
+                        'evidence': hit.evidence,
+                    }
+                    for hit in d.rule_hits
+                ],
+                explainability_json=d.explainability,
+                trust_score_before=trust_before,
+                trust_score_after=trust_after,
+                mode=mode,
+                verification_version=version,
+            )
+            for d in decision.interval_decisions
+        ])
+    except Exception as exc:
+        logger.warning('Failed to persist anti-cheat v2 artifacts: %s', exc)
 
 
 def _haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -290,17 +372,61 @@ def sync_health(request):
     if trust.status == 'SUSPEND':
         return Response({'error': 'Challenge participation paused.'}, status=403)
 
-    result = run_anti_cheat(
-        user=user,
-        steps=submitted_steps,
-        date=date,
-        distance_km=data.get('distance_km'),
-        calories=data.get('calories_active'),
-        active_minutes=data.get('active_minutes'),
-        cadence_spm=data.get('cadence_spm'),
-        burst_steps_5s=data.get('burst_steps_5s'),
-        submitted_at=now,
-    )
+    anti_v2_enabled = bool(getattr(settings, 'STEP_ANTICHEAT_V2_ENABLED', False))
+    anti_v2_shadow = bool(getattr(settings, 'STEP_ANTICHEAT_V2_SHADOW_MODE', True))
+    anti_v2_version = str(getattr(settings, 'STEP_ANTICHEAT_V2_VERSION', 'v2'))
+    anti_cfg = VerificationConfig.from_settings(settings)
+
+    trust_score_before = trust.score
+    v2_payload = {
+        'steps': submitted_steps,
+        'distance_km': data.get('distance_km'),
+        'calories_active': data.get('calories_active'),
+        'active_minutes': data.get('active_minutes'),
+        'cadence_spm': data.get('cadence_spm'),
+        'burst_steps_5s': data.get('burst_steps_5s'),
+    }
+    v2_decision = None
+
+    if anti_v2_enabled:
+        v2_decision = evaluate_daily_submission(
+            user=user,
+            payload=v2_payload,
+            day=date,
+            submitted_at=now,
+            trust_score=trust.score,
+            trust_status=trust.status,
+            source_platform=data.get('source', 'device_sensor'),
+            source_device=user.device_platform,
+            source_app='steps.sync_health',
+            config=anti_cfg,
+        )
+        result = decision_to_check_result(v2_decision)
+    else:
+        result = run_anti_cheat(
+            user=user,
+            steps=submitted_steps,
+            date=date,
+            distance_km=data.get('distance_km'),
+            calories=data.get('calories_active'),
+            active_minutes=data.get('active_minutes'),
+            cadence_spm=data.get('cadence_spm'),
+            burst_steps_5s=data.get('burst_steps_5s'),
+            submitted_at=now,
+        )
+        if anti_v2_shadow:
+            v2_decision = evaluate_daily_submission(
+                user=user,
+                payload=v2_payload,
+                day=date,
+                submitted_at=now,
+                trust_score=trust.score,
+                trust_status=trust.status,
+                source_platform=data.get('source', 'device_sensor'),
+                source_device=user.device_platform,
+                source_app='steps.sync_health',
+                config=anti_cfg,
+            )
 
     if result.should_block:
         for flag in result.flags:
@@ -328,7 +454,7 @@ def sync_health(request):
         trust.recover(1)
 
     approved_steps = result.approved_steps
-    if trust.status == 'RESTRICT':
+    if trust.status == 'RESTRICT' and not anti_v2_enabled:
         approved_steps = int(approved_steps * 0.5)
 
     legacy_is_suspicious = False
@@ -376,6 +502,17 @@ def sync_health(request):
     if record.steps > request.user.best_day_steps:
         request.user.__class__.objects.filter(id=request.user.id).update(
             best_day_steps=record.steps
+        )
+
+    if v2_decision is not None:
+        _persist_verification_artifacts(
+            user=user,
+            day=date,
+            decision=v2_decision,
+            mode='active' if anti_v2_enabled else 'shadow',
+            version=anti_v2_version,
+            trust_before=trust_score_before,
+            trust_after=trust.score,
         )
 
     # Keep streak counters fresh whenever step sync updates a daily record.

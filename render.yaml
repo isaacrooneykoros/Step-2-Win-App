@@ -115,6 +115,12 @@ services:
         value: "0"
       - key: RECON_MAX_CALLBACK_FAILURE_RATE_PCT
         value: "5.0"
+      - key: STEP_ANTICHEAT_V2_ENABLED
+        value: "False"
+      - key: STEP_ANTICHEAT_V2_SHADOW_MODE
+        value: "True"
+      - key: STEP_ANTICHEAT_V2_VERSION
+        value: "v2"
 
   # ── Celery worker (requires paid Starter plan ~$7/mo on Render) ───────────
   # Background task processing: fraud scan, challenge finalization, etc.
