@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Sum
+from decimal import Decimal
 from apps.challenges.models import Challenge
 from apps.wallet.models import WalletTransaction, Withdrawal
 from apps.gamification.models import Badge, UserBadge
@@ -106,6 +108,8 @@ class AdminUserSerializer(serializers.ModelSerializer):
     """
     xp_profile = serializers.SerializerMethodField()
     badges_count = serializers.SerializerMethodField()
+    is_banned = serializers.SerializerMethodField()
+    total_deposited = serializers.SerializerMethodField()
     
     class Meta:
         model = User
@@ -118,11 +122,16 @@ class AdminUserSerializer(serializers.ModelSerializer):
             'locked_balance',
             'total_steps',
             'challenges_won',
+            'challenges_joined',
             'total_earned',
             'current_streak',
             'is_active',
             'is_staff',
+            'is_banned',
             'device_platform',
+            'date_joined',
+            'last_login',
+            'total_deposited',
             'xp_profile',
             'badges_count',
             'created_at',
@@ -134,11 +143,26 @@ class AdminUserSerializer(serializers.ModelSerializer):
             'locked_balance',
             'total_steps',
             'challenges_won',
+            'challenges_joined',
             'total_earned',
             'current_streak',
+            'is_banned',
+            'date_joined',
+            'last_login',
+            'total_deposited',
             'created_at',
             'updated_at',
         ]
+
+    def get_is_banned(self, obj) -> bool:
+        return not obj.is_active
+
+    def get_total_deposited(self, obj) -> Decimal:
+        total = WalletTransaction.objects.filter(
+            user=obj,
+            type='deposit',
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        return total
 
     def get_xp_profile(self, obj) -> dict | None:
         """Get user's XP profile"""
