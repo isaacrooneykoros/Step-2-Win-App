@@ -40,6 +40,10 @@ from apps.core.throttles import AdminLoginRateThrottle
 from apps.core.url_utils import build_absolute_media_url
 from apps.core.locks import acquire_lock, release_lock
 from apps.payments.reconciliation import run_financial_reconciliation
+from apps.steps.drift_monitor import (
+    AntiCheatDriftThresholds,
+    run_anticheat_shadow_drift_monitor,
+)
 
 from apps.admin_api.serializers import (
     AdminProfileSerializer,
@@ -2419,5 +2423,26 @@ def ops_monitoring_dashboard(request):
     Aggregated operational monitoring metrics for admin dashboards.
     Includes fraud load, withdrawal queue age, callback failures, and duplicate-request rejections.
     """
-    result = run_financial_reconciliation(send_alerts=False)
-    return Response(result)
+    financial = run_financial_reconciliation(send_alerts=False)
+    drift = run_anticheat_shadow_drift_monitor(
+        thresholds=AntiCheatDriftThresholds(
+            lookback_hours=int(getattr(settings, 'ANTICHEAT_DRIFT_LOOKBACK_HOURS', 24)),
+            min_samples=int(getattr(settings, 'ANTICHEAT_DRIFT_MIN_SAMPLES', 50)),
+            per_sample_alert_pct=float(getattr(settings, 'ANTICHEAT_DRIFT_PER_SAMPLE_ALERT_PCT', 35.0)),
+            max_avg_abs_delta_pct=float(getattr(settings, 'ANTICHEAT_DRIFT_MAX_AVG_ABS_DELTA_PCT', 20.0)),
+            max_high_drift_ratio_pct=float(getattr(settings, 'ANTICHEAT_DRIFT_MAX_HIGH_DRIFT_RATIO_PCT', 25.0)),
+            max_review_mismatch_ratio_pct=float(getattr(settings, 'ANTICHEAT_DRIFT_MAX_REVIEW_MISMATCH_RATIO_PCT', 10.0)),
+        ),
+        send_alerts=False,
+    )
+
+    merged = {
+        **financial,
+        'anti_cheat_drift': drift,
+    }
+    if not drift['ok']:
+        merged['breaches'] = merged.get('breaches', []) + [
+            f'anticheat_drift:{breach}' for breach in drift.get('breaches', [])
+        ]
+    merged['ok'] = bool(financial.get('ok')) and bool(drift.get('ok'))
+    return Response(merged)

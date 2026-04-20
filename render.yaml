@@ -121,6 +121,18 @@ services:
         value: "True"
       - key: STEP_ANTICHEAT_V2_VERSION
         value: "v2"
+      - key: ANTICHEAT_DRIFT_LOOKBACK_HOURS
+        value: "24"
+      - key: ANTICHEAT_DRIFT_MIN_SAMPLES
+        value: "50"
+      - key: ANTICHEAT_DRIFT_PER_SAMPLE_ALERT_PCT
+        value: "35.0"
+      - key: ANTICHEAT_DRIFT_MAX_AVG_ABS_DELTA_PCT
+        value: "20.0"
+      - key: ANTICHEAT_DRIFT_MAX_HIGH_DRIFT_RATIO_PCT
+        value: "25.0"
+      - key: ANTICHEAT_DRIFT_MAX_REVIEW_MISMATCH_RATIO_PCT
+        value: "10.0"
 
   # ── Celery worker (requires paid Starter plan ~$7/mo on Render) ───────────
   # Background task processing: fraud scan, challenge finalization, etc.
@@ -212,6 +224,36 @@ services:
         sync: false
       - key: OPS_ALERT_WEBHOOK_URL
         sync: false
+      - key: ANTICHEAT_DRIFT_LOOKBACK_HOURS
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_LOOKBACK_HOURS
+      - key: ANTICHEAT_DRIFT_MIN_SAMPLES
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_MIN_SAMPLES
+      - key: ANTICHEAT_DRIFT_PER_SAMPLE_ALERT_PCT
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_PER_SAMPLE_ALERT_PCT
+      - key: ANTICHEAT_DRIFT_MAX_AVG_ABS_DELTA_PCT
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_MAX_AVG_ABS_DELTA_PCT
+      - key: ANTICHEAT_DRIFT_MAX_HIGH_DRIFT_RATIO_PCT
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_MAX_HIGH_DRIFT_RATIO_PCT
+      - key: ANTICHEAT_DRIFT_MAX_REVIEW_MISMATCH_RATIO_PCT
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_MAX_REVIEW_MISMATCH_RATIO_PCT
 
   # ── Celery beat scheduler(requires paid Starter plan ~$7/mo on Render) ───
   - type: worker
@@ -296,3 +338,33 @@ services:
         sync: false
       - key: OPS_ALERT_WEBHOOK_URL
         sync: false
+      - key: ANTICHEAT_DRIFT_LOOKBACK_HOURS
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_LOOKBACK_HOURS
+      - key: ANTICHEAT_DRIFT_MIN_SAMPLES
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_MIN_SAMPLES
+      - key: ANTICHEAT_DRIFT_PER_SAMPLE_ALERT_PCT
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_PER_SAMPLE_ALERT_PCT
+      - key: ANTICHEAT_DRIFT_MAX_AVG_ABS_DELTA_PCT
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_MAX_AVG_ABS_DELTA_PCT
+      - key: ANTICHEAT_DRIFT_MAX_HIGH_DRIFT_RATIO_PCT
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_MAX_HIGH_DRIFT_RATIO_PCT
+      - key: ANTICHEAT_DRIFT_MAX_REVIEW_MISMATCH_RATIO_PCT
+        fromService:
+          name: step2win-backend
+          type: web
+          envVarKey: ANTICHEAT_DRIFT_MAX_REVIEW_MISMATCH_RATIO_PCT

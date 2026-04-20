@@ -374,6 +374,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.payments.tasks.reconcile_financial_integrity_task',
         'schedule': crontab(minute='*/10'),  # every 10 minutes
     },
+    'monitor-anticheat-shadow-drift': {
+        'task': 'apps.steps.tasks.monitor_anticheat_shadow_drift_task',
+        'schedule': crontab(minute='*/30'),  # every 30 minutes
+    },
     'cleanup-inactive-sessions': {
         'task': 'apps.users.tasks.cleanup_inactive_sessions',
         'schedule': crontab(hour=3, minute=0),  # 3AM every night
@@ -535,6 +539,14 @@ RECON_MAX_STUCK_PROCESSING = int(os.getenv('RECON_MAX_STUCK_PROCESSING', '10'))
 RECON_MAX_UNPROCESSED_CALLBACKS = int(os.getenv('RECON_MAX_UNPROCESSED_CALLBACKS', '5'))
 RECON_MAX_NEGATIVE_BALANCE_USERS = int(os.getenv('RECON_MAX_NEGATIVE_BALANCE_USERS', '0'))
 RECON_MAX_CALLBACK_FAILURE_RATE_PCT = float(os.getenv('RECON_MAX_CALLBACK_FAILURE_RATE_PCT', '5.0'))
+
+# Anti-cheat shadow drift monitoring thresholds
+ANTICHEAT_DRIFT_LOOKBACK_HOURS = int(os.getenv('ANTICHEAT_DRIFT_LOOKBACK_HOURS', '24'))
+ANTICHEAT_DRIFT_MIN_SAMPLES = int(os.getenv('ANTICHEAT_DRIFT_MIN_SAMPLES', '50'))
+ANTICHEAT_DRIFT_PER_SAMPLE_ALERT_PCT = float(os.getenv('ANTICHEAT_DRIFT_PER_SAMPLE_ALERT_PCT', '35.0'))
+ANTICHEAT_DRIFT_MAX_AVG_ABS_DELTA_PCT = float(os.getenv('ANTICHEAT_DRIFT_MAX_AVG_ABS_DELTA_PCT', '20.0'))
+ANTICHEAT_DRIFT_MAX_HIGH_DRIFT_RATIO_PCT = float(os.getenv('ANTICHEAT_DRIFT_MAX_HIGH_DRIFT_RATIO_PCT', '25.0'))
+ANTICHEAT_DRIFT_MAX_REVIEW_MISMATCH_RATIO_PCT = float(os.getenv('ANTICHEAT_DRIFT_MAX_REVIEW_MISMATCH_RATIO_PCT', '10.0'))
 
 # ── Sentry error monitoring ───────────────────────────────────────────────────
 if os.getenv('SENTRY_DSN'):

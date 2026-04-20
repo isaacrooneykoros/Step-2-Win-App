@@ -294,10 +294,53 @@ export interface OpsMonitoringThresholds {
   max_callback_failure_rate_pct: number;
 }
 
+export interface OpsAntiCheatDriftExample {
+  user_id: number;
+  date: string;
+  legacy_steps: number;
+  shadow_verified_steps: number;
+  delta_steps: number;
+  abs_delta_pct: number;
+  shadow_review_state: string;
+}
+
+export interface OpsAntiCheatDriftSection {
+  timestamp: string;
+  window: {
+    since: string;
+    hours: number;
+    enough_samples: boolean;
+  };
+  metrics: {
+    sample_count: number;
+    matched_samples: number;
+    missing_legacy_records: number;
+    legacy_steps_total: number;
+    shadow_verified_steps_total: number;
+    avg_abs_delta_pct: number;
+    high_drift_samples: number;
+    high_drift_ratio_pct: number;
+    review_mismatch_samples: number;
+    review_mismatch_ratio_pct: number;
+    top_drift_examples: OpsAntiCheatDriftExample[];
+  };
+  thresholds: {
+    lookback_hours: number;
+    min_samples: number;
+    per_sample_alert_pct: number;
+    max_avg_abs_delta_pct: number;
+    max_high_drift_ratio_pct: number;
+    max_review_mismatch_ratio_pct: number;
+  };
+  breaches: string[];
+  ok: boolean;
+}
+
 export interface OpsMonitoringResponse {
   timestamp: string;
   metrics: OpsMonitoringMetrics;
   thresholds: OpsMonitoringThresholds;
   breaches: string[];
   ok: boolean;
+  anti_cheat_drift?: OpsAntiCheatDriftSection;
 }

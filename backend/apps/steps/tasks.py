@@ -1,4 +1,5 @@
 from celery import shared_task
+from django.conf import settings
 from django.utils import timezone
 from django.db.models import Sum
 from datetime import timedelta
@@ -243,3 +244,25 @@ def update_user_streak_records():
 
     logger.info(f'update_user_streak_records: updated {users.count()} users.')
     return f'Updated {users.count()} users'
+
+
+@shared_task
+def monitor_anticheat_shadow_drift_task():
+    """
+    Runs periodic anti-cheat shadow drift checks and emits ops webhook alerts
+    when v2 shadow diverges from legacy accepted totals beyond configured bounds.
+    """
+    from apps.steps.drift_monitor import (
+        AntiCheatDriftThresholds,
+        run_anticheat_shadow_drift_monitor,
+    )
+
+    thresholds = AntiCheatDriftThresholds(
+        lookback_hours=int(getattr(settings, 'ANTICHEAT_DRIFT_LOOKBACK_HOURS', 24)),
+        min_samples=int(getattr(settings, 'ANTICHEAT_DRIFT_MIN_SAMPLES', 50)),
+        per_sample_alert_pct=float(getattr(settings, 'ANTICHEAT_DRIFT_PER_SAMPLE_ALERT_PCT', 35.0)),
+        max_avg_abs_delta_pct=float(getattr(settings, 'ANTICHEAT_DRIFT_MAX_AVG_ABS_DELTA_PCT', 20.0)),
+        max_high_drift_ratio_pct=float(getattr(settings, 'ANTICHEAT_DRIFT_MAX_HIGH_DRIFT_RATIO_PCT', 25.0)),
+        max_review_mismatch_ratio_pct=float(getattr(settings, 'ANTICHEAT_DRIFT_MAX_REVIEW_MISMATCH_RATIO_PCT', 10.0)),
+    )
+    return run_anticheat_shadow_drift_monitor(thresholds=thresholds, send_alerts=True)
