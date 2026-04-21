@@ -436,6 +436,19 @@ async function readAndroidSensorSteps(profile?: User) {
   const weightKg = clampNumber(profile?.weight_kg, 30, 220, 70);
   const cadenceSpm = clampNumber(reading.cadence_spm, 0, 400, 0);
   const burstSteps5s = Math.max(0, Math.round(Number(reading.burst_steps_5s) || 0));
+  const gaitConfidence = clampNumber(reading.gait_confidence, 0, 100, 0);
+  const gaitDominantFreqHz = clampNumber(reading.gait_dominant_freq_hz, 0, 10, 0);
+  const gaitAutocorr = clampNumber(reading.gait_autocorr, 0, 1, 0);
+  const gaitIntervalStdMs = clampNumber(reading.gait_interval_std_ms, 0, 5000, 0);
+  const gaitValidPeaks2s = Math.max(0, Math.round(Number(reading.gait_valid_peaks_2s) || 0));
+  const gaitGyroVariance = clampNumber(reading.gait_gyro_variance, 0, 1000, 0);
+  const gaitJerkRms = clampNumber(reading.gait_jerk_rms, 0, 1000, 0);
+  const gaitState = typeof reading.gait_state === 'string' ? reading.gait_state : 'idle';
+  const carryMode = typeof reading.carry_mode === 'string' ? reading.carry_mode : 'unknown';
+  const mlMotionLabel = typeof reading.ml_motion_label === 'string' ? reading.ml_motion_label : 'other';
+  const mlWalkProbability = clampNumber(reading.ml_walk_probability, 0, 1, 0);
+  const mlShakeProbability = clampNumber(reading.ml_shake_probability, 0, 1, 0);
+  const mlModelVersion = typeof reading.ml_model_version === 'string' ? reading.ml_model_version : null;
 
   const distanceMeters = steps * (strideCm / 100);
   const distance_km = steps > 0 ? parseFloat((distanceMeters / 1000).toFixed(2)) : null;
@@ -457,6 +470,19 @@ async function readAndroidSensorSteps(profile?: User) {
     active_minutes,
     cadence_spm: cadenceSpm,
     burst_steps_5s: burstSteps5s,
+    gait_state: gaitState,
+    gait_confidence: gaitConfidence,
+    gait_dominant_freq_hz: gaitDominantFreqHz,
+    gait_autocorr: gaitAutocorr,
+    gait_interval_std_ms: gaitIntervalStdMs,
+    gait_valid_peaks_2s: gaitValidPeaks2s,
+    gait_gyro_variance: gaitGyroVariance,
+    gait_jerk_rms: gaitJerkRms,
+    carry_mode: carryMode,
+    ml_motion_label: mlMotionLabel,
+    ml_walk_probability: mlWalkProbability,
+    ml_shake_probability: mlShakeProbability,
+    ml_model_version: mlModelVersion,
   };
 }
 

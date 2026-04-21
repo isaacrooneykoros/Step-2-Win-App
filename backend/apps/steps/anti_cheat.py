@@ -72,6 +72,19 @@ class StepIntervalInput:
     raw_active_minutes: float | None = None
     cadence_spm: float | None = None
     burst_steps_5s: int | None = None
+    gait_state: str | None = None
+    gait_confidence: float | None = None
+    gait_dominant_freq_hz: float | None = None
+    gait_autocorr: float | None = None
+    gait_interval_std_ms: float | None = None
+    gait_valid_peaks_2s: int | None = None
+    gait_gyro_variance: float | None = None
+    gait_jerk_rms: float | None = None
+    carry_mode: str | None = None
+    ml_motion_label: str | None = None
+    ml_walk_probability: float | None = None
+    ml_shake_probability: float | None = None
+    ml_model_version: str | None = None
     submitted_at: datetime | None = None
 
 
@@ -91,6 +104,19 @@ class NormalizedInterval:
     active_minutes: float | None
     cadence_spm: float | None
     burst_steps_5s: int | None
+    gait_state: str | None
+    gait_confidence: float | None
+    gait_dominant_freq_hz: float | None
+    gait_autocorr: float | None
+    gait_interval_std_ms: float | None
+    gait_valid_peaks_2s: int | None
+    gait_gyro_variance: float | None
+    gait_jerk_rms: float | None
+    carry_mode: str | None
+    ml_motion_label: str | None
+    ml_walk_probability: float | None
+    ml_shake_probability: float | None
+    ml_model_version: str | None
     source_confidence: float
     dedupe_key: str
 
@@ -281,6 +307,19 @@ def normalize_payload_to_intervals(
             active_minutes=active_minutes,
             cadence_spm=payload.get('cadence_spm'),
             burst_steps_5s=payload.get('burst_steps_5s'),
+            gait_state=payload.get('gait_state'),
+            gait_confidence=payload.get('gait_confidence'),
+            gait_dominant_freq_hz=payload.get('gait_dominant_freq_hz'),
+            gait_autocorr=payload.get('gait_autocorr'),
+            gait_interval_std_ms=payload.get('gait_interval_std_ms'),
+            gait_valid_peaks_2s=payload.get('gait_valid_peaks_2s'),
+            gait_gyro_variance=payload.get('gait_gyro_variance'),
+            gait_jerk_rms=payload.get('gait_jerk_rms'),
+            carry_mode=payload.get('carry_mode'),
+            ml_motion_label=payload.get('ml_motion_label'),
+            ml_walk_probability=payload.get('ml_walk_probability'),
+            ml_shake_probability=payload.get('ml_shake_probability'),
+            ml_model_version=payload.get('ml_model_version'),
             source_confidence=source_confidence,
             dedupe_key=dedupe_key,
         )
@@ -421,6 +460,129 @@ def score_interval(
                 {'burst_steps_5s': interval.burst_steps_5s, 'threshold': config.suspicious_burst_steps_5s},
             ))
 
+    if interval.gait_confidence is not None:
+        if interval.gait_confidence < 20:
+            hits.append(_mk_hit(
+                'gait_confidence_very_low', RuleSeverity.HIGH, 0.9, 16.0,
+                'Motion confidence is too low for reliable walking gait.',
+                {'gait_confidence': interval.gait_confidence},
+            ))
+        elif interval.gait_confidence < 40:
+            hits.append(_mk_hit(
+                'gait_confidence_low', RuleSeverity.MEDIUM, 0.5, 8.0,
+                'Weak gait confidence suggests non-walking motion.',
+                {'gait_confidence': interval.gait_confidence},
+            ))
+
+    if interval.gait_state == 'suspicious_motion':
+        hits.append(_mk_hit(
+            'gait_state_suspicious', RuleSeverity.HIGH, 0.8, 14.0,
+            'Sensor state machine flagged suspicious motion.',
+            {'gait_state': interval.gait_state},
+        ))
+
+    if interval.gait_dominant_freq_hz is not None:
+        if not (0.8 <= interval.gait_dominant_freq_hz <= 3.0):
+            hits.append(_mk_hit(
+                'gait_frequency_out_of_band', RuleSeverity.MEDIUM, 0.5, 7.0,
+                'Dominant motion frequency falls outside walking band.',
+                {'dominant_freq_hz': interval.gait_dominant_freq_hz},
+            ))
+
+    if interval.gait_autocorr is not None and interval.gait_autocorr < 0.35:
+        hits.append(_mk_hit(
+            'gait_periodicity_low', RuleSeverity.MEDIUM, 0.6, 9.0,
+            'Poor periodicity indicates non-rhythmic movement.',
+            {'gait_autocorr': interval.gait_autocorr},
+        ))
+
+    if interval.gait_interval_std_ms is not None:
+        if interval.gait_interval_std_ms > 320:
+            hits.append(_mk_hit(
+                'gait_interval_variability_high', RuleSeverity.HIGH, 0.8, 12.0,
+                'Step interval variability is too high for normal gait.',
+                {'interval_std_ms': interval.gait_interval_std_ms},
+            ))
+        elif interval.gait_interval_std_ms > 180:
+            hits.append(_mk_hit(
+                'gait_interval_variability_moderate', RuleSeverity.MEDIUM, 0.5, 7.0,
+                'Step interval consistency is weaker than expected.',
+                {'interval_std_ms': interval.gait_interval_std_ms},
+            ))
+
+    if interval.gait_valid_peaks_2s is not None and interval.gait_valid_peaks_2s < 3 and interval.normalized_steps > 0:
+        hits.append(_mk_hit(
+            'gait_peak_run_short', RuleSeverity.MEDIUM, 0.5, 8.0,
+            'Too few consecutive gait-like peaks were detected.',
+            {'gait_valid_peaks_2s': interval.gait_valid_peaks_2s},
+        ))
+
+    if interval.gait_jerk_rms is not None and interval.gait_jerk_rms > 18:
+        hits.append(_mk_hit(
+            'gait_jerk_high', RuleSeverity.HIGH, 0.7, 10.0,
+            'Excessive jerk suggests abrupt shaking rather than walking.',
+            {'gait_jerk_rms': interval.gait_jerk_rms},
+        ))
+
+    if interval.gait_gyro_variance is not None and interval.gait_gyro_variance > 4.0:
+        hits.append(_mk_hit(
+            'gait_rotation_chaotic', RuleSeverity.MEDIUM, 0.6, 8.0,
+            'Rotation variance is too chaotic for steady gait.',
+            {'gait_gyro_variance': interval.gait_gyro_variance},
+        ))
+
+    if interval.carry_mode == 'in_hand' and interval.cadence_spm is not None and interval.cadence_spm > 185:
+        hits.append(_mk_hit(
+            'in_hand_high_cadence', RuleSeverity.MEDIUM, 0.4, 6.0,
+            'High cadence while in hand requires stronger gait evidence.',
+            {'carry_mode': interval.carry_mode, 'cadence_spm': interval.cadence_spm},
+        ))
+
+    if interval.ml_shake_probability is not None:
+        if interval.ml_shake_probability >= 0.80:
+            hits.append(_mk_hit(
+                'ml_shake_high_probability', RuleSeverity.HIGH, 0.9, 18.0,
+                'ML classifier indicates high shake probability.',
+                {
+                    'ml_shake_probability': interval.ml_shake_probability,
+                    'ml_motion_label': interval.ml_motion_label,
+                    'ml_model_version': interval.ml_model_version,
+                },
+            ))
+        elif interval.ml_shake_probability >= 0.65:
+            hits.append(_mk_hit(
+                'ml_shake_moderate_probability', RuleSeverity.MEDIUM, 0.6, 9.0,
+                'ML classifier indicates moderate shake probability.',
+                {
+                    'ml_shake_probability': interval.ml_shake_probability,
+                    'ml_motion_label': interval.ml_motion_label,
+                    'ml_model_version': interval.ml_model_version,
+                },
+            ))
+
+    if interval.ml_walk_probability is not None and interval.ml_walk_probability >= 0.70:
+        hits.append(_mk_hit(
+            'ml_walk_high_probability', RuleSeverity.LOW, -0.35, 7.0,
+            'ML classifier indicates high walk probability.',
+            {
+                'ml_walk_probability': interval.ml_walk_probability,
+                'ml_motion_label': interval.ml_motion_label,
+                'ml_model_version': interval.ml_model_version,
+            },
+        ))
+
+    if interval.ml_motion_label == 'shake' and interval.ml_walk_probability is not None and interval.ml_walk_probability < 0.40:
+        hits.append(_mk_hit(
+            'ml_label_shake', RuleSeverity.HIGH, 0.7, 12.0,
+            'ML classifier labeled this interval as shake-dominant.',
+            {
+                'ml_motion_label': interval.ml_motion_label,
+                'ml_walk_probability': interval.ml_walk_probability,
+                'ml_shake_probability': interval.ml_shake_probability,
+                'ml_model_version': interval.ml_model_version,
+            },
+        ))
+
     # Personal baseline deviation from clean history.
     baseline_anchor = max(1.0, baseline.avg_14d)
     ratio = interval.normalized_steps / baseline_anchor
@@ -463,6 +625,19 @@ def score_interval(
         'baseline_ratio': round(ratio, 2),
         'source_confidence': interval.source_confidence,
         'trust_status': trust.status,
+        'gait_state': interval.gait_state,
+        'gait_confidence': interval.gait_confidence,
+        'gait_dominant_freq_hz': interval.gait_dominant_freq_hz,
+        'gait_autocorr': interval.gait_autocorr,
+        'gait_interval_std_ms': interval.gait_interval_std_ms,
+        'gait_valid_peaks_2s': interval.gait_valid_peaks_2s,
+        'gait_gyro_variance': interval.gait_gyro_variance,
+        'gait_jerk_rms': interval.gait_jerk_rms,
+        'carry_mode': interval.carry_mode,
+        'ml_motion_label': interval.ml_motion_label,
+        'ml_walk_probability': interval.ml_walk_probability,
+        'ml_shake_probability': interval.ml_shake_probability,
+        'ml_model_version': interval.ml_model_version,
     }
     return risk_score, hits, evidence
 
@@ -683,6 +858,19 @@ def run_anti_cheat(
     active_minutes=None,
     cadence_spm=None,
     burst_steps_5s=None,
+    gait_state=None,
+    gait_confidence=None,
+    gait_dominant_freq_hz=None,
+    gait_autocorr=None,
+    gait_interval_std_ms=None,
+    gait_valid_peaks_2s=None,
+    gait_gyro_variance=None,
+    gait_jerk_rms=None,
+    carry_mode=None,
+    ml_motion_label=None,
+    ml_walk_probability=None,
+    ml_shake_probability=None,
+    ml_model_version=None,
     submitted_at=None,
 ) -> CheckResult:
     """Backward-compatible adapter for existing call sites and tests."""
@@ -694,6 +882,19 @@ def run_anti_cheat(
         'active_minutes': active_minutes,
         'cadence_spm': cadence_spm,
         'burst_steps_5s': burst_steps_5s,
+        'gait_state': gait_state,
+        'gait_confidence': gait_confidence,
+        'gait_dominant_freq_hz': gait_dominant_freq_hz,
+        'gait_autocorr': gait_autocorr,
+        'gait_interval_std_ms': gait_interval_std_ms,
+        'gait_valid_peaks_2s': gait_valid_peaks_2s,
+        'gait_gyro_variance': gait_gyro_variance,
+        'gait_jerk_rms': gait_jerk_rms,
+        'carry_mode': carry_mode,
+        'ml_motion_label': ml_motion_label,
+        'ml_walk_probability': ml_walk_probability,
+        'ml_shake_probability': ml_shake_probability,
+        'ml_model_version': ml_model_version,
     }
 
     trust = getattr(user, 'trust_score', None)

@@ -51,6 +51,81 @@ class HealthSyncSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
+    gait_state = serializers.ChoiceField(
+        choices=['idle', 'possible_walking', 'confirmed_walking', 'suspicious_motion'],
+        required=False,
+        allow_null=True,
+    )
+    gait_confidence = serializers.FloatField(
+        min_value=0,
+        max_value=100,
+        required=False,
+        allow_null=True,
+    )
+    gait_dominant_freq_hz = serializers.FloatField(
+        min_value=0,
+        max_value=10,
+        required=False,
+        allow_null=True,
+    )
+    gait_autocorr = serializers.FloatField(
+        min_value=0,
+        max_value=1,
+        required=False,
+        allow_null=True,
+    )
+    gait_interval_std_ms = serializers.FloatField(
+        min_value=0,
+        max_value=5000,
+        required=False,
+        allow_null=True,
+    )
+    gait_valid_peaks_2s = serializers.IntegerField(
+        min_value=0,
+        max_value=30,
+        required=False,
+        allow_null=True,
+    )
+    gait_gyro_variance = serializers.FloatField(
+        min_value=0,
+        max_value=1000,
+        required=False,
+        allow_null=True,
+    )
+    gait_jerk_rms = serializers.FloatField(
+        min_value=0,
+        max_value=1000,
+        required=False,
+        allow_null=True,
+    )
+    carry_mode = serializers.ChoiceField(
+        choices=['unknown', 'in_hand', 'pocket', 'bag'],
+        required=False,
+        allow_null=True,
+    )
+    ml_motion_label = serializers.ChoiceField(
+        choices=['walk', 'shake', 'other'],
+        required=False,
+        allow_null=True,
+    )
+    ml_walk_probability = serializers.FloatField(
+        min_value=0,
+        max_value=1,
+        required=False,
+        allow_null=True,
+    )
+    ml_shake_probability = serializers.FloatField(
+        min_value=0,
+        max_value=1,
+        required=False,
+        allow_null=True,
+    )
+    ml_model_version = serializers.CharField(
+        max_length=64,
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
 
 
 class HourlyStepSerializer(serializers.ModelSerializer):

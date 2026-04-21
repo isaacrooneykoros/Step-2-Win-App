@@ -19,6 +19,19 @@ export interface DeviceStepCounterReading {
   available: boolean;
   cadence_spm: number;
   burst_steps_5s: number;
+  gait_state?: 'idle' | 'possible_walking' | 'confirmed_walking' | 'suspicious_motion';
+  gait_confidence?: number;
+  gait_dominant_freq_hz?: number;
+  gait_autocorr?: number;
+  gait_interval_std_ms?: number;
+  gait_valid_peaks_2s?: number;
+  gait_gyro_variance?: number;
+  gait_jerk_rms?: number;
+  carry_mode?: 'unknown' | 'in_hand' | 'pocket' | 'bag';
+  ml_motion_label?: 'walk' | 'shake' | 'other';
+  ml_walk_probability?: number;
+  ml_shake_probability?: number;
+  ml_model_version?: string;
   background_running: boolean;
 }
 
