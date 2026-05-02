@@ -24,6 +24,7 @@ from .anti_cheat import (
     evaluate_daily_submission,
     run_anti_cheat,
 )
+from .security import compute_payload_hash, detect_replay, verify_session_token
 from .daily_reset import update_streak
 from apps.core.throttles import DashboardReadRateThrottle
 from apps.admin_api.realtime import broadcast_admin_steps_update
@@ -34,6 +35,8 @@ from .models import (
     HourlyStepRecord,
     IntervalVerificationResult,
     LocationWaypoint,
+    StepSession,
+    StepSyncEvent,
     SuspiciousActivity,
     TrustScore,
 )
@@ -306,6 +309,24 @@ def sync_health(request):
     serializer = HealthSyncSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
+    session = None
+    session_token = data.get('session_token')
+    session_id = data.get('session_id')
+    client_event_id = data.get('client_event_id')
+    sequence_number = data.get('sequence_number')
+    timestamp_client = data.get('timestamp_client')
+    payload_hash = compute_payload_hash({
+        'session_id': str(session_id) if session_id else None,
+        'client_event_id': client_event_id,
+        'sequence_number': sequence_number,
+        'timestamp_client': timestamp_client.isoformat() if timestamp_client else None,
+        'steps_delta': data.get('steps_delta'),
+        'steps_total': data.get('steps_total') or data.get('steps'),
+        'ml_motion_label': data.get('ml_motion_label'),
+        'ml_walk_probability': data.get('ml_walk_probability'),
+        'ml_shake_probability': data.get('ml_shake_probability'),
+        'ml_model_version': data.get('ml_model_version'),
+    })
 
     if not request.user.device_id:
         import uuid
@@ -322,6 +343,116 @@ def sync_health(request):
     submitted_steps = data.get('steps', 0)
     now = timezone.now()
     date = data.get('date', now.date())
+
+    # Optional session-based replay protection. Legacy clients continue through.
+    if session_id and session_token:
+        try:
+            session = StepSession.objects.get(id=session_id, user=user)
+        except StepSession.DoesNotExist:
+            StepSyncEvent.objects.create(
+                user=user,
+                session=None,
+                device=None,
+                client_event_id=client_event_id or str(session_id),
+                sequence_number=sequence_number or 0,
+                timestamp_client=timestamp_client,
+                payload_hash=payload_hash,
+                signature_valid=False,
+                replay_detected=True,
+                steps_delta=data.get('steps_delta') or 0,
+                raw_steps_total=data.get('steps_total') or submitted_steps,
+                ml_motion_label=data.get('ml_motion_label'),
+                ml_walk_probability=data.get('ml_walk_probability'),
+                ml_shake_probability=data.get('ml_shake_probability'),
+                ml_model_version=data.get('ml_model_version'),
+                interval_risk_score=100.0,
+                accepted=False,
+                rejection_reason='session_not_found',
+                raw_payload=request.data,
+            )
+            return Response({'accepted': False, 'steps_credited': 0, 'replay_detected': True, 'interval_risk_score': 100, 'message': 'This activity could not be verified.'}, status=400)
+
+        if session.user_id != user.id or session.status != 'active' or session.expires_at <= now:
+            StepSyncEvent.objects.create(
+                user=user,
+                session=session,
+                device=session.device,
+                client_event_id=client_event_id or str(session_id),
+                sequence_number=sequence_number or 0,
+                timestamp_client=timestamp_client,
+                payload_hash=payload_hash,
+                signature_valid=False,
+                replay_detected=True,
+                steps_delta=data.get('steps_delta') or 0,
+                raw_steps_total=data.get('steps_total') or submitted_steps,
+                ml_motion_label=data.get('ml_motion_label'),
+                ml_walk_probability=data.get('ml_walk_probability'),
+                ml_shake_probability=data.get('ml_shake_probability'),
+                ml_model_version=data.get('ml_model_version'),
+                interval_risk_score=100.0,
+                accepted=False,
+                rejection_reason='invalid_or_expired_session',
+                raw_payload=request.data,
+            )
+            return Response({'accepted': False, 'steps_credited': 0, 'replay_detected': True, 'interval_risk_score': 100, 'message': 'This activity could not be verified.'}, status=400)
+
+        if not verify_session_token(session_token, session.session_token_hash):
+            StepSyncEvent.objects.create(
+                user=user,
+                session=session,
+                device=session.device,
+                client_event_id=client_event_id or str(session_id),
+                sequence_number=sequence_number or 0,
+                timestamp_client=timestamp_client,
+                payload_hash=payload_hash,
+                signature_valid=False,
+                replay_detected=True,
+                steps_delta=data.get('steps_delta') or 0,
+                raw_steps_total=data.get('steps_total') or submitted_steps,
+                ml_motion_label=data.get('ml_motion_label'),
+                ml_walk_probability=data.get('ml_walk_probability'),
+                ml_shake_probability=data.get('ml_shake_probability'),
+                ml_model_version=data.get('ml_model_version'),
+                interval_risk_score=100.0,
+                accepted=False,
+                rejection_reason='invalid_session_token',
+                raw_payload=request.data,
+            )
+            return Response({'accepted': False, 'steps_credited': 0, 'replay_detected': True, 'interval_risk_score': 100, 'message': 'This activity could not be verified.'}, status=401)
+
+        replay_detected, replay_reason = detect_replay(
+            user.id,
+            str(session.id),
+            client_event_id or '',
+            sequence_number,
+            payload_hash,
+        )
+        if replay_detected or (sequence_number is not None and sequence_number <= session.last_sequence_number):
+            StepSyncEvent.objects.create(
+                user=user,
+                session=session,
+                device=session.device,
+                client_event_id=client_event_id or str(session_id),
+                sequence_number=sequence_number or 0,
+                timestamp_client=timestamp_client,
+                payload_hash=payload_hash,
+                signature_valid=True,
+                replay_detected=True,
+                steps_delta=data.get('steps_delta') or 0,
+                raw_steps_total=data.get('steps_total') or submitted_steps,
+                ml_motion_label=data.get('ml_motion_label'),
+                ml_walk_probability=data.get('ml_walk_probability'),
+                ml_shake_probability=data.get('ml_shake_probability'),
+                ml_model_version=data.get('ml_model_version'),
+                interval_risk_score=95.0,
+                accepted=False,
+                rejection_reason=replay_reason or 'sequence_replay_detected',
+                raw_payload=request.data,
+            )
+            session.last_sequence_number = max(session.last_sequence_number, sequence_number or 0)
+            session.status = 'rejected'
+            session.save(update_fields=['last_sequence_number', 'status', 'updated_at'])
+            return Response({'accepted': False, 'steps_credited': 0, 'replay_detected': True, 'interval_risk_score': 95, 'message': 'This activity could not be verified.'}, status=400)
 
     idem_key = request.headers.get('X-Idempotency-Key')
     if idem_key and not _check_idempotency(idem_key, user.id):
@@ -530,6 +661,52 @@ def sync_health(request):
             best_day_steps=record.steps
         )
 
+    # Persist step event + session aggregates for verified or legacy syncs.
+    try:
+        event_steps_delta = int(data.get('steps_delta') or max(0, submitted_steps - (existing_record.steps if existing_record else 0)))
+        event = StepSyncEvent.objects.create(
+            user=user,
+            session=session,
+            device=session.device if session else None,
+            client_event_id=client_event_id or f'legacy-{user.id}-{date}-{submitted_steps}',
+            sequence_number=sequence_number or (session.last_sequence_number + 1 if session else 0),
+            timestamp_client=timestamp_client,
+            payload_hash=payload_hash,
+            signature_valid=bool(session),
+            replay_detected=False,
+            steps_delta=event_steps_delta,
+            raw_steps_total=data.get('steps_total') or submitted_steps,
+            ml_motion_label=data.get('ml_motion_label'),
+            ml_walk_probability=data.get('ml_walk_probability'),
+            ml_shake_probability=data.get('ml_shake_probability'),
+            ml_model_version=data.get('ml_model_version'),
+            interval_risk_score=float(sum(flag.get('severity') == 'high' for flag in result.flags) * 10.0),
+            accepted=not result.should_block,
+            rejection_reason=None,
+            raw_payload=request.data,
+        )
+
+        if session:
+            session.total_steps += event_steps_delta
+            if not result.should_block:
+                session.accepted_steps += approved_steps
+            else:
+                session.rejected_steps += submitted_steps
+            session.last_sequence_number = max(session.last_sequence_number, sequence_number or session.last_sequence_number + 1)
+            session.policy_version = session.policy_version or anti_v2_version
+            session.ml_model_version = session.ml_model_version or data.get('ml_model_version')
+            if data.get('ml_walk_probability') is not None:
+                prev = session.avg_walk_probability or 0.0
+                session.avg_walk_probability = (prev + float(data.get('ml_walk_probability'))) / 2.0 if prev else float(data.get('ml_walk_probability'))
+            if data.get('ml_shake_probability') is not None:
+                prev = session.avg_shake_probability or 0.0
+                session.avg_shake_probability = (prev + float(data.get('ml_shake_probability'))) / 2.0 if prev else float(data.get('ml_shake_probability'))
+            session.avg_risk_score = (session.avg_risk_score + event.interval_risk_score) / 2.0 if session.avg_risk_score is not None else event.interval_risk_score
+            session.session_risk_score = max(session.session_risk_score, event.interval_risk_score)
+            session.save(update_fields=['total_steps', 'accepted_steps', 'rejected_steps', 'last_sequence_number', 'policy_version', 'ml_model_version', 'avg_walk_probability', 'avg_shake_probability', 'avg_risk_score', 'session_risk_score', 'updated_at'])
+    except Exception:
+        logger.exception('Failed to persist step sync event/session aggregate')
+
     if v2_decision is not None:
         _persist_verification_artifacts(
             user=user,
@@ -618,6 +795,10 @@ def sync_health(request):
         'flags_raised': anti_flags_count,
         'user_id': user.id,
         'username': user.username,
+        'accepted': not result.should_block,
+        'verification_level': 'session_verified' if session else 'legacy_low_confidence',
+        'session_id': str(session.id) if session else None,
+        'policy_version': getattr(session, 'policy_version', None) if session else None,
     })
 
     channel_layer = get_channel_layer()

@@ -1,11 +1,228 @@
+
+
+from __future__ import annotations
+
+# ============================================================
+# PRODUCTION SECURITY HARDENING: SESSION-LEVEL SCORING
+# ============================================================
+
+
+def score_session(session) -> dict[str, Any]:
+    """
+    Aggregate session-level risk by analyzing all StepSyncEvents.
+    
+    Returns comprehensive session risk metrics for finalization.
+    """
+    from .models import StepSyncEvent
+    from .security import get_active_policy
+    from django.db.models import Avg, Count, Max
+    
+    events = StepSyncEvent.objects.filter(session=session).order_by('created_at')
+    policy = get_active_policy()
+    
+    # Aggregate metrics
+    stats = events.aggregate(
+        total_events=Count('id'),
+        accepted_count=Count('id', filter=models.Q(accepted=True)),
+        rejected_count=Count('id', filter=models.Q(accepted=False)),
+        replay_count=Count('id', filter=models.Q(replay_detected=True)),
+        total_steps=Sum('steps_delta', filter=models.Q(accepted=True)),
+        avg_walk_prob=Avg('ml_walk_probability', filter=models.Q(ml_walk_probability__isnull=False)),
+        avg_shake_prob=Avg('ml_shake_probability', filter=models.Q(ml_shake_probability__isnull=False)),
+        max_shake_prob=Max('ml_shake_probability', filter=models.Q(ml_shake_probability__isnull=False)),
+        avg_risk=Avg('interval_risk_score'),
+        legacy_count=Count('id', filter=models.Q(ml_motion_label__isnull=True)),
+    )
+    
+    total_events = stats['total_events'] or 0
+    accepted_count = stats['accepted_count'] or 0
+    rejected_count = stats['rejected_count'] or 0
+    replay_count = stats['replay_count'] or 0
+    total_steps = stats['total_steps'] or 0
+    legacy_count = stats['legacy_count'] or 0
+    
+    # Session-level risk scoring
+    session_risk = 0.0
+    risk_hits = []
+    
+    # High replay attempts
+    if replay_count > 0:
+        replay_penalty = min(50.0, 15.0 + (replay_count * 5.0))
+        session_risk += replay_penalty
+        risk_hits.append({
+            'rule': 'session_replay_detected',
+            'severity': 'critical',
+            'penalty': replay_penalty,
+            'details': f'{replay_count} replay attempts detected',
+        })
+    
+    # High rejection rate
+    if total_events > 0:
+        rejection_rate = rejected_count / total_events
+        if rejection_rate > 0.5:
+            rejection_penalty = min(30.0, rejection_rate * 50.0)
+            session_risk += rejection_penalty
+            risk_hits.append({
+                'rule': 'session_high_rejection_rate',
+                'severity': 'high',
+                'penalty': rejection_penalty,
+                'details': f'{rejection_rate*100:.1f}% of events rejected',
+            })
+    
+    # High average shake probability
+    avg_shake = stats['avg_shake_prob'] or 0.0
+    if avg_shake > 0.60:
+        shake_penalty = min(25.0, (avg_shake ** 2) * 30.0)
+        session_risk += shake_penalty
+        risk_hits.append({
+            'rule': 'session_high_avg_shake',
+            'severity': 'high',
+            'penalty': shake_penalty,
+            'details': f'Average shake probability {avg_shake:.2f}',
+        })
+    
+    # Very high steps per minute (physical impossibility check)
+    session_duration_minutes = (session.updated_at - session.started_at).total_seconds() / 60.0
+    if session_duration_minutes > 0:
+        spm = total_steps / max(1.0, session_duration_minutes)
+        max_spm = policy.get('session', {}).get('max_steps_per_minute', 180)
+        if spm > max_spm * 1.5:  # 50% over normal limit is suspicious
+            impossible_penalty = min(35.0, (spm - max_spm) / max_spm * 20.0)
+            session_risk += impossible_penalty
+            risk_hits.append({
+                'rule': 'session_impossible_pace',
+                'severity': 'critical',
+                'penalty': impossible_penalty,
+                'details': f'Pace {spm:.1f} SPM exceeds physical limits',
+            })
+    
+    # Many legacy events (unverified ML)
+    if total_events > 0 and legacy_count / total_events > 0.7:
+        legacy_penalty = 5.0
+        session_risk += legacy_penalty
+        risk_hits.append({
+            'rule': 'session_mostly_legacy',
+            'severity': 'low',
+            'penalty': legacy_penalty,
+            'details': f'{legacy_count}/{total_events} events missing ML data',
+        })
+    
+    # Session too long (likely spoofing)
+    max_session_hours = policy.get('session', {}).get('max_session_hours', 12)
+    session_hours = (session.updated_at - session.started_at).total_seconds() / 3600.0
+    if session_hours > max_session_hours * 1.5:
+        duration_penalty = min(15.0, (session_hours - max_session_hours) / max_session_hours * 10.0)
+        session_risk += duration_penalty
+        risk_hits.append({
+            'rule': 'session_too_long',
+            'severity': 'medium',
+            'penalty': duration_penalty,
+            'details': f'Session {session_hours:.1f}h exceeds max {max_session_hours}h',
+        })
+    
+    # Clamp final risk to [0, 100]
+    session_risk = max(0.0, min(100.0, session_risk))
+    
+    return {
+        'total_events': total_events,
+        'accepted_events': accepted_count,
+        'rejected_events': rejected_count,
+        'replay_events': replay_count,
+        'legacy_events': legacy_count,
+        'total_steps': total_steps,
+        'avg_walk_probability': stats['avg_walk_prob'],
+        'avg_shake_probability': avg_shake,
+        'max_shake_probability': stats['max_shake_prob'],
+        'avg_interval_risk': stats['avg_risk'],
+        'session_duration_hours': session_hours,
+        'steps_per_minute': total_steps / max(1.0, session_duration_minutes),
+        'final_session_risk_score': session_risk,
+        'risk_hits': risk_hits,
+    }
+
+
+def finalize_step_session(session) -> dict[str, Any]:
+    """
+    Finalize a session: compute risk, determine rewards, update user trust.
+    
+    Returns a dict with finalization details for API response.
+    """
+    from .models import StepSyncEvent, SuspiciousSessionReview
+    from .security import update_user_trust_after_session, get_trust_reward_modifier, get_or_create_user_trust_profile
+    
+    # Compute session-level risk
+    session_metrics = score_session(session)
+    final_risk = session_metrics['final_session_risk_score']
+    
+    # Determine reward multiplier based on risk
+    if final_risk < 20:
+        reward_multiplier = 1.0
+    elif final_risk < 40:
+        reward_multiplier = 0.85
+    elif final_risk < 60:
+        reward_multiplier = 0.50
+    elif final_risk < 80:
+        reward_multiplier = 0.20
+    else:
+        reward_multiplier = 0.0
+    
+    # Determine trust adjustment based on session quality
+    is_replay = session_metrics['replay_events'] > 0
+    trust_adjustment = 0.0
+    
+    # Update user trust profile
+    update_user_trust_after_session(
+        session.user,
+        session_risk_score=final_risk,
+        is_replay=is_replay
+    )
+    
+    # Apply trust multiplier to rewards
+    trust_modifier = get_trust_reward_modifier(session.user)
+    final_reward_multiplier = reward_multiplier * trust_modifier
+    
+    # Update session record
+    session.session_risk_score = final_risk
+    session.trust_adjustment = trust_adjustment
+    session.status = 'completed'
+    session.ended_at = timezone.now()
+    session.save(update_fields=['session_risk_score', 'trust_adjustment', 'status', 'ended_at', 'updated_at'])
+    
+    # Create review if risk is high
+    if final_risk >= 60:
+        SuspiciousSessionReview.objects.create(
+            user=session.user,
+            session=session,
+            risk_score=final_risk,
+            reason_summary=f'Session risk score {final_risk:.1f} exceeds review threshold',
+            risk_hits=session_metrics['risk_hits'],
+            status='pending',
+        )
+    
+    return {
+        'session_id': str(session.id),
+        'status': 'completed',
+        'session_risk_score': final_risk,
+        'accepted_steps': session_metrics['accepted_events'],
+        'rejected_steps': session_metrics['rejected_events'],
+        'final_reward_multiplier': final_reward_multiplier,
+        'reward_multiplier_breakdown': {
+            'session_risk_multiplier': reward_multiplier,
+            'trust_modifier': trust_modifier,
+        },
+        'trust_adjustment': trust_adjustment,
+        'message': (
+            'Activity synced successfully.' if final_risk < 20 else
+            'Some activity could not be fully verified.' if final_risk < 60 else
+            'This session requires review.'
+        ),
+    }
 """Step2Win Anti-Cheat v2.
 
 Interval-first verification with trust-aware scoring and payout-risk signaling.
 The legacy `run_anti_cheat` contract is preserved for compatibility while v2
 rolls out through feature flags in `steps/views.py`.
 """
-
-from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass, field
@@ -19,6 +236,7 @@ from django.db.models import Avg, Count, Sum
 from django.utils import timezone
 
 from .models import HealthRecord
+import django.db.models as models
 
 DAILY_STEP_CAP = 60_000
 WEEKLY_HARD_CAP = 420_000

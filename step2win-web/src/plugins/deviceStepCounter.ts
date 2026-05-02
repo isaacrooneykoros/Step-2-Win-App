@@ -32,6 +32,21 @@ export interface DeviceStepCounterReading {
   ml_walk_probability?: number;
   ml_shake_probability?: number;
   ml_model_version?: string;
+  // Enhanced ML features (smoothed predictions)
+  smoothed_walk_probability?: number;
+  smoothed_shake_probability?: number;
+  ml_window_count?: number;
+  ml_confidence_stability?: number;
+  motion_entropy?: number;
+  // Session and replay protection fields
+  device_id?: string;
+  session_id?: string;
+  client_event_id?: string;
+  sequence_number?: number;
+  timestamp_client?: string;
+  payload_hash?: string;
+  steps_delta?: number;
+  steps_total?: number;
   background_running: boolean;
 }
 
@@ -59,6 +74,23 @@ export interface DeviceStepCounterPlugin {
   requestLocationPermissions(): Promise<{ location: PermissionState }>;
   requestBackgroundLocationPermission(): Promise<{ backgroundLocation: PermissionState }>;
   openExactAlarmSettings(): Promise<{ opened: boolean; supported: boolean }>;
+  startStepSession(): Promise<{
+    device_id: string;
+    platform: 'android';
+    app_version: string;
+    ml_model_version: string;
+    session_id?: string | null;
+    session_token?: string | null;
+    expires_at?: string | null;
+    next_sequence_number?: number | null;
+  }>;
+  setActiveStepSession(data: {
+    session_id: string;
+    session_token: string;
+    expires_at: string;
+    next_sequence_number: number;
+  }): Promise<{ saved: boolean }>;
+  clearActiveStepSession(): Promise<{ cleared: boolean }>;
   getTodaySteps(): Promise<DeviceStepCounterReading>;
   startBackgroundCapture(): Promise<DeviceStepCounterBackgroundStatus>;
   stopBackgroundCapture(): Promise<DeviceStepCounterBackgroundStatus>;

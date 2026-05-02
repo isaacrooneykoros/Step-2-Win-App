@@ -6,6 +6,12 @@ import type {
   DayDetail,
   HourlyStep,
   LocationWaypoint,
+  StepSessionStartRequest,
+  StepSessionStartResponse,
+  StepSessionEndRequest,
+  StepSessionEndResponse,
+  TrustProfileResponse,
+  ActivePolicyResponse,
 } from '../../types';
 
 export const stepsService = {
@@ -16,6 +22,26 @@ export const stepsService = {
     const response = await api.post<HealthRecord>('/api/steps/sync/', data, {
       headers,
     });
+    return response.data;
+  },
+
+  startSession: async (data: StepSessionStartRequest): Promise<StepSessionStartResponse> => {
+    const response = await api.post<StepSessionStartResponse>('/api/steps/session/start/', data);
+    return response.data;
+  },
+
+  endSession: async (data: StepSessionEndRequest): Promise<StepSessionEndResponse> => {
+    const response = await api.post<StepSessionEndResponse>('/api/steps/session/end/', data);
+    return response.data;
+  },
+
+  getTrustProfile: async (): Promise<TrustProfileResponse> => {
+    const response = await api.get<TrustProfileResponse>('/api/steps/trust/profile/');
+    return response.data;
+  },
+
+  getActivePolicy: async (): Promise<ActivePolicyResponse> => {
+    const response = await api.get<ActivePolicyResponse>('/api/steps/policy/active/');
     return response.data;
   },
 

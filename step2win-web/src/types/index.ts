@@ -463,6 +463,81 @@ export interface StepSyncForm {
   active_minutes?: number | null;
   cadence_spm?: number | null;
   burst_steps_5s?: number | null;
+  gait_state?: 'idle' | 'possible_walking' | 'confirmed_walking' | 'suspicious_motion' | null;
+  gait_confidence?: number | null;
+  gait_dominant_freq_hz?: number | null;
+  gait_autocorr?: number | null;
+  gait_interval_std_ms?: number | null;
+  gait_valid_peaks_2s?: number | null;
+  gait_gyro_variance?: number | null;
+  gait_jerk_rms?: number | null;
+  carry_mode?: 'unknown' | 'in_hand' | 'pocket' | 'bag' | null;
+  ml_motion_label?: 'walk' | 'shake' | 'other' | null;
+  ml_walk_probability?: number | null;
+  ml_shake_probability?: number | null;
+  ml_model_version?: string | null;
+  smoothed_walk_probability?: number | null;
+  smoothed_shake_probability?: number | null;
+  ml_window_count?: number | null;
+  ml_confidence_stability?: number | null;
+  motion_entropy?: number | null;
+  device_id?: string | null;
+  session_id?: string | null;
+  session_token?: string | null;
+  client_event_id?: string | null;
+  sequence_number?: number | null;
+  timestamp_client?: string | null;
+  payload_hash?: string | null;
+  steps_delta?: number | null;
+  steps_total?: number | null;
+}
+
+export interface StepSessionStartRequest {
+  device_id: string;
+  platform: 'android' | 'ios' | 'web';
+  app_version?: string | null;
+  ml_model_version?: string | null;
+}
+
+export interface StepSessionStartResponse {
+  session_id: string;
+  session_token: string;
+  server_nonce: string;
+  expires_at: string;
+  sequence_start: number;
+  policy_version: string;
+}
+
+export interface StepSessionEndRequest {
+  session_id: string;
+  session_token: string;
+}
+
+export interface StepSessionEndResponse {
+  session_id: string;
+  status: string;
+  session_risk_score: number;
+  accepted_steps: number;
+  rejected_steps: number;
+  final_reward_multiplier?: number;
+  reward_multiplier?: number;
+  trust_adjustment: number;
+  message: string;
+}
+
+export interface TrustProfileResponse {
+  trust_score: number;
+  trust_tier: 'new' | 'low' | 'standard' | 'trusted' | 'restricted';
+  verified_sessions_count: number;
+  suspicious_sessions_count: number;
+  total_accepted_steps: number;
+  total_rejected_steps: number;
+}
+
+export interface ActivePolicyResponse {
+  version: string;
+  session_max_hours: number;
+  sync_interval_seconds: number;
 }
 
 // ==================== Support Types ====================

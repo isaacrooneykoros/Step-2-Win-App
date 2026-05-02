@@ -15,20 +15,64 @@ import {
   upsertOutboxItem,
 } from '../services/offlineSyncOutbox';
 
-const APP_SIGNING_SECRET = import.meta.env.VITE_APP_SIGNING_SECRET || '';
 const HOURLY_SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000;
 const SILENT_SYNC_MIN_INTERVAL_MS = 30 * 1000;
 const PERMISSIONS_BOOTSTRAP_DONE_KEY = 'permissions_bootstrap_done_v1';
 
-function buildSignedHeaders(userId: string, body: object, idempotencyKey?: string): Record<string, string> {
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const bodyHash = CryptoJS.SHA256(JSON.stringify(body)).toString();
-  const message = `${userId}:${timestamp}:${bodyHash}`;
-  return {
-    'X-App-Signature': CryptoJS.HmacSHA256(message, APP_SIGNING_SECRET).toString(),
-    'X-Timestamp': timestamp,
-    'X-Idempotency-Key': idempotencyKey || uuidv4(),
+type ActiveStepSession = {
+  sessionId: string;
+  sessionToken: string;
+  expiresAt: string;
+  nextSequenceNumber: number;
+  deviceId: string;
+  platform: 'android';
+  appVersion: string;
+  mlModelVersion: string;
+};
+
+function roundProbability(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return null;
+  }
+  return Math.max(0, Math.min(1, Number(n.toFixed(4))));
+}
+
+function stablePayloadHash(payload: Record<string, unknown>): string {
+  const ordered = {
+    session_id: payload.session_id ?? null,
+    client_event_id: payload.client_event_id ?? null,
+    sequence_number: payload.sequence_number ?? null,
+    timestamp_client: payload.timestamp_client ?? null,
+    steps_delta: payload.steps_delta ?? null,
+    steps_total: payload.steps_total ?? null,
+    ml_motion_label: payload.ml_motion_label ?? null,
+    ml_walk_probability: roundProbability(payload.ml_walk_probability),
+    ml_shake_probability: roundProbability(payload.ml_shake_probability),
+    ml_model_version: payload.ml_model_version ?? null,
   };
+
+  return CryptoJS.SHA256(JSON.stringify(ordered)).toString();
+}
+
+function isExpiredSessionPayload(session: ActiveStepSession | null): boolean {
+  if (!session) {
+    return true;
+  }
+
+  const expiresAt = Date.parse(session.expiresAt);
+  return Number.isFinite(expiresAt) ? expiresAt <= Date.now() : true;
+}
+
+function isExpiredSessionError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const maybeAxios = error as { response?: { status?: number; data?: { detail?: string; message?: string; error?: string } } };
+  const statusCode = maybeAxios.response?.status;
+  const message = `${maybeAxios.response?.data?.detail || ''} ${maybeAxios.response?.data?.message || ''} ${maybeAxios.response?.data?.error || ''}`.toLowerCase();
+  return statusCode === 401 || statusCode === 403 || message.includes('expired') || message.includes('invalid session') || message.includes('could not be verified');
 }
 
 function extractSyncErrorMessage(error: unknown): string {
@@ -90,9 +134,122 @@ export function useHealthSync() {
   const lastHourlySyncAtRef = useRef(0);
   const lastSilentSyncAtRef = useRef(0);
   const hourlyBaselineRef = useRef<{ key: string; baselineSteps: number }>({ key: '', baselineSteps: 0 });
+  const activeStepSessionRef = useRef<ActiveStepSession | null>(null);
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const userId = useAuthStore((state) => state.user?.id);
+
+  const ensureActiveStepSession = useCallback(async (): Promise<ActiveStepSession> => {
+    const nativeSession = await DeviceStepCounter.startStepSession();
+    const existing = activeStepSessionRef.current;
+
+    if (existing && !isExpiredSessionPayload(existing)) {
+      return existing;
+    }
+
+    if (nativeSession.session_id && nativeSession.session_token && nativeSession.expires_at) {
+      const cached: ActiveStepSession = {
+        sessionId: nativeSession.session_id,
+        sessionToken: nativeSession.session_token,
+        expiresAt: nativeSession.expires_at,
+        nextSequenceNumber: nativeSession.next_sequence_number ?? 1,
+        deviceId: nativeSession.device_id,
+        platform: 'android',
+        appVersion: nativeSession.app_version,
+        mlModelVersion: nativeSession.ml_model_version,
+      };
+      activeStepSessionRef.current = cached;
+      return cached;
+    }
+
+    const started = await stepsService.startSession({
+      device_id: nativeSession.device_id,
+      platform: 'android',
+      app_version: nativeSession.app_version,
+      ml_model_version: nativeSession.ml_model_version,
+    });
+
+    const created: ActiveStepSession = {
+      sessionId: started.session_id,
+      sessionToken: started.session_token,
+      expiresAt: started.expires_at,
+      nextSequenceNumber: started.sequence_start ?? 1,
+      deviceId: nativeSession.device_id,
+      platform: 'android',
+      appVersion: nativeSession.app_version,
+      mlModelVersion: nativeSession.ml_model_version,
+    };
+
+    await DeviceStepCounter.setActiveStepSession({
+      session_id: created.sessionId,
+      session_token: created.sessionToken,
+      expires_at: created.expiresAt,
+      next_sequence_number: created.nextSequenceNumber,
+    }).catch(() => ({ saved: false }));
+
+    activeStepSessionRef.current = created;
+    return created;
+  }, []);
+
+  const clearActiveStepSession = useCallback(async () => {
+    activeStepSessionRef.current = null;
+    await DeviceStepCounter.clearActiveStepSession().catch(() => ({ cleared: false }));
+  }, []);
+
+  const submitHealthPayload = useCallback(async (healthPayload: StepSyncForm): Promise<void> => {
+    let session = await ensureActiveStepSession();
+    let payload = { ...healthPayload } as StepSyncForm & Record<string, unknown>;
+
+    const attachSession = (sessionState: ActiveStepSession) => {
+      const timestampClient = typeof payload.timestamp_client === 'string' && payload.timestamp_client.trim()
+        ? payload.timestamp_client
+        : new Date().toISOString();
+      payload = {
+        ...payload,
+        device_id: sessionState.deviceId,
+        session_id: sessionState.sessionId,
+        session_token: sessionState.sessionToken,
+        client_event_id: payload.client_event_id || uuidv4(),
+        sequence_number: sessionState.nextSequenceNumber,
+        timestamp_client: timestampClient,
+        steps_total: payload.steps_total ?? payload.steps,
+        steps_delta: payload.steps_delta ?? payload.steps,
+      };
+      payload.payload_hash = stablePayloadHash(payload);
+    };
+
+    attachSession(session);
+
+    try {
+      await stepsService.syncHealth(payload as StepSyncForm);
+      session = { ...session, nextSequenceNumber: session.nextSequenceNumber + 1 };
+      activeStepSessionRef.current = session;
+      await DeviceStepCounter.setActiveStepSession({
+        session_id: session.sessionId,
+        session_token: session.sessionToken,
+        expires_at: session.expiresAt,
+        next_sequence_number: session.nextSequenceNumber,
+      }).catch(() => ({ saved: false }));
+      return;
+    } catch (error) {
+      if (!isExpiredSessionError(error)) {
+        throw error;
+      }
+
+      await clearActiveStepSession();
+      session = await ensureActiveStepSession();
+      attachSession(session);
+      await stepsService.syncHealth(payload as StepSyncForm);
+      session = { ...session, nextSequenceNumber: session.nextSequenceNumber + 1 };
+      activeStepSessionRef.current = session;
+      await DeviceStepCounter.setActiveStepSession({
+        session_id: session.sessionId,
+        session_token: session.sessionToken,
+        expires_at: session.expiresAt,
+        next_sequence_number: session.nextSequenceNumber,
+      }).catch(() => ({ saved: false }));
+    }
+  }, [clearActiveStepSession, ensureActiveStepSession]);
 
   const flushQueuedSync = useCallback(async () => {
     if (!userId || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
@@ -108,7 +265,7 @@ export function useHealthSync() {
       try {
         if (item.kind === 'health') {
           const healthPayload = item.payload as StepSyncForm;
-          await stepsService.syncHealth(healthPayload, buildSignedHeaders(String(userId), healthPayload, item.idempotencyKey));
+          await submitHealthPayload(healthPayload);
         } else {
           const hourlyPayload = item.payload as { date: string; hourly: HourlyStep[]; waypoints: LocationWaypoint[] };
           await stepsService.syncHourly(hourlyPayload);
@@ -122,7 +279,7 @@ export function useHealthSync() {
         await touchOutboxRetry(item.queueKey);
       }
     }
-  }, [userId]);
+  }, [submitHealthPayload, userId]);
 
   useEffect(() => {
     const onOnline = () => {
@@ -248,7 +405,8 @@ export function useHealthSync() {
 
       if (platform === 'android') {
         const profile = queryClient.getQueryData<User>(['profile']);
-        data = await readAndroidSensorSteps(profile);
+        const activeSession = await ensureActiveStepSession();
+        data = await readAndroidSensorSteps(profile, activeSession);
         setPermissionStatus('granted');
       } else {
         return;
@@ -423,7 +581,7 @@ export function useAutoHealthSync(intervalMs: number = 1000) {
   return { isSyncing };
 }
 
-async function readAndroidSensorSteps(profile?: User) {
+async function readAndroidSensorSteps(profile: User | undefined, session: ActiveStepSession) {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
 
@@ -461,7 +619,17 @@ async function readAndroidSensorSteps(profile?: User) {
     ? Math.round((met * 3.5 * weightKg / 200) * active_minutes)
     : null;
 
-  return {
+  const timestampClient = typeof reading.timestamp_client === 'string' && reading.timestamp_client.trim()
+    ? reading.timestamp_client
+    : new Date().toISOString();
+  const clientEventId = typeof reading.client_event_id === 'string' && reading.client_event_id.trim()
+    ? reading.client_event_id
+    : uuidv4();
+  const sequenceNumber = Math.max(1, Math.round(Number(reading.sequence_number) || session.nextSequenceNumber || 1));
+  const stepsTotal = Math.max(0, Math.round(Number(reading.steps_total) || steps));
+  const stepsDelta = Math.max(0, Math.round(Number(reading.steps_delta) || steps));
+
+  const payload = {
     date: dateStr,
     source: 'device_sensor' as const,
     steps,
@@ -483,7 +651,25 @@ async function readAndroidSensorSteps(profile?: User) {
     ml_walk_probability: mlWalkProbability,
     ml_shake_probability: mlShakeProbability,
     ml_model_version: mlModelVersion,
+    smoothed_walk_probability: clampNumber(reading.smoothed_walk_probability, 0, 1, mlWalkProbability),
+    smoothed_shake_probability: clampNumber(reading.smoothed_shake_probability, 0, 1, mlShakeProbability),
+    ml_window_count: Math.max(0, Math.round(Number(reading.ml_window_count) || 0)),
+    ml_confidence_stability: clampNumber(reading.ml_confidence_stability, 0, 1, 0),
+    motion_entropy: clampNumber(reading.motion_entropy, 0, 10, 0),
+    device_id: typeof reading.device_id === 'string' ? reading.device_id : session.deviceId,
+    session_id: session.sessionId,
+    session_token: session.sessionToken,
+    client_event_id: clientEventId,
+    sequence_number: sequenceNumber,
+    timestamp_client: timestampClient,
+    steps_delta: stepsDelta,
+    steps_total: stepsTotal,
+    payload_hash: '',
   };
+
+  payload.payload_hash = stablePayloadHash(payload);
+
+  return payload;
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
