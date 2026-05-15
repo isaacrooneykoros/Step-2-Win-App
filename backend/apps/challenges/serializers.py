@@ -11,7 +11,7 @@ class ParticipantSerializer(serializers.ModelSerializer):
     """
     username = serializers.CharField(source='user.username', read_only=True)
     progress_percentage = serializers.IntegerField(read_only=True)
-    
+
     class Meta:
         model = Participant
         fields = [
@@ -34,7 +34,7 @@ class ChallengeSerializer(serializers.ModelSerializer):
     current_participants = serializers.IntegerField(read_only=True)
     days_remaining = serializers.IntegerField(read_only=True)
     is_full = serializers.BooleanField(read_only=True)
-    
+
     class Meta:
         model = Challenge
         fields = [
@@ -49,7 +49,7 @@ class ChallengeSerializer(serializers.ModelSerializer):
             'id', 'creator', 'total_pool', 'current_participants',
             'status', 'invite_code', 'created_at'
         ]
-    
+
     def validate_entry_fee(self, value):
         if value < 1:
             raise serializers.ValidationError('Minimum entry fee is KES 1')
@@ -77,7 +77,7 @@ class ChallengeSerializer(serializers.ModelSerializer):
             except DjangoValidationError as e:
                 raise serializers.ValidationError(e.message)
         return value
-    
+
     def validate(self, data):
         # Validate dates
         if 'start_date' in data and 'end_date' in data:
@@ -85,14 +85,14 @@ class ChallengeSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'end_date': 'End date must be after start date'
                 })
-            
+
             # Duration must be between 7 and 30 days
             duration = (data['end_date'] - data['start_date']).days
             if duration < 7 or duration > 30:
                 raise serializers.ValidationError({
                     'end_date': 'Challenge must be between 7 and 30 days long'
                 })
-        
+
         return data
 
 
@@ -104,12 +104,12 @@ class ChallengeDetailSerializer(ChallengeSerializer):
     my_participation = serializers.SerializerMethodField()
     platform_fee = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     net_pool = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
-    
+
     class Meta(ChallengeSerializer.Meta):
         fields = ChallengeSerializer.Meta.fields + [
             'participants', 'my_participation', 'platform_fee', 'net_pool'
         ]
-    
+
     def get_my_participation(self, obj) -> dict | None:
         request = self.context.get('request')
         if request and request.user.is_authenticated:
@@ -127,7 +127,7 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
     """
     duration_days = serializers.IntegerField(write_only=True, default=7, help_text='Challenge duration in days (7, 14, 21, or 30)')
     is_public = serializers.BooleanField(write_only=True, default=True, help_text='Whether challenge is public or private')
-    
+
     class Meta:
         model = Challenge
         fields = [
@@ -140,7 +140,21 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
             'is_private': {'required': False},
             'max_participants': {'required': False, 'default': 20},
         }
-    
+
+    def validate_name(self, value):
+        try:
+            return sanitize_text(value, max_length=100)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message)
+
+    def validate_description(self, value):
+        if value:
+            try:
+                return sanitize_text(value, max_length=500)
+            except DjangoValidationError as e:
+                raise serializers.ValidationError(e.message)
+        return value
+
     def validate_milestone(self, value):
         """Validate milestone is one of the valid choices"""
         valid_milestones = [50000, 70000, 90000]
@@ -149,7 +163,7 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
                 f'Milestone must be one of: {valid_milestones}'
             )
         return value
-    
+
     def validate_entry_fee(self, value):
         if value < 1:
             raise serializers.ValidationError('Minimum entry fee is KES 1')
@@ -160,14 +174,14 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
         if value not in allowed:
             raise serializers.ValidationError(f'Theme emoji must be one of: {allowed}')
         return value
-    
+
     def validate_max_participants(self, value):
         if value < 2:
             raise serializers.ValidationError('Minimum 2 participants required')
         if value > 1000:
             raise serializers.ValidationError('Maximum 1000 participants allowed')
         return value
-    
+
     def validate_duration_days(self, value):
         """Validate duration is one of the allowed options"""
         allowed_durations = [7, 14, 21, 30]
@@ -198,12 +212,12 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
                 })
 
         return data
-    
+
     def create(self, validated_data):
         # Extract duration and visibility
         duration_days = validated_data.pop('duration_days', 7)
         is_public = validated_data.pop('is_public', True)
-        
+
         # Set is_private based on is_public
         validated_data['is_public'] = is_public
         validated_data['is_private'] = not is_public
@@ -211,12 +225,12 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
         # Public challenges always use proportional payout mode
         if is_public:
             validated_data['win_condition'] = 'proportional'
-        
+
         # Set dates: start today, end based on duration
         validated_data['start_date'] = date.today()
         validated_data['end_date'] = date.today() + timedelta(days=duration_days)
         validated_data['status'] = 'active'
-        
+
         return super().create(validated_data)
 
 
@@ -225,7 +239,7 @@ class JoinChallengeSerializer(serializers.Serializer):
     Serializer for joining a challenge
     """
     invite_code = serializers.CharField(max_length=10)
-    
+
     def validate_invite_code(self, value):
         try:
             challenge = Challenge.objects.get(invite_code=value.upper())
@@ -235,7 +249,7 @@ class JoinChallengeSerializer(serializers.Serializer):
                 raise serializers.ValidationError('Challenge is full')
         except Challenge.DoesNotExist:
             raise serializers.ValidationError('Invalid invite code')
-        
+
         return value.upper()
 
 
@@ -244,7 +258,7 @@ class ChallengeMessageSerializer(serializers.ModelSerializer):
     Serializer for challenge chat messages
     """
     username = serializers.CharField(source='user.username', read_only=True, allow_null=True)
-    
+
     class Meta:
         model = ChallengeMessage
         fields = ['id', 'user', 'username', 'message', 'is_system', 'event_type', 'created_at']
