@@ -114,6 +114,7 @@ def run_backend_ci_checks(python_cmd: list[str], *, skip_tests: bool) -> None:
         'DATABASE_URL': 'postgres://releasegate:releasegate@localhost:5432/releasegate',
         'DATABASE_POOL_URL': 'postgres://releasegate:releasegate@localhost:6432/releasegate',
         'REDIS_URL': 'redis://localhost:6379/1',
+        'APP_SIGNING_SECRET': 'release-gate-signing-secret-placeholder',
     }
 
     backend_test_env = {
