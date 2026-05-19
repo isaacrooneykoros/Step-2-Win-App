@@ -27,6 +27,7 @@ from .serializers import (
     UserSupportTicketMessageSerializer,
 )
 from apps.admin_api.models import SupportTicket, SupportTicketMessage
+from apps.core.sanitizers import sanitize_text
 from apps.core.throttles import (
     DashboardReadRateThrottle,
     DeviceBindRateThrottle,
@@ -69,7 +70,7 @@ def register(request):
 
     # Generate JWT tokens
     refresh = RefreshToken.for_user(user)
-    
+
     return Response({
         'access': str(refresh.access_token),
         'refresh': str(refresh),
@@ -87,13 +88,13 @@ def login(request):
     """
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    
+
     username_or_email_or_phone = serializer.validated_data['username']
     password = serializer.validated_data['password']
-    
+
     # Try to authenticate with username first
     user = authenticate(request=request, username=username_or_email_or_phone, password=password)
-    
+
     # If authentication failed, try to find user by email or phone number
     if not user:
         try:
@@ -105,27 +106,27 @@ def login(request):
                 user_obj = User.objects.get(phone_number=username_or_email_or_phone)
             else:
                 user_obj = None
-            
+
             # If found, authenticate with the username
             if user_obj:
                 user = authenticate(request=request, username=user_obj.username, password=password)
         except User.DoesNotExist:
             pass
-    
+
     if not user:
         return Response(
-            {'error': 'Invalid credentials'}, 
+            {'error': 'Invalid credentials'},
             status=status.HTTP_401_UNAUTHORIZED
         )
-    
+
     if not user.is_active:
         return Response(
-            {'error': 'Account is disabled'}, 
+            {'error': 'Account is disabled'},
             status=status.HTTP_403_FORBIDDEN
         )
-    
+
     refresh = RefreshToken.for_user(user)
-    
+
     return Response({
         'access': str(refresh.access_token),
         'refresh': str(refresh),
@@ -242,7 +243,7 @@ def logout(request):
         return Response({'status': 'Successfully logged out'})
     except Exception:
         return Response(
-            {'error': 'Invalid token'}, 
+            {'error': 'Invalid token'},
             status=status.HTTP_400_BAD_REQUEST
         )
 
@@ -260,16 +261,16 @@ class ProfileView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
-    
+
     def retrieve(self, request, *args, **kwargs):
         """Override retrieve to handle daily reset"""
         from apps.steps.daily_reset import reset_daily_stats_if_needed
-        
+
         user = self.get_object()
         reset_daily_stats_if_needed(user)
-        
+
         return super().retrieve(request, *args, **kwargs)
-    
+
     def put(self, request, *args, **kwargs):
         """Handle PUT requests as partial updates"""
         return self.partial_update(request, *args, **kwargs)
@@ -320,16 +321,16 @@ def upload_profile_picture(request):
                 },
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
-    
+
     # Delete old profile picture if it exists
     if user.profile_picture:
         user.profile_picture.delete()
-    
+
     # Save new profile picture
     user.profile_picture = serializer.validated_data['profile_picture']
     user.last_profile_picture_update = timezone.now()
     user.save()
-    
+
     return Response({
         'status': 'success',
         'profile_picture_url': build_absolute_media_url(
@@ -366,18 +367,18 @@ def delete_profile_picture(request):
     Delete the current user's profile picture
     """
     user = request.user
-    
+
     if user.profile_picture:
         user.profile_picture.delete()
         user.profile_picture = None
         user.last_profile_picture_update = None
         user.save()
-        
+
         return Response({
             'status': 'success',
             'message': 'Profile picture deleted successfully'
         }, status=status.HTTP_200_OK)
-    
+
     return Response({
         'status': 'error',
         'message': 'No profile picture to delete'
@@ -413,16 +414,16 @@ def bind_device(request):
     device_id = str(request.data.get('device_id', '')).strip()
     platform = request.data.get('platform')
     device_signature = (request.data.get('device_signature') or '').strip()
-    
+
     if not device_id:
         return Response(
-            {'error': 'device_id required'}, 
+            {'error': 'device_id required'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     if platform not in ['android', 'ios']:
         return Response(
-            {'error': 'platform must be android or ios'}, 
+            {'error': 'platform must be android or ios'},
             status=status.HTTP_400_BAD_REQUEST
         )
 
@@ -457,20 +458,20 @@ def bind_device(request):
             {'error': 'Invalid device signature'},
             status=status.HTTP_403_FORBIDDEN,
         )
-    
+
     # Check if device is already bound to another account
     if User.objects.filter(device_id=device_id).exclude(id=request.user.id).exists():
         return Response(
-            {'error': 'Device already bound to another account'}, 
+            {'error': 'Device already bound to another account'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     with transaction.atomic():
         user = User.objects.select_for_update().get(id=request.user.id)
         user.device_id = device_id
         user.device_platform = platform
         user.save()
-    
+
     return Response({
         'status': 'Device bound successfully',
         'device_id': device_id,
@@ -503,7 +504,7 @@ def device_status(request):
     last_sync = HealthRecord.objects.filter(
         user=request.user
     ).order_by('-date').first()
-    
+
     return Response({
         'bound': request.user.device_id is not None,
         'platform': request.user.device_platform,
@@ -521,18 +522,18 @@ def change_password(request):
     """
     serializer = ChangePasswordSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    
+
     # Check old password
     if not request.user.check_password(serializer.validated_data['old_password']):
         return Response(
-            {'error': 'Old password is incorrect'}, 
+            {'error': 'Old password is incorrect'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     # Set new password
     request.user.set_password(serializer.validated_data['new_password'])
     request.user.save()
-    
+
     return Response({'status': 'Password updated successfully'})
 
 
@@ -561,7 +562,7 @@ def user_stats(request):
     Get detailed user statistics
     """
     user = request.user
-    
+
     return Response({
         'username': user.username,
         'total_steps': user.total_steps,
@@ -735,6 +736,12 @@ def reply_support_ticket(request, ticket_id):
     if not message:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
 
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    try:
+        message = sanitize_text(message, max_length=5000)
+    except DjangoValidationError as e:
+        return Response({'error': str(e.message)}, status=status.HTTP_400_BAD_REQUEST)
+
     reply = SupportTicketMessage.objects.create(
         ticket=ticket,
         sender=request.user,
@@ -802,31 +809,31 @@ def reply_support_ticket(request, ticket_id):
 def update_ticket_status(request, ticket_id):
     """Allow user to mark their ticket as resolved or reopen it"""
     from apps.admin_api.realtime import broadcast_support_ticket
-    
+
     try:
         ticket = SupportTicket.objects.get(id=ticket_id, user=request.user)
     except SupportTicket.DoesNotExist:
         return Response({'error': 'Support ticket not found'}, status=status.HTTP_404_NOT_FOUND)
-    
+
     new_status = str(request.data.get('status', '')).strip()
-    
+
     # Users can only mark as resolved or reopen (set to in_progress)
     allowed_statuses = ['resolved', 'in_progress', 'open']
     if new_status not in allowed_statuses:
         return Response({'error': f'Invalid status. Allowed: {", ".join(allowed_statuses)}'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     old_status = ticket.status
     ticket.status = new_status
-    
+
     # Set resolved_at timestamp if marking as resolved
     if new_status == 'resolved' and old_status != 'resolved':
         from django.utils import timezone
         ticket.resolved_at = timezone.now()
     elif new_status != 'resolved':
         ticket.resolved_at = None
-    
+
     ticket.save(update_fields=['status', 'resolved_at', 'updated_at'])
-    
+
     broadcast_support_ticket(
         ticket.id,
         {
@@ -837,7 +844,7 @@ def update_ticket_status(request, ticket_id):
             'resolved_at': ticket.resolved_at.isoformat() if ticket.resolved_at else None,
         },
     )
-    
+
     return Response({
         'status': 'Ticket status updated',
         'ticket': UserSupportTicketSerializer(ticket).data,
