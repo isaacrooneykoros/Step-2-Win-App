@@ -208,7 +208,7 @@ def join_challenge(request):
 
     try:
         with transaction.atomic():
-            # Lock user first to prevent race conditions and fix UnboundLocalError
+            # Resolve and lock user first to prevent race conditions and UnboundLocalError
             user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
 
             challenge = Challenge.objects.select_for_update().get(
