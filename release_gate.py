@@ -123,6 +123,7 @@ def run_backend_ci_checks(python_cmd: list[str], *, skip_tests: bool) -> None:
         'USE_SQLITE': 'True',
         'SECRET_KEY': 'test-secret-key-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
         'ALLOWED_HOSTS': 'localhost,127.0.0.1,testserver',
+        'APP_SIGNING_SECRET': 'test-signing-secret-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
     }
 
     run(python_cmd + ['manage.py', 'check', '--deploy'], BACKEND, backend_prod_env)
