@@ -65,8 +65,10 @@ class ChallengeIntegrationTests(APITestCase):
         creator = User.objects.create_user(
             username='challenge_creator_new',
             email='challenge_creator_new@example.com',
+            phone_number='254712345679',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            challenges_joined=1,
         )
         self.client.force_authenticate(user=creator)
 
