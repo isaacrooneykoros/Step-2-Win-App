@@ -17,6 +17,7 @@ _MANAGE_PY_BOOTSTRAP_COMMANDS = {
     'check',
     'collectstatic',
     'migrate',
+    'makemigrations',
     'showmigrations',
 }
 _CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 else ''
