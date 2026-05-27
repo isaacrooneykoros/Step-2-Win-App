@@ -61,12 +61,49 @@ class ChallengeIntegrationTests(APITestCase):
         self.assertEqual(self.joiner.locked_balance, Decimal('100.00'))
         self.assertEqual(self.challenge.total_pool, Decimal('200.00'))
 
+    def test_challenge_chat_xss_protection(self):
+        """
+        Verify that challenge chat messages are sanitized to prevent Stored XSS
+        """
+        # Create a private challenge for chat testing
+        private_challenge = Challenge.objects.create(
+            name='Private Chat Challenge',
+            creator=self.owner,
+            milestone=50000,
+            entry_fee=Decimal('100.00'),
+            is_private=True,
+            is_public=False,
+            status='active',
+            start_date=date.today(),
+            end_date=date.today() + timedelta(days=7),
+        )
+        Participant.objects.create(challenge=private_challenge, user=self.owner)
+
+        self.client.force_authenticate(user=self.owner)
+
+        # Stored XSS payload
+        xss_payload = "Hello <script>alert('XSS')</script> <img src=x onerror=alert(1)>"
+
+        url = f'/api/challenges/{private_challenge.id}/chat/'
+        response = self.client.post(url, {'content': xss_payload}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # Verify stored content is sanitized
+        from apps.challenges.models import ChallengeMessage
+        msg = ChallengeMessage.objects.get(id=response.data['id'])
+
+        self.assertNotIn('<script>', msg.message)
+        self.assertNotIn('onerror', msg.message)
+        self.assertIn('Hello', msg.message)
+
     def test_create_challenge_creates_participant_and_locks_balance(self):
         creator = User.objects.create_user(
             username='challenge_creator_new',
             email='challenge_creator_new@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            challenges_joined=1,
         )
         self.client.force_authenticate(user=creator)
 

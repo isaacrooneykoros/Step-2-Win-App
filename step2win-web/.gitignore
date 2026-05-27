@@ -15,7 +15,7 @@ dist-ssr
 *.sw?
 
 # Capacitor
-android/
+# android/  <-- Sentinel: disabled to allow CI to find the platform directory
 ios/
 .capacitor
 
