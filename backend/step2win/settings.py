@@ -42,7 +42,7 @@ if not DEBUG and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
     if any(host in {'localhost', '127.0.0.1', 'testserver'} for host in ALLOWED_HOSTS):
         raise ImproperlyConfigured('Production ALLOWED_HOSTS cannot contain localhost/testserver values.')
 
-if ENVIRONMENT == 'production' and os.getenv('USE_SQLITE', 'False').strip().lower() == 'true':
+if ENVIRONMENT == 'production' and not DEBUG and os.getenv('USE_SQLITE', 'False').strip().lower() == 'true':
     raise ImproperlyConfigured('SQLite is not allowed in production. Configure PostgreSQL DATABASE_URL/DATABASE_POOL_URL.')
 if ENVIRONMENT == 'production' and not os.getenv('REDIS_URL', '').strip():
     raise ImproperlyConfigured('REDIS_URL is required in production for throttling/locks/channels/celery.')
