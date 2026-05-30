@@ -18,9 +18,9 @@ _MANAGE_PY_BOOTSTRAP_COMMANDS = {
     'collectstatic',
     'migrate',
     'showmigrations',
+    'makemigrations',
 }
-_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and sys.argv[0].endswith('manage.py') else ''
-_ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS
+_ALLOW_BOOTSTRAP_SECRET_FALLBACKS = any(arg in _MANAGE_PY_BOOTSTRAP_COMMANDS for arg in sys.argv) or 'test' in sys.argv
 
 ENVIRONMENT = os.getenv('DJANGO_ENV', 'development').strip().lower()
 DEBUG = os.getenv('DEBUG', 'False').strip().lower() == 'true'
@@ -48,10 +48,10 @@ if ENVIRONMENT == 'production' and not os.getenv('REDIS_URL', '').strip():
     raise ImproperlyConfigured('REDIS_URL is required in production for throttling/locks/channels/celery.')
 USE_REDIS = os.getenv('USE_REDIS', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
-APP_SIGNING_SECRET = os.environ.get('APP_SIGNING_SECRET', '')
-if not APP_SIGNING_SECRET and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
-    raise ImproperlyConfigured('APP_SIGNING_SECRET environment variable is required.')
+APP_SIGNING_SECRET = os.getenv('APP_SIGNING_SECRET', '')
 if not APP_SIGNING_SECRET:
+    if ENVIRONMENT == 'production' and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
+        raise ImproperlyConfigured('APP_SIGNING_SECRET environment variable is required in production.')
     APP_SIGNING_SECRET = SECRET_KEY
 
 INSTALLED_APPS = [
