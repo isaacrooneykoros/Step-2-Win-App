@@ -1,29 +1,25 @@
 import random
-
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-
 User = get_user_model()
-
 
 class AuthAndHealthTests(APITestCase):
     def test_health_endpoint_returns_ok(self):
         response = self.client.get('/api/health/')
-
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data.get('status'), 'ok')
 
     def test_register_login_and_profile_flow(self):
         username = f"testuser_{random.randint(100000, 999999)}"
         password = 'TestPass123!'
-
         register_response = self.client.post(
             '/api/auth/register/',
             {
                 'username': username,
                 'email': f'{username}@example.com',
+                'phone_number': f'2547{random.randint(10000000, 99999999)}',
                 'password': password,
                 'confirm_password': password,
             },

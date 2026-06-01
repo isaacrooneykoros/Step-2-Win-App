@@ -1,0 +1,4 @@
+## 2026-06-01 - Stored XSS in Administrative and Social Interfaces
+**Vulnerability:** User-supplied text in challenge chat messages, support ticket replies, and administrative notes was being persisted and displayed without sanitization, allowing for Stored Cross-Site Scripting (XSS).
+**Learning:** Even in "internal" or "administrative" contexts (like support tickets and admin notes), trusting user or staff input can lead to XSS that targets high-privileged users. The existing `bleach`-based sanitizers were available in `apps.core.sanitizers` but were not consistently applied across all views handling user text.
+**Prevention:** Always apply `sanitize_text` or `sanitize_chat_message` to any non-validated text field before saving to the database. Catch `ValidationError` from sanitizers in the view layer to provide clear feedback to the user.
