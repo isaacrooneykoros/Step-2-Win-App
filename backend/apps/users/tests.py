@@ -18,12 +18,14 @@ class AuthAndHealthTests(APITestCase):
     def test_register_login_and_profile_flow(self):
         username = f"testuser_{random.randint(100000, 999999)}"
         password = 'TestPass123!'
+        phone_number = f"2547{random.randint(10000000, 99999999)}"
 
         register_response = self.client.post(
             '/api/auth/register/',
             {
                 'username': username,
                 'email': f'{username}@example.com',
+                'phone_number': phone_number,
                 'password': password,
                 'confirm_password': password,
             },
