@@ -18,12 +18,16 @@ class ChallengeIntegrationTests(APITestCase):
             email='owner@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('1000.00'),
+            challenges_joined=1,
+            phone_number='254712345678',
         )
         self.joiner = User.objects.create_user(
             username='challenge_joiner',
             email='joiner@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('1000.00'),
+            challenges_joined=1,
+            phone_number='254712345679',
         )
         self.challenge = Challenge.objects.create(
             name='Integration Challenge',
@@ -67,6 +71,8 @@ class ChallengeIntegrationTests(APITestCase):
             email='challenge_creator_new@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            challenges_joined=1,
+            phone_number='254712345670',
         )
         self.client.force_authenticate(user=creator)
 
@@ -94,3 +100,62 @@ class ChallengeIntegrationTests(APITestCase):
         self.assertEqual(creator.locked_balance, Decimal('100.00'))
         self.assertEqual(created.total_pool, Decimal('100.00'))
         self.assertTrue(Participant.objects.filter(challenge=created, user=creator).exists())
+
+
+class ChallengeSecurityTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='security_user',
+            email='security@example.com',
+            password='TestPass123!',
+            wallet_balance=Decimal('1000.00'),
+            challenges_joined=1,
+            phone_number='254712345671',
+        )
+        self.challenge = Challenge.objects.create(
+            name='Security Challenge',
+            creator=self.user,
+            milestone=50000,
+            entry_fee=Decimal('100.00'),
+            total_pool=Decimal('100.00'),
+            max_participants=10,
+            status='active',
+            start_date=date.today(),
+            end_date=date.today() + timedelta(days=7),
+            is_private=True,
+        )
+        Participant.objects.create(challenge=self.challenge, user=self.user)
+
+    def test_join_challenge_unbound_local_error(self):
+        # This user is NOT the owner
+        other_user = User.objects.create_user(
+            username='other_user',
+            email='other@example.com',
+            password='TestPass123!',
+            wallet_balance=Decimal('1000.00'),
+            challenges_joined=1,
+            phone_number='254712345672',
+        )
+        self.client.force_authenticate(user=other_user)
+
+        response = self.client.post(
+            '/api/challenges/join/',
+            {'invite_code': self.challenge.invite_code},
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_challenge_chat_xss_protection(self):
+        self.client.force_authenticate(user=self.user)
+
+        xss_payload = "<script>alert('xss')</script>Hello"
+        response = self.client.post(
+            f'/api/challenges/{self.challenge.id}/chat/',
+            {'content': xss_payload},
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertNotIn('<script>', response.data['content'])
+        self.assertNotIn('</script>', response.data['content'])
+        self.assertEqual(response.data['content'], "alert('xss')Hello")
