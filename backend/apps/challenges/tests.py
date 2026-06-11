@@ -68,6 +68,10 @@ class ChallengeIntegrationTests(APITestCase):
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
         )
+        # Paid challenge creators must have joined at least one challenge previously.
+        creator.challenges_joined = 1
+        creator.save()
+
         self.client.force_authenticate(user=creator)
 
         response = self.client.post(
