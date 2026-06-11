@@ -238,7 +238,6 @@ export function UsersPage() {
 
   useEffect(() => {
     if (!selected) {
-      setIsEditing(false)
       setEditError('')
       return
     }
@@ -254,7 +253,6 @@ export function UsersPage() {
 
   useEffect(() => {
     if (!accessToken) {
-      setLiveConnected(false)
       return
     }
 
