@@ -67,7 +67,13 @@ class ChallengeIntegrationTests(APITestCase):
             email='challenge_creator_new@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            challenges_joined=1,
+            phone_number='+254712345679'
         )
+        # Set trust score to meet minimum requirement
+        from apps.steps.models import TrustScore
+        TrustScore.objects.create(user=creator, score=70)
+
         self.client.force_authenticate(user=creator)
 
         response = self.client.post(

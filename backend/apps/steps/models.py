@@ -395,7 +395,7 @@ class StepSyncEvent(models.Model):
     ml_shake_probability = models.FloatField(null=True, blank=True)
     ml_model_version = models.CharField(max_length=64, null=True, blank=True)
     interval_risk_score = models.FloatField(default=0.0)
-    accepted = models.BooleanField(default=True, db_index=True)
+    accepted = models.BooleanField(default=True)
     rejection_reason = models.CharField(max_length=255, null=True, blank=True)
     raw_payload = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
