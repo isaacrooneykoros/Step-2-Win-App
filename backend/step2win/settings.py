@@ -21,7 +21,12 @@ _MANAGE_PY_BOOTSTRAP_COMMANDS = {
     'makemigrations',
     'test',
 }
-_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and sys.argv[0].endswith('manage.py') else ''
+_CURRENT_MANAGEMENT_COMMAND = ''
+if len(sys.argv) > 1:
+    if sys.argv[0].endswith('manage.py'):
+        _CURRENT_MANAGEMENT_COMMAND = sys.argv[1]
+    elif len(sys.argv) > 2 and sys.argv[1].endswith('manage.py'):
+        _CURRENT_MANAGEMENT_COMMAND = sys.argv[2]
 _ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS
 
 ENVIRONMENT = os.getenv('DJANGO_ENV', 'development').strip().lower()
