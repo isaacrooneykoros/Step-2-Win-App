@@ -295,7 +295,7 @@ class DeviceRegistration(models.Model):
     class Meta:
         unique_together = [('user', 'device_id')]
         indexes = [
-            models.Index(fields=['user', 'is_active']),
+            models.Index(fields=['user', 'is_active'], name='device_reg_user_active_idx'),
             models.Index(fields=['device_id']),
         ]
         ordering = ['-last_seen_at']
@@ -348,9 +348,9 @@ class StepSession(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=['user', 'status']),
-            models.Index(fields=['user', '-created_at']),
-            models.Index(fields=['expires_at', 'status']),
+            models.Index(fields=['user', 'status'], name='session_user_status_idx'),
+            models.Index(fields=['user', '-created_at'], name='session_user_created_idx'),
+            models.Index(fields=['expires_at', 'status'], name='session_expiry_status_idx'),
         ]
         ordering = ['-created_at']
 
@@ -402,10 +402,13 @@ class StepSyncEvent(models.Model):
 
     class Meta:
         unique_together = [('user', 'client_event_id')]
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'client_event_id'], name='syncevent_unique_user_event'),
+        ]
         indexes = [
-            models.Index(fields=['session', 'sequence_number']),
-            models.Index(fields=['user', 'created_at']),
-            models.Index(fields=['payload_hash']),
+            models.Index(fields=['session', 'sequence_number'], name='syncevent_session_sq_idx'),
+            models.Index(fields=['user', 'created_at'], name='syncevent_user_created_idx'),
+            models.Index(fields=['payload_hash'], name='syncevent_hash_idx'),
             models.Index(fields=['replay_detected']),
         ]
         ordering = ['-created_at']
@@ -507,8 +510,8 @@ class SuspiciousSessionReview(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=['status', '-created_at']),
-            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['status', '-created_at'], name='review_status_created_idx'),
+            models.Index(fields=['user', '-created_at'], name='review_user_created_idx'),
         ]
         ordering = ['-created_at']
 
