@@ -114,6 +114,7 @@ def run_backend_ci_checks(python_cmd: list[str], *, skip_tests: bool) -> None:
         'DATABASE_URL': 'postgres://releasegate:releasegate@localhost:5432/releasegate',
         'DATABASE_POOL_URL': 'postgres://releasegate:releasegate@localhost:6432/releasegate',
         'REDIS_URL': 'redis://localhost:6379/1',
+        'APP_SIGNING_SECRET': 'release-gate-app-signing-secret-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
     }
 
     backend_test_env = {
@@ -122,6 +123,7 @@ def run_backend_ci_checks(python_cmd: list[str], *, skip_tests: bool) -> None:
         'USE_SQLITE': 'True',
         'SECRET_KEY': 'test-secret-key-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
         'ALLOWED_HOSTS': 'localhost,127.0.0.1,testserver',
+        'APP_SIGNING_SECRET': 'test-app-signing-secret-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
     }
 
     run(python_cmd + ['manage.py', 'check', '--deploy'], BACKEND, backend_prod_env)

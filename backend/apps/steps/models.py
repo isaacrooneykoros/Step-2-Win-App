@@ -293,7 +293,9 @@ class DeviceRegistration(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = [('user', 'device_id')]
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'device_id'], name='device_registration_unique')
+        ]
         indexes = [
             models.Index(fields=['user', 'is_active']),
             models.Index(fields=['device_id']),
@@ -347,6 +349,9 @@ class StepSession(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'session_token_hash'], name='session_unique_token_hash')
+        ]
         indexes = [
             models.Index(fields=['user', 'status']),
             models.Index(fields=['user', '-created_at']),
@@ -387,7 +392,7 @@ class StepSyncEvent(models.Model):
     timestamp_server = models.DateTimeField(auto_now_add=True)
     payload_hash = models.CharField(max_length=255, db_index=True)
     signature_valid = models.BooleanField(default=False)
-    replay_detected = models.BooleanField(default=False)
+    replay_detected = models.BooleanField(default=False, db_index=True)
     steps_delta = models.IntegerField(default=0)
     raw_steps_total = models.IntegerField(null=True, blank=True)
     ml_motion_label = models.CharField(max_length=20, null=True, blank=True)
@@ -401,7 +406,9 @@ class StepSyncEvent(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = [('user', 'client_event_id')]
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'client_event_id'], name='syncevent_unique_user_event')
+        ]
         indexes = [
             models.Index(fields=['session', 'sequence_number']),
             models.Index(fields=['user', 'created_at']),
