@@ -48,11 +48,7 @@ if ENVIRONMENT == 'production' and not os.getenv('REDIS_URL', '').strip():
     raise ImproperlyConfigured('REDIS_URL is required in production for throttling/locks/channels/celery.')
 USE_REDIS = os.getenv('USE_REDIS', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
-APP_SIGNING_SECRET = os.environ.get('APP_SIGNING_SECRET', '')
-if not APP_SIGNING_SECRET and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
-    raise ImproperlyConfigured('APP_SIGNING_SECRET environment variable is required.')
-if not APP_SIGNING_SECRET:
-    APP_SIGNING_SECRET = SECRET_KEY
+APP_SIGNING_SECRET = os.getenv('APP_SIGNING_SECRET') or SECRET_KEY
 
 INSTALLED_APPS = [
     'daphne',
