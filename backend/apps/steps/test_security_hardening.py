@@ -4,7 +4,8 @@ Tests for production security hardening: sessions, replay protection, trust scor
 
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
+User = get_user_model()
 from datetime import timedelta
 import uuid
 
@@ -68,7 +69,7 @@ class SecurityUtilsTestCase(TestCase):
         
         # Probabilities rounded to 4 decimals
         payload3 = payload1.copy()
-        payload3['ml_walk_probability'] = 0.851234
+        payload3['ml_walk_probability'] = 0.850012
         hash4 = compute_payload_hash(payload3)
         self.assertEqual(hash1, hash4)  # Should still match due to rounding
 
