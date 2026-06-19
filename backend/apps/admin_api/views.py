@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.db import transaction as db_transaction
 from django.db.models import Sum, Count, Min, Max, Q
 from django.contrib.auth import authenticate
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.contrib.auth.password_validation import validate_password
 from django.shortcuts import get_object_or_404
 from django.core.cache import cache
@@ -39,6 +40,7 @@ from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiTypes
 from apps.core.throttles import AdminLoginRateThrottle
 from apps.core.url_utils import build_absolute_media_url
 from apps.core.locks import acquire_lock, release_lock
+from apps.core.sanitizers import sanitize_text
 from apps.payments.reconciliation import run_financial_reconciliation
 from apps.steps.drift_monitor import (
     AntiCheatDriftThresholds,
@@ -618,6 +620,10 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
         """Reject a pending challenge"""
         challenge = self.get_object()
         reason = request.data.get('reason', 'No reason provided')
+        try:
+            reason = sanitize_text(reason, max_length=500)
+        except DjangoValidationError as e:
+            return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
         challenge.status = 'cancelled'
         challenge.save()
         return Response({'status': f'Challenge rejected (cancelled). Reason: {reason}'})
@@ -824,6 +830,10 @@ class AdminWithdrawalViewSet(viewsets.ModelViewSet):
         """Reject a withdrawal request"""
         withdrawal = self.get_object()
         reason = request.data.get('reason', 'No reason provided')
+        try:
+            reason = sanitize_text(reason, max_length=500)
+        except DjangoValidationError as e:
+            return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
         withdrawal.status = 'rejected'
         withdrawal.processed_at = timezone.now()
         withdrawal.processed_by = request.user
@@ -1576,6 +1586,11 @@ def reply_support_ticket(request, ticket_id):
         return Response({'error': 'Support ticket not found'}, status=status.HTTP_404_NOT_FOUND)
 
     message_text = request.data.get('message', '').strip()
+    try:
+        message_text = sanitize_text(message_text, max_length=5000)
+    except DjangoValidationError as e:
+        return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
+
     if not message_text:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1681,7 +1696,10 @@ def update_support_ticket(request, ticket_id):
             updates['assigned_to'] = admin_user
 
     if 'admin_notes' in request.data:
-        updates['admin_notes'] = str(request.data.get('admin_notes') or '').strip()
+        try:
+            updates['admin_notes'] = sanitize_text(str(request.data.get('admin_notes') or '').strip(), max_length=5000)
+        except DjangoValidationError as e:
+            return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
 
     if not updates:
         return Response({'error': 'No valid fields to update'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2125,6 +2143,10 @@ def action_flag(request, flag_id):
 
     action = request.data.get('action')
     admin_note = str(request.data.get('admin_note') or '').strip()
+    try:
+        admin_note = sanitize_text(admin_note, max_length=500)
+    except DjangoValidationError as e:
+        return Response({'error': e.message}, status=400)
 
     valid_actions = {
         'dismiss', 'warn', 'restrict', 'suspend', 'ban',
@@ -2132,8 +2154,6 @@ def action_flag(request, flag_id):
     }
     if action not in valid_actions:
         return Response({'error': 'Invalid action'}, status=400)
-    if len(admin_note) > 500:
-        return Response({'error': 'admin_note must be 500 characters or fewer'}, status=400)
 
     flag = get_object_or_404(FraudFlag, id=flag_id)
     flag.reviewed = True
@@ -2368,6 +2388,10 @@ def reject_withdrawal(request, withdrawal_id):
     Balance is immediately refunded to the user.
     """
     reason = request.data.get('reason', 'Rejected by admin')
+    try:
+        reason = sanitize_text(reason, max_length=500)
+    except DjangoValidationError as e:
+        return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         withdrawal = get_object_or_404(WithdrawalRequest, id=withdrawal_id)

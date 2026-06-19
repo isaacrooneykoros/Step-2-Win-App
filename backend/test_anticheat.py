@@ -13,6 +13,8 @@ today = timezone.now().date()
 try:
     user = User.objects.first()
     if not user:
+        user = User.objects.create_user(username='anticheat_test', password='password123', email='anticheat@example.com', phone_number='254700000000')
+    if not user:
         print("ERROR: No users in database")
     else:
         # Test 1: impossible_rate (10k steps/min)
