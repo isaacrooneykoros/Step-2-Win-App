@@ -1,3 +1,5 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
+from apps.core.sanitizers import sanitize_chat_message
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
@@ -30,13 +32,13 @@ class ChallengeListView(generics.ListAPIView):
     """
     serializer_class = ChallengeSerializer
     permission_classes = [IsAuthenticated]
-    
+
     def get_queryset(self):
         finalize_expired_challenges()
         queryset = Challenge.objects.annotate(
             participant_count=Count('participants')
         )
-        
+
         # Filter by status
         status_filter = self.request.query_params.get('status')
         if status_filter:
@@ -44,31 +46,31 @@ class ChallengeListView(generics.ListAPIView):
         else:
             # Default: show active and pending challenges
             queryset = queryset.filter(status__in=['pending', 'active'])
-        
+
         # Filter by milestone
         milestone_filter = self.request.query_params.get('milestone')
         if milestone_filter:
             queryset = queryset.filter(milestone=milestone_filter)
-        
+
         # Filter by visibility and participant status
         show_full = self.request.query_params.get('show_full') == 'true'
-        
+
         # Public challenges: show to all users
         # Private challenges: only show if user is a participant
         # Full challenges: hide unless show_full=true OR challenge is public
-        
+
         if not show_full:
             # Exclude full non-public challenges
             queryset = queryset.exclude(
-                Q(participant_count__gte=models.F('max_participants')) & 
+                Q(participant_count__gte=models.F('max_participants')) &
                 Q(is_private=True)
             )
-        
+
         # Exclude private challenges unless user is a participant
         queryset = queryset.exclude(
             Q(is_private=True) & ~Q(participants__user=self.request.user)
         )
-        
+
         return queryset.order_by('-created_at')
 
 
@@ -84,9 +86,9 @@ def create_challenge(request):
     """
     import logging
     logger = logging.getLogger(__name__)
-    
+
     logger.info(f"Create challenge request data: {request.data}")
-    
+
     serializer = CreateChallengeSerializer(data=request.data)
     if not serializer.is_valid():
         logger.error(f"Validation errors: {serializer.errors}")
@@ -94,7 +96,7 @@ def create_challenge(request):
             {'errors': serializer.errors},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     entry_fee = serializer.validated_data['entry_fee']
 
     # Hardening: require minimum reputation/history for paid challenge creators.
@@ -115,7 +117,7 @@ def create_challenge(request):
                 {'error': f'Complete at least {min_joined} challenge(s) before creating paid challenges.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
-    
+
     # Check if user has enough AVAILABLE balance (wallet - locked)
     if request.user.available_balance < entry_fee:
         logger.warning(
@@ -128,7 +130,7 @@ def create_challenge(request):
             },
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     # Check max locked balance (prevent over-locking)
     max_locked_pct = Decimal(str(getattr(settings, 'MAX_LOCKED_BALANCE_PERCENT', 80)))
     max_lockable = request.user.wallet_balance * (max_locked_pct / Decimal('100'))
@@ -143,27 +145,27 @@ def create_challenge(request):
             },
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     with transaction.atomic():
         # Create challenge
         challenge = serializer.save(creator=request.user)
-        
+
         # Deduct entry fee and lock it
         user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
         user.wallet_balance -= entry_fee
         user.locked_balance += entry_fee
         user.save()
-        
+
         # Add creator as first participant
         Participant.objects.create(
             challenge=challenge,
             user=user
         )
-        
+
         # Update pool
         challenge.total_pool = entry_fee
         challenge.save()
-        
+
         # Create wallet transaction
         from apps.wallet.models import WalletTransaction
         WalletTransaction.objects.create(
@@ -175,7 +177,7 @@ def create_challenge(request):
             description=f'Created challenge: {challenge.name}',
             metadata={'challenge_id': challenge.id}
         )
-        
+
         from .serializers import ChallengeDetailSerializer
         result_serializer = ChallengeDetailSerializer(challenge, context={'request': request})
         return Response(result_serializer.data, status=status.HTTP_201_CREATED)
@@ -201,30 +203,31 @@ def join_challenge(request):
     """
     serializer = JoinChallengeSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    
+
     invite_code = serializer.validated_data['invite_code']
-    
+
     try:
         with transaction.atomic():
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             challenge = Challenge.objects.select_for_update().get(
                 invite_code=invite_code,
                 status='active'
             )
-            
+
             # Check if challenge is full
             if challenge.participants.count() >= challenge.max_participants:
                 return Response(
                     {'error': 'Challenge is full'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
+
             # Check if already joined
-            if Participant.objects.filter(challenge=challenge, user=request.user).exists():
+            if Participant.objects.filter(challenge=challenge, user=user).exists():
                 return Response(
                     {'error': 'Already joined this challenge'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
+
             # Check max locked balance (prevent over-locking) - typically 80% of wallet
             max_locked_pct = Decimal(str(getattr(settings, 'MAX_LOCKED_BALANCE_PERCENT', 80)))
             max_lockable = user.wallet_balance * (max_locked_pct / Decimal('100'))
@@ -239,9 +242,8 @@ def join_challenge(request):
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
+
             # Check balance (use available_balance, not wallet_balance)
-            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             if user.available_balance < challenge.entry_fee:
                 return Response(
                     {
@@ -252,16 +254,16 @@ def join_challenge(request):
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
+
             # Deduct entry fee and lock it
             user.wallet_balance -= challenge.entry_fee
             user.locked_balance += challenge.entry_fee
             user.save()
-            
+
             # Update pool
             challenge.total_pool += challenge.entry_fee
             challenge.save()
-            
+
             # Add participant
             participant = Participant.objects.create(
                 challenge=challenge,
@@ -271,7 +273,7 @@ def join_challenge(request):
             request.user.__class__.objects.filter(id=request.user.id).update(
                 challenges_joined=F('challenges_joined') + 1
             )
-            
+
             # Create wallet transaction
             from apps.wallet.models import WalletTransaction
             WalletTransaction.objects.create(
@@ -283,7 +285,7 @@ def join_challenge(request):
                 description=f'Joined challenge: {challenge.name}',
                 metadata={'challenge_id': challenge.id}
             )
-            
+
             # Sync user's steps for this challenge
             from apps.steps.models import HealthRecord
             from django.db.models import Sum
@@ -293,22 +295,22 @@ def join_challenge(request):
                 date__lte=challenge.end_date,
                 is_suspicious=False
             ).aggregate(total=Sum('steps'))['total'] or 0
-            
+
             participant.steps = total_steps
             participant.qualified = total_steps >= challenge.milestone
             participant.save()
-            
+
             # Notify chat if private challenge
             if challenge.is_private:
                 from .events import notify_new_participant
                 notify_new_participant(challenge, user.username)
-    
+
     except Challenge.DoesNotExist:
         return Response(
             {'error': 'Invalid invite code or challenge not active'},
             status=status.HTTP_404_NOT_FOUND
         )
-    
+
     return Response({
         'status': 'Successfully joined challenge',
         'challenge': ChallengeDetailSerializer(challenge, context={'request': request}).data
@@ -322,7 +324,7 @@ class MyChallengesView(generics.ListAPIView):
     serializer_class = ChallengeDetailSerializer
     permission_classes = [IsAuthenticated]
     throttle_classes = [DashboardReadRateThrottle]
-    
+
     def get_queryset(self):
         finalize_expired_challenges()
         # Don't annotate current_participants as it's already a property on the model
@@ -343,7 +345,7 @@ class ChallengeDetailView(generics.RetrieveAPIView):
     def get_queryset(self):
         finalize_expired_challenges()
         return super().get_queryset()
-    
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
@@ -364,23 +366,23 @@ def leaderboard(request, pk):
             {'error': 'Challenge not found'},
             status=status.HTTP_404_NOT_FOUND
         )
-    
+
     # Check if user is a participant
     if not challenge.participants.filter(user=request.user).exists():
         return Response(
             {'error': 'You are not a participant in this challenge'},
             status=status.HTTP_403_FORBIDDEN
         )
-    
+
     participants = challenge.participants.select_related('user').order_by('-steps', 'joined_at')
-    
+
     # Add rank
     leaderboard_data = []
     for idx, participant in enumerate(participants, 1):
         data = ParticipantSerializer(participant).data
         data['rank'] = idx
         leaderboard_data.append(data)
-    
+
     return Response(leaderboard_data)
 
 
@@ -422,16 +424,16 @@ def challenge_stats(request, pk):
             {'error': 'Challenge not found'},
             status=status.HTTP_404_NOT_FOUND
         )
-    
+
     participants = challenge.participants.all()
     qualified = participants.filter(qualified=True)
-    
+
     # Calculate average steps
     avg_steps = participants.aggregate(models.Avg('steps'))['steps__avg'] or 0
-    
+
     # Get top performer
     top_performer = participants.order_by('-steps').first()
-    
+
     return Response({
         'challenge_id': challenge.id,
         'challenge_name': challenge.name,
@@ -478,7 +480,7 @@ def leave_challenge(request, pk):
             {'error': 'Challenge or participation not found'},
             status=status.HTTP_404_NOT_FOUND
         )
-    
+
     # Check if can leave
     from datetime import date
     if challenge.status == 'active' and date.today() > challenge.start_date:
@@ -486,32 +488,31 @@ def leave_challenge(request, pk):
             {'error': 'Cannot leave an active challenge after it has started'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     if challenge.status == 'completed':
         return Response(
             {'error': 'Cannot leave a completed challenge'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     with transaction.atomic():
         # Refund entry fee
-        user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
         user.wallet_balance += challenge.entry_fee
         user.locked_balance -= challenge.entry_fee
         user.save()
-        
+
         # Update pool
         challenge.total_pool -= challenge.entry_fee
         challenge.save()
-        
+
         # Remove participant
         participant.delete()
-        
+
         # Notify chat if private challenge
         if challenge.is_private:
             from .events import notify_participant_left
             notify_participant_left(challenge, user.username)
-        
+
         # Create refund transaction
         from apps.wallet.models import WalletTransaction
         WalletTransaction.objects.create(
@@ -523,7 +524,7 @@ def leave_challenge(request, pk):
             description=f'Left challenge: {challenge.name}',
             metadata={'challenge_id': challenge.id}
         )
-    
+
     return Response({'status': 'Successfully left challenge'})
 
 
@@ -567,7 +568,6 @@ def rematch_challenge(request, pk):
     duration_days = max(1, (source.end_date - source.start_date).days)
 
     with transaction.atomic():
-        user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
 
         challenge = Challenge.objects.create(
             name=source.name,
@@ -634,20 +634,20 @@ def challenge_chat(request, pk):
             {'error': 'Challenge not found'},
             status=status.HTTP_404_NOT_FOUND
         )
-    
+
     if not challenge.is_private:
         return Response(
             {'error': 'Chat is only available for private challenges'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     # Check if user is a participant
     if not challenge.participants.filter(user=request.user).exists():
         return Response(
             {'error': 'Only participants can access the chat'},
             status=status.HTTP_403_FORBIDDEN
         )
-    
+
     if request.method == 'GET':
         from .models import ChallengeMessage
         messages = (
@@ -656,7 +656,7 @@ def challenge_chat(request, pk):
             .select_related('user')
             .order_by('-created_at')[:100]
         )
-        
+
         # Transform to new format with initials and is_mine
         data = [
             {
@@ -670,39 +670,29 @@ def challenge_chat(request, pk):
             }
             for m in reversed(list(messages))
         ]
-        
+
         return Response({'messages': data, 'count': len(data)})
-    
+
     elif request.method == 'POST':
         from .models import ChallengeMessage
-        content = request.data.get('content', '').strip()
-        if not content:
-            content = request.data.get('message', '').strip()  # Fallback for old format
-        
-        if not content:
-            return Response(
-                {'error': 'Message cannot be empty'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if len(content) > 1000:
-            return Response(
-                {'error': 'Message too long (max 1000 chars)'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+        raw_content = request.data.get('content', '').strip() or request.data.get('message', '').strip()
+        try:
+            content = sanitize_chat_message(raw_content)
+        except DjangoValidationError as e:
+            return Response({'error': e.message if hasattr(e, 'message') else str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
         message = ChallengeMessage.objects.create(
             challenge=challenge,
             user=request.user,
             message=content,
             is_system=False
         )
-        
+
         # Broadcast via WebSocket if available
         try:
             from channels.layers import get_channel_layer
             from asgiref.sync import async_to_sync
-            
+
             channel_layer = get_channel_layer()
             if channel_layer:
                 async_to_sync(channel_layer.group_send)(
@@ -720,7 +710,7 @@ def challenge_chat(request, pk):
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f'WebSocket broadcast failed: {e}')
-        
+
         return Response({
             'id': message.id,
             'sender': request.user.username,
@@ -748,25 +738,25 @@ def challenge_social_stats(request, pk):
             {'error': 'Challenge not found'},
             status=status.HTTP_404_NOT_FOUND
         )
-    
+
     if not challenge.is_private:
         return Response(
             {'error': 'Social stats are only available for private challenges'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     # Check if user is a participant
     if not challenge.participants.filter(user=request.user).exists():
         return Response(
             {'error': 'Only participants can view social stats'},
             status=status.HTTP_403_FORBIDDEN
         )
-    
+
     from apps.steps.models import HealthRecord
     from django.db.models import Count, Max, Sum
-    
+
     participants = challenge.participants.select_related('user').all()
-    
+
     # Most consistent: most days with steps recorded
     most_consistent = None
     max_days = 0
@@ -780,14 +770,14 @@ def challenge_social_stats(request, pk):
         if days_active > max_days:
             max_days = days_active
             most_consistent = p
-    
+
     # Biggest single day: highest steps in one day
     biggest_day_record = HealthRecord.objects.filter(
         user__in=[p.user for p in participants],
         date__gte=challenge.start_date,
         date__lte=challenge.end_date
     ).order_by('-steps').first()
-    
+
     biggest_single_day = None
     biggest_day_steps = 0
     biggest_day_date = None
@@ -795,10 +785,10 @@ def challenge_social_stats(request, pk):
         biggest_single_day = participants.filter(user=biggest_day_record.user).first()
         biggest_day_steps = biggest_day_record.steps
         biggest_day_date = biggest_day_record.date
-    
+
     # Night walker: most steps after 9 PM (if we had hourly data)
     # For now, we'll skip this as we don't have hourly breakdown
-    
+
     # Most improved: best percentage improvement (comparing early vs late period)
     most_improved = None
     best_improvement = 0
@@ -811,19 +801,19 @@ def challenge_social_stats(request, pk):
                 date__gte=challenge.start_date,
                 date__lt=midpoint
             ).aggregate(total=Sum('steps'))['total'] or 0
-            
+
             late_steps = HealthRecord.objects.filter(
                 user=p.user,
                 date__gte=midpoint,
                 date__lte=challenge.end_date
             ).aggregate(total=Sum('steps'))['total'] or 0
-            
+
             if early_steps > 0:
                 improvement = ((late_steps - early_steps) / early_steps) * 100
                 if improvement > best_improvement:
                     best_improvement = improvement
                     most_improved = p
-    
+
     return Response({
         'most_consistent': {
             'username': most_consistent.user.username if most_consistent else None,
@@ -1207,4 +1197,3 @@ def my_recent_results(request):
             'is_refund': all_results.filter(payout_method='refund').exists(),
         },
     })
-
