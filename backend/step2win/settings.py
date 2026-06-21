@@ -19,7 +19,7 @@ _MANAGE_PY_BOOTSTRAP_COMMANDS = {
     'migrate',
     'showmigrations',
 }
-_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and ("manage.py" in sys.argv[0] or "release_gate.py" in sys.argv[0]) else ""
+_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and ("manage.py" in sys.argv[0] or "release_gate.py" in sys.argv[0] or "pytest" in sys.argv[0]) else ""
 _ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS
 
 ENVIRONMENT = os.getenv('DJANGO_ENV', 'development').strip().lower()
