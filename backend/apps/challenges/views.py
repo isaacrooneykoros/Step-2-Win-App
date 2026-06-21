@@ -1,3 +1,5 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
+from apps.core.sanitizers import sanitize_chat_message
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
@@ -5,13 +7,11 @@ from rest_framework.response import Response
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema, inline_serializer
 from django.conf import settings
-from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, models
 from django.db.models import Count, Q, F
 from datetime import date, timedelta
 from decimal import Decimal
 from .models import Challenge, Participant
-from apps.core.sanitizers import sanitize_chat_message
 from .services import finalize_expired_challenges
 from .serializers import (
     ChallengeSerializer,
@@ -677,24 +677,13 @@ def challenge_chat(request, pk):
 
     elif request.method == 'POST':
         from .models import ChallengeMessage
-        raw_content = request.data.get('content', '').strip()
-        if not raw_content:
-            raw_content = request.data.get('message', '').strip()
-
+        content = request.data.get('content', '').strip()
+        raw_content = request.data.get("content", "").strip() or request.data.get("message", "").strip()
         try:
             content = sanitize_chat_message(raw_content)
         except DjangoValidationError as e:
-            return Response(
-                {'error': e.message if hasattr(e, 'message') else str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        message = ChallengeMessage.objects.create(
-            challenge=challenge,
-            user=request.user,
-            message=content,
-            is_system=False
-        )
+            return Response({"error": e.message if hasattr(e, "message") else str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        message = ChallengeMessage.objects.create(challenge=challenge, user=request.user, message=content, is_system=False)
 
         # Broadcast via WebSocket if available
         try:
