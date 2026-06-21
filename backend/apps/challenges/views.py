@@ -497,7 +497,6 @@ def leave_challenge(request, pk):
 
     with transaction.atomic():
         # Refund entry fee
-        user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
         user.wallet_balance += challenge.entry_fee
         user.locked_balance -= challenge.entry_fee
         user.save()
@@ -569,7 +568,6 @@ def rematch_challenge(request, pk):
     duration_days = max(1, (source.end_date - source.start_date).days)
 
     with transaction.atomic():
-        user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
 
         challenge = Challenge.objects.create(
             name=source.name,
@@ -677,13 +675,18 @@ def challenge_chat(request, pk):
 
     elif request.method == 'POST':
         from .models import ChallengeMessage
-        content = request.data.get('content', '').strip()
-        raw_content = request.data.get("content", "").strip() or request.data.get("message", "").strip()
+        raw_content = request.data.get('content', '').strip() or request.data.get('message', '').strip()
         try:
             content = sanitize_chat_message(raw_content)
         except DjangoValidationError as e:
-            return Response({"error": e.message if hasattr(e, "message") else str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        message = ChallengeMessage.objects.create(challenge=challenge, user=request.user, message=content, is_system=False)
+            return Response({'error': e.message if hasattr(e, 'message') else str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        message = ChallengeMessage.objects.create(
+            challenge=challenge,
+            user=request.user,
+            message=content,
+            is_system=False
+        )
 
         # Broadcast via WebSocket if available
         try:
