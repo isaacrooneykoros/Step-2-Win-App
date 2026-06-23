@@ -154,51 +154,51 @@ class Migration(migrations.Migration):
         ),
         # Add unique constraints
         migrations.AddConstraint(
-            model_name='deviceregistration',
+            model_name='DeviceRegistration',
             constraint=models.UniqueConstraint(fields=['user', 'device_id'], name='device_registration_unique'),
         ),
         migrations.AddIndex(
-            model_name='deviceregistration',
+            model_name='DeviceRegistration',
             index=models.Index(fields=['user', 'is_active'], name='device_reg_user_active_idx'),
         ),
         migrations.AddConstraint(
-            model_name='stepsession',
+            model_name='StepSession',
             constraint=models.UniqueConstraint(fields=['user', 'session_token_hash'], name='session_unique_token_hash'),
         ),
         migrations.AddIndex(
-            model_name='stepsession',
+            model_name='StepSession',
             index=models.Index(fields=['user', 'status'], name='session_user_status_idx'),
         ),
         migrations.AddIndex(
-            model_name='stepsession',
+            model_name='StepSession',
             index=models.Index(fields=['user', '-created_at'], name='session_user_created_idx'),
         ),
         migrations.AddIndex(
-            model_name='stepsession',
+            model_name='StepSession',
             index=models.Index(fields=['expires_at', 'status'], name='session_expiry_status_idx'),
         ),
         migrations.AddConstraint(
-            model_name='stepssyncevent',
+            model_name='StepSyncEvent',
             constraint=models.UniqueConstraint(fields=['user', 'client_event_id'], name='syncevent_unique_user_event'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
+            model_name='StepSyncEvent',
             index=models.Index(fields=['session', 'sequence_number'], name='syncevent_session_sq_idx'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
+            model_name='StepSyncEvent',
             index=models.Index(fields=['user', 'created_at'], name='syncevent_user_created_idx'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
+            model_name='StepSyncEvent',
             index=models.Index(fields=['payload_hash'], name='syncevent_hash_idx'),
         ),
         migrations.AddIndex(
-            model_name='suspicioussessionreview',
+            model_name='SuspiciousSessionReview',
             index=models.Index(fields=['status', '-created_at'], name='review_status_created_idx'),
         ),
         migrations.AddIndex(
-            model_name='suspicioussessionreview',
+            model_name='SuspiciousSessionReview',
             index=models.Index(fields=['user', '-created_at'], name='review_user_created_idx'),
         ),
     ]

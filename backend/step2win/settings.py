@@ -18,8 +18,10 @@ _MANAGE_PY_BOOTSTRAP_COMMANDS = {
     'collectstatic',
     'migrate',
     'showmigrations',
+    "test",
 }
-_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and sys.argv[0].endswith('manage.py') else ''
+# Detect if we are running a management command that should allow placeholder secrets
+_CURRENT_MANAGEMENT_COMMAND = next((arg for arg in sys.argv[1:] if not arg.startswith('-')), '')
 _ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS
 
 ENVIRONMENT = os.getenv('DJANGO_ENV', 'development').strip().lower()
@@ -49,7 +51,7 @@ if ENVIRONMENT == 'production' and not os.getenv('REDIS_URL', '').strip():
 USE_REDIS = os.getenv('USE_REDIS', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 APP_SIGNING_SECRET = os.environ.get('APP_SIGNING_SECRET', '')
-if not APP_SIGNING_SECRET and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
+if not APP_SIGNING_SECRET and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS and not (os.getenv("GITHUB_ACTIONS") == "true" or os.getenv("CI") == "true"):
     raise ImproperlyConfigured('APP_SIGNING_SECRET environment variable is required.')
 if not APP_SIGNING_SECRET:
     APP_SIGNING_SECRET = SECRET_KEY
