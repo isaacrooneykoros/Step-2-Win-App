@@ -23,7 +23,8 @@ _CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 else ''
 _ALLOW_BOOTSTRAP_SECRET_FALLBACKS = (
     _CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS or
     'test' in _CURRENT_MANAGEMENT_COMMAND or
-    'pytest' in sys.argv[0]
+    'pytest' in sys.argv[0] or
+    os.getenv('GITHUB_ACTIONS') == 'true'
 )
 
 ENVIRONMENT = os.getenv('DJANGO_ENV', 'development').strip().lower()
