@@ -1,0 +1,4 @@
+## 2026-06-29 - [Race Conditions in Wallet Operations]
+**Vulnerability:** User balance and reputation checks in challenge operations (create, join, rematch) were performed before acquiring database locks, allowing for race conditions where a user could potentially "double-spend" or bypass trust-based restrictions through concurrent requests.
+**Learning:** In high-concurrency environments handling financial state, all validations must occur *after* row-level locking (`select_for_update`) within an atomic transaction. Validations performed on stale, non-locked data are effectively bypassed by concurrent requests.
+**Prevention:** Always use the "lock-then-check-then-update" pattern for any endpoint that deducts balance or checks mutable security state (like `challenges_joined`). Ensure `select_for_update()` is called at the very start of the transaction block.
