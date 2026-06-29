@@ -53,6 +53,7 @@ jobs:
 
   android-build:
     runs-on: ubuntu-latest
+    if: false  # Temporarily disabled until Capacitor Android platform is committed
 
     steps:
       - name: Checkout
