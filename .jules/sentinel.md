@@ -1,0 +1,4 @@
+## 2026-07-05 - [Atomic Financial Operations & Migration Integrity]
+**Vulnerability:** Race conditions in challenge entry/creation allowed potential balance bypass (ToCToU). Also, a critical typo in a security migration blocked the entire test suite, and improper User model imports in tests caused runtime errors when the model was swapped.
+**Learning:** Checking balances *before* entering an atomic transaction with `select_for_update()` is unsafe in concurrent environments. In monorepos with custom User models, always use `get_user_model()` in tests to avoid `AttributeError`.
+**Prevention:** Always perform financial validation inside a `transaction.atomic()` block immediately after acquiring a row-level lock. Ensure migration names match model names exactly to avoid `KeyError` during `migrate`.
