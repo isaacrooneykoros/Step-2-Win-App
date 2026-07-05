@@ -238,23 +238,31 @@ export function UsersPage() {
 
   useEffect(() => {
     if (!selected) {
-      setIsEditing(false)
-      setEditError('')
+      // Use setTimeout or functional updates to avoid synchronous setState inside effect
+      // if it's triggering cascading renders.
+      setTimeout(() => {
+        setIsEditing(false)
+        setEditError('')
+      }, 0)
       return
     }
 
     if (!isEditing) {
-      setEditDraft({
-        username: selected.username,
-        email: selected.email,
-        phone_number: selected.phone_number || '',
-      })
+      setTimeout(() => {
+        setEditDraft({
+          username: selected.username,
+          email: selected.email,
+          phone_number: selected.phone_number || '',
+        })
+      }, 0)
     }
   }, [isEditing, selected])
 
   useEffect(() => {
     if (!accessToken) {
-      setLiveConnected(false)
+      setTimeout(() => {
+        setLiveConnected(false)
+      }, 0)
       return
     }
 
@@ -331,7 +339,9 @@ export function UsersPage() {
       return
     }
 
-    openDrawer(target)
+    setTimeout(() => {
+      openDrawer(target)
+    }, 0)
     setSearchParams((current) => {
       const next = new URLSearchParams(current)
       next.delete('openUserId')

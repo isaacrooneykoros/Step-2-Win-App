@@ -13,7 +13,7 @@ export function AdminFraudPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterSeverity, setFilterSeverity] = useState<'all' | 'critical' | 'high' | 'medium' | 'low'>('all');
   const [actionNote, setActionNote] = useState('');
-  
+
   // Confirmation modal state
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<'unban' | 'unsuspend' | 'unrestrict' | null>(null);
@@ -97,7 +97,7 @@ export function AdminFraudPage() {
     if (selectedFlag) {
       setActionNote('');
     }
-  }, [selectedFlag?.id]);
+  }, [selectedFlag?.id, selectedFlag]);
 
   // Filter flags based on search and severity
   const filteredFlags = overview?.recent_flags.filter((flag) => {
@@ -144,7 +144,7 @@ export function AdminFraudPage() {
   return (
     <div className="space-y-6">
       {/* Header Section */}
-      <div style={{ 
+      <div style={{
         background: 'linear-gradient(135deg, #7C6FF7, #4F9CF9)',
         padding: '24px',
         borderRadius: '12px',
@@ -179,7 +179,7 @@ export function AdminFraudPage() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <div style={{ 
+        <div style={{
           background: '#13161F',
           padding: '20px',
           borderRadius: '12px',
@@ -193,7 +193,7 @@ export function AdminFraudPage() {
           <p style={{ fontSize: '32px', fontWeight: 700, color: '#F0F2F8', margin: 0 }}>{overview.open_flags}</p>
         </div>
 
-        <div style={{ 
+        <div style={{
           background: '#13161F',
           padding: '20px',
           borderRadius: '12px',
@@ -207,7 +207,7 @@ export function AdminFraudPage() {
           <p style={{ fontSize: '32px', fontWeight: 700, color: '#F0F2F8', margin: 0 }}>{overview.critical_unread}</p>
         </div>
 
-        <div style={{ 
+        <div style={{
           background: '#13161F',
           padding: '20px',
           borderRadius: '12px',
@@ -221,7 +221,7 @@ export function AdminFraudPage() {
           <p style={{ fontSize: '32px', fontWeight: 700, color: '#F0F2F8', margin: 0 }}>{overview.high_unread}</p>
         </div>
 
-        <div style={{ 
+        <div style={{
           background: '#13161F',
           padding: '20px',
           borderRadius: '12px',
@@ -235,7 +235,7 @@ export function AdminFraudPage() {
           <p style={{ fontSize: '32px', fontWeight: 700, color: '#F0F2F8', margin: 0 }}>{overview.restricted_users}</p>
         </div>
 
-        <div style={{ 
+        <div style={{
           background: '#13161F',
           padding: '20px',
           borderRadius: '12px',
@@ -249,7 +249,7 @@ export function AdminFraudPage() {
           <p style={{ fontSize: '32px', fontWeight: 700, color: '#F0F2F8', margin: 0 }}>{overview.suspended_users}</p>
         </div>
 
-        <div style={{ 
+        <div style={{
           background: '#13161F',
           padding: '20px',
           borderRadius: '12px',
@@ -265,7 +265,7 @@ export function AdminFraudPage() {
       </div>
 
       {/* Filters Section */}
-      <div style={{ 
+      <div style={{
         background: '#0C1117',
         padding: '20px',
         borderRadius: '12px',
@@ -276,12 +276,12 @@ export function AdminFraudPage() {
         alignItems: 'center'
       }}>
         <div style={{ position: 'relative', flex: '1', minWidth: '250px' }}>
-          <Search size={18} style={{ 
-            position: 'absolute', 
-            left: '12px', 
-            top: '50%', 
-            transform: 'translateY(-50%)', 
-            color: '#7B82A0' 
+          <Search size={18} style={{
+            position: 'absolute',
+            left: '12px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: '#7B82A0'
           }} />
           <input
             type="text"
@@ -321,7 +321,7 @@ export function AdminFraudPage() {
           <option value="low">Low</option>
         </select>
 
-        <div style={{ 
+        <div style={{
           marginLeft: 'auto',
           color: '#7B82A0',
           fontSize: '14px',
@@ -332,13 +332,13 @@ export function AdminFraudPage() {
       </div>
 
       {/* Recent Flags Table */}
-      <div style={{ 
+      <div style={{
         background: '#0C1117',
         borderRadius: '12px',
         border: '1px solid #1A2430',
         overflow: 'hidden'
       }}>
-        <div style={{ 
+        <div style={{
           padding: '20px 24px',
           background: '#13161F',
           borderBottom: '1px solid #21263A'
@@ -348,7 +348,7 @@ export function AdminFraudPage() {
             <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#F0F2F8', margin: 0 }}>
               Recent Flags Today
             </h2>
-            <span style={{ 
+            <span style={{
               background: 'linear-gradient(135deg, #7C6FF7, #4F9CF9)',
               color: '#fff',
               padding: '4px 12px',
@@ -419,10 +419,10 @@ export function AdminFraudPage() {
                       </span>
                     </td>
                     <td style={{ padding: '16px 24px', color: '#7B82A0', fontSize: '14px' }}>
-                      {new Date(flag.date).toLocaleDateString('en-US', { 
-                        month: 'short', 
-                        day: 'numeric', 
-                        year: 'numeric' 
+                      {new Date(flag.date).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
                       })}
                     </td>
                     <td style={{ padding: '16px 24px', textAlign: 'center' }}>
@@ -607,7 +607,7 @@ export function AdminFraudPage() {
 
       {/* Flag Detail Modal */}
       {selectedFlag && (
-        <div style={{ 
+        <div style={{
           position: 'fixed',
           inset: 0,
           background: 'rgba(0, 0, 0, 0.75)',
@@ -617,7 +617,7 @@ export function AdminFraudPage() {
           zIndex: 50,
           padding: '16px'
         }}>
-          <div style={{ 
+          <div style={{
             background: '#13161F',
             borderRadius: '16px',
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
@@ -629,7 +629,7 @@ export function AdminFraudPage() {
             flexDirection: 'column',
             border: '1px solid #21263A'
           }}>
-            <div style={{ 
+            <div style={{
               padding: '24px',
               background: 'linear-gradient(135deg, #7C6FF7, #4F9CF9)',
               borderBottom: '1px solid #21263A',
@@ -664,7 +664,7 @@ export function AdminFraudPage() {
               </button>
             </div>
 
-            <div style={{ 
+            <div style={{
               padding: '24px',
               overflowY: 'auto',
               flex: 1
@@ -719,7 +719,7 @@ export function AdminFraudPage() {
                   <p style={{ fontSize: '12px', color: '#7B82A0', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
                     Details
                   </p>
-                  <pre style={{ 
+                  <pre style={{
                     background: '#0C1117',
                     padding: '16px',
                     borderRadius: '8px',
@@ -733,7 +733,7 @@ export function AdminFraudPage() {
                   </pre>
                 </div>
 
-                <div style={{ 
+                <div style={{
                   background: 'rgba(79, 156, 249, 0.1)',
                   padding: '16px',
                   borderRadius: '8px',
@@ -744,7 +744,7 @@ export function AdminFraudPage() {
                   </p>
                 </div>
 
-                <div style={{ 
+                <div style={{
                   display: 'flex',
                   gap: '8px',
                   flexWrap: 'wrap',
@@ -896,7 +896,7 @@ export function AdminFraudPage() {
 
       {/* Confirmation Modal for Reversal Actions */}
       {confirmModalOpen && pendingAction && (
-        <div style={{ 
+        <div style={{
           position: 'fixed',
           inset: 0,
           background: 'rgba(0, 0, 0, 0.75)',
@@ -906,7 +906,7 @@ export function AdminFraudPage() {
           zIndex: 50,
           padding: '16px'
         }}>
-          <div style={{ 
+          <div style={{
             background: '#13161F',
             borderRadius: '16px',
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
@@ -915,7 +915,7 @@ export function AdminFraudPage() {
             overflow: 'hidden',
             border: '1px solid #21263A'
           }}>
-            <div style={{ 
+            <div style={{
               padding: '24px',
               background: 'linear-gradient(135deg, #7C6FF7, #4F9CF9)',
               borderBottom: '1px solid #21263A'
@@ -933,7 +933,7 @@ export function AdminFraudPage() {
                 Are you sure you want to <strong style={{ color: '#fff' }}>{pendingAction}</strong> the user{' '}
                 <strong style={{ color: '#fff' }}>{pendingUsername}</strong>?
               </p>
-              
+
               {pendingAction === 'unban' && (
                 <p style={{ fontSize: '14px', color: '#7B82A0', margin: '12px 0 0 0', lineHeight: '1.5' }}>
                   This will restore their trust score to 35 and allow them to access the app again.
@@ -973,7 +973,7 @@ export function AdminFraudPage() {
                 <p style={{ fontSize: '11px', color: '#7B82A0', marginTop: '6px' }}>{actionNote.length}/500</p>
               </div>
 
-              <div style={{ 
+              <div style={{
                 display: 'flex',
                 gap: '12px',
                 marginTop: '24px'
