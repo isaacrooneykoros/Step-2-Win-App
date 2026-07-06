@@ -67,6 +67,7 @@ class ChallengeIntegrationTests(APITestCase):
             email='challenge_creator_new@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            challenges_joined=1,
         )
         self.client.force_authenticate(user=creator)
 
@@ -94,3 +95,49 @@ class ChallengeIntegrationTests(APITestCase):
         self.assertEqual(creator.locked_balance, Decimal('100.00'))
         self.assertEqual(created.total_pool, Decimal('100.00'))
         self.assertTrue(Participant.objects.filter(challenge=created, user=creator).exists())
+
+
+class ChallengeSecurityTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='chat_user',
+            email='chat@example.com',
+            password='TestPass123!',
+            challenges_joined=1,
+        )
+        self.challenge = Challenge.objects.create(
+            name='Private Challenge',
+            creator=self.user,
+            milestone=50000,
+            entry_fee=Decimal('100.00'),
+            is_private=True,
+            is_public=False,
+            status='active',
+            start_date=date.today(),
+            end_date=date.today() + timedelta(days=7),
+        )
+        Participant.objects.create(challenge=self.challenge, user=self.user)
+
+    def test_challenge_chat_sanitization(self):
+        """Verify that XSS payloads are sanitized in challenge chat"""
+        self.client.force_authenticate(user=self.user)
+
+        xss_payload = '<script>alert("xss")</script>Hello <img src=x onerror=alert(1)>'
+
+        response = self.client.post(
+            f'/api/challenges/{self.challenge.id}/chat/',
+            {'content': xss_payload},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # Verify response doesn't contain tags
+        self.assertNotIn('<script>', response.data['content'])
+        self.assertNotIn('<img>', response.data['content'])
+        self.assertNotIn('onerror', response.data['content'])
+
+        # Double check in database
+        from apps.challenges.models import ChallengeMessage
+        msg = ChallengeMessage.objects.get(id=response.data['id'])
+        self.assertNotIn('<script>', msg.message)
