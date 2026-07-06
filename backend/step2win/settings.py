@@ -18,9 +18,11 @@ _MANAGE_PY_BOOTSTRAP_COMMANDS = {
     'collectstatic',
     'migrate',
     'showmigrations',
+    'test',
 }
-_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and sys.argv[0].endswith('manage.py') else ''
-_ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS
+_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and os.path.basename(sys.argv[0]) == 'manage.py' else ''
+_IS_CI = os.getenv('GITHUB_ACTIONS') == 'true'
+_ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS or _IS_CI
 
 ENVIRONMENT = os.getenv('DJANGO_ENV', 'development').strip().lower()
 DEBUG = os.getenv('DEBUG', 'False').strip().lower() == 'true'
