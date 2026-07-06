@@ -7,6 +7,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework import serializers
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from django.db import transaction as db_transaction
 from django.db.models import Sum, Count, Min, Max, Q
@@ -38,6 +39,7 @@ from apps.payments.views import _notify_user
 from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiTypes
 from apps.core.throttles import AdminLoginRateThrottle
 from apps.core.url_utils import build_absolute_media_url
+from apps.core.sanitizers import sanitize_text
 from apps.core.locks import acquire_lock, release_lock
 from apps.payments.reconciliation import run_financial_reconciliation
 from apps.steps.drift_monitor import (
@@ -1579,6 +1581,11 @@ def reply_support_ticket(request, ticket_id):
     if not message_text:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
 
+    try:
+        message_text = sanitize_text(message_text, max_length=5000)
+    except DjangoValidationError as e:
+        return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
+
     reply = SupportTicketMessage.objects.create(
         ticket=ticket,
         sender=request.user,
@@ -1681,7 +1688,10 @@ def update_support_ticket(request, ticket_id):
             updates['assigned_to'] = admin_user
 
     if 'admin_notes' in request.data:
-        updates['admin_notes'] = str(request.data.get('admin_notes') or '').strip()
+        try:
+            updates['admin_notes'] = sanitize_text(str(request.data.get('admin_notes') or '').strip(), max_length=5000)
+        except DjangoValidationError as e:
+            return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
 
     if not updates:
         return Response({'error': 'No valid fields to update'}, status=status.HTTP_400_BAD_REQUEST)
