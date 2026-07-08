@@ -83,7 +83,9 @@ jobs:
         working-directory: step2win-web
 
       - name: Sync Capacitor Android
-        run: npm exec cap sync android
+        run: |
+          npx cap add android
+          npm exec cap sync android
         working-directory: step2win-web
 
       - name: Make gradlew executable
