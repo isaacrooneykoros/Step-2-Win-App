@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema, inline_serializer
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, models
 from django.db.models import Count, Q, F
 from datetime import date, timedelta
@@ -22,6 +23,7 @@ from .serializers import (
     SpectatorLeaderboardSerializer
 )
 from apps.core.throttles import DashboardReadRateThrottle
+from apps.core.sanitizers import sanitize_chat_message
 
 
 class ChallengeListView(generics.ListAPIView):
@@ -225,6 +227,19 @@ def join_challenge(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
+            # Check balance (use available_balance, not wallet_balance)
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
+            if user.available_balance < challenge.entry_fee:
+                return Response(
+                    {
+                        'error': (
+                            f'Insufficient available balance. Required: KES {challenge.entry_fee}, '
+                            f'Available: KES {user.available_balance}'
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             # Check max locked balance (prevent over-locking) - typically 80% of wallet
             max_locked_pct = Decimal(str(getattr(settings, 'MAX_LOCKED_BALANCE_PERCENT', 80)))
             max_lockable = user.wallet_balance * (max_locked_pct / Decimal('100'))
@@ -240,18 +255,6 @@ def join_challenge(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Check balance (use available_balance, not wallet_balance)
-            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
-            if user.available_balance < challenge.entry_fee:
-                return Response(
-                    {
-                        'error': (
-                            f'Insufficient available balance. Required: KES {challenge.entry_fee}, '
-                            f'Available: KES {user.available_balance}'
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
             
             # Deduct entry fee and lock it
             user.wallet_balance -= challenge.entry_fee
@@ -679,15 +682,11 @@ def challenge_chat(request, pk):
         if not content:
             content = request.data.get('message', '').strip()  # Fallback for old format
         
-        if not content:
+        try:
+            content = sanitize_chat_message(content)
+        except DjangoValidationError as e:
             return Response(
-                {'error': 'Message cannot be empty'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if len(content) > 1000:
-            return Response(
-                {'error': 'Message too long (max 1000 chars)'},
+                {'error': e.message},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
