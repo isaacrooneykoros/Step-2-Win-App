@@ -1,4 +1,6 @@
 from rest_framework import generics, status
+from django.core.exceptions import ValidationError as DjangoValidationError
+from apps.core.sanitizers import sanitize_chat_message
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
@@ -206,6 +208,9 @@ def join_challenge(request):
     
     try:
         with transaction.atomic():
+            # Check balance (use available_balance, not wallet_balance)
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
+
             challenge = Challenge.objects.select_for_update().get(
                 invite_code=invite_code,
                 status='active'
@@ -219,7 +224,7 @@ def join_challenge(request):
                 )
             
             # Check if already joined
-            if Participant.objects.filter(challenge=challenge, user=request.user).exists():
+            if Participant.objects.filter(challenge=challenge, user=user).exists():
                 return Response(
                     {'error': 'Already joined this challenge'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -240,8 +245,6 @@ def join_challenge(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Check balance (use available_balance, not wallet_balance)
-            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             if user.available_balance < challenge.entry_fee:
                 return Response(
                     {
@@ -679,15 +682,11 @@ def challenge_chat(request, pk):
         if not content:
             content = request.data.get('message', '').strip()  # Fallback for old format
         
-        if not content:
+        try:
+            content = sanitize_chat_message(content)
+        except DjangoValidationError as e:
             return Response(
-                {'error': 'Message cannot be empty'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if len(content) > 1000:
-            return Response(
-                {'error': 'Message too long (max 1000 chars)'},
+                {'error': e.message},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
