@@ -1,6 +1,6 @@
 """
 Migration to add production security hardening models.
-Includes: DeviceRegistration, StepSession, StepSyncEvent, AntiCheatPolicy, 
+Includes: DeviceRegistration, StepSession, StepSyncEvent, AntiCheatPolicy,
 UserTrustProfile, SuspiciousSessionReview.
 """
 
