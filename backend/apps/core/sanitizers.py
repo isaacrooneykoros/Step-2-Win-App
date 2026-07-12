@@ -125,3 +125,33 @@ def sanitize_username(value: str) -> str:
         )
 
     return cleaned
+
+def sanitize_html(value: str) -> str:
+    """
+    Sanitizes HTML content for display.
+    Allows a safe subset of tags and attributes (standard policy docs).
+    """
+    if not value:
+        return value
+
+    allowed_tags = [
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'p', 'br', 'hr',
+        'strong', 'em', 'u', 's', 'b', 'i',
+        'ul', 'ol', 'li',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td',
+        'a', 'span', 'div', 'img',
+    ]
+    allowed_attrs = {
+        'a': ['href', 'title', 'target'],
+        'img': ['src', 'alt', 'width', 'height'],
+        '*': ['class', 'id'],
+    }
+
+    cleaned = bleach.clean(
+        str(value),
+        tags=allowed_tags,
+        attributes=allowed_attrs,
+        strip=True
+    )
+    return cleaned.strip()

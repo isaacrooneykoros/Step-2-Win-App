@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.challenges.models import Challenge, Participant
+from apps.steps.models import TrustScore
 
 
 User = get_user_model()
@@ -18,13 +19,19 @@ class ChallengeIntegrationTests(APITestCase):
             email='owner@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('1000.00'),
+            challenges_joined=1,
+            phone_number='0711111111',
         )
+        TrustScore.objects.create(user=self.owner, score=100)
         self.joiner = User.objects.create_user(
             username='challenge_joiner',
             email='joiner@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('1000.00'),
+            challenges_joined=1,
+            phone_number='0722222222',
         )
+        TrustScore.objects.create(user=self.joiner, score=100)
         self.challenge = Challenge.objects.create(
             name='Integration Challenge',
             creator=self.owner,
@@ -67,7 +74,10 @@ class ChallengeIntegrationTests(APITestCase):
             email='challenge_creator_new@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            challenges_joined=1,
+            phone_number='0733333333',
         )
+        TrustScore.objects.create(user=creator, score=100)
         self.client.force_authenticate(user=creator)
 
         response = self.client.post(

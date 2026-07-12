@@ -13,6 +13,7 @@ from .serializers import (
     LegalDocumentVersionSerializer,
 )
 from .utils import process_uploaded_file
+from apps.core.sanitizers import sanitize_html
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,10 @@ def document_detail_admin(request, pk):
             doc.uploaded_file = uploaded_file
         except ValueError as e:
             return Response({'error': str(e)}, status=400)
+
+    # Sanitize HTML content before saving to prevent Stored XSS
+    if 'content_html' in data:
+        data['content_html'] = sanitize_html(data['content_html'])
 
     serializer = LegalDocumentAdminSerializer(
         doc, data=data, partial=(request.method == 'PATCH')

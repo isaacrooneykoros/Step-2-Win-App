@@ -145,11 +145,11 @@ def create_challenge(request):
         )
     
     with transaction.atomic():
+        user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
         # Create challenge
-        challenge = serializer.save(creator=request.user)
+        challenge = serializer.save(creator=user)
         
         # Deduct entry fee and lock it
-        user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
         user.wallet_balance -= entry_fee
         user.locked_balance += entry_fee
         user.save()
@@ -206,6 +206,7 @@ def join_challenge(request):
     
     try:
         with transaction.atomic():
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             challenge = Challenge.objects.select_for_update().get(
                 invite_code=invite_code,
                 status='active'
@@ -225,6 +226,8 @@ def join_challenge(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
+
+
             # Check max locked balance (prevent over-locking) - typically 80% of wallet
             max_locked_pct = Decimal(str(getattr(settings, 'MAX_LOCKED_BALANCE_PERCENT', 80)))
             max_lockable = user.wallet_balance * (max_locked_pct / Decimal('100'))
@@ -241,7 +244,6 @@ def join_challenge(request):
                 )
             
             # Check balance (use available_balance, not wallet_balance)
-            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             if user.available_balance < challenge.entry_fee:
                 return Response(
                     {
