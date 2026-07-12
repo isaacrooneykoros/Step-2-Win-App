@@ -19,6 +19,7 @@ _MANAGE_PY_BOOTSTRAP_COMMANDS = {
     'migrate',
     'showmigrations',
     'test',
+    'makemigrations',
 }
 _CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and sys.argv[0].endswith('manage.py') else ''
 _ALLOW_BOOTSTRAP_SECRET_FALLBACKS = (_CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS or os.getenv('GITHUB_ACTIONS') == 'true')
