@@ -17,15 +17,19 @@ _MANAGE_PY_BOOTSTRAP_COMMANDS = {
     'check',
     'collectstatic',
     'migrate',
+    'makemigrations',
     'showmigrations',
     'test',
 }
-_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and sys.argv[0].endswith('manage.py') else ''
-_ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS
+_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 else ''
+_IS_CI = os.getenv('GITHUB_ACTIONS') == 'true'
+_ALLOW_BOOTSTRAP_SECRET_FALLBACKS = (_CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS) or _IS_CI
 
 ENVIRONMENT = os.getenv('DJANGO_ENV', 'development').strip().lower()
 DEBUG = os.getenv('DEBUG', 'False').strip().lower() == 'true'
 SECRET_KEY = os.getenv('SECRET_KEY', '')
+if not SECRET_KEY and _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
+    SECRET_KEY = 'bootstrap-placeholder-secret-key-at-least-50-characters-long'
 if not SECRET_KEY:
     raise ImproperlyConfigured('SECRET_KEY environment variable is required.')
 
