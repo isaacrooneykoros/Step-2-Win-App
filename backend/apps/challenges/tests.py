@@ -18,12 +18,14 @@ class ChallengeIntegrationTests(APITestCase):
             email='owner@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('1000.00'),
+            challenges_joined=1,
         )
         self.joiner = User.objects.create_user(
             username='challenge_joiner',
             email='joiner@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('1000.00'),
+            challenges_joined=1,
         )
         self.challenge = Challenge.objects.create(
             name='Integration Challenge',
@@ -67,6 +69,7 @@ class ChallengeIntegrationTests(APITestCase):
             email='challenge_creator_new@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            challenges_joined=1,
         )
         self.client.force_authenticate(user=creator)
 
@@ -94,3 +97,39 @@ class ChallengeIntegrationTests(APITestCase):
         self.assertEqual(creator.locked_balance, Decimal('100.00'))
         self.assertEqual(created.total_pool, Decimal('100.00'))
         self.assertTrue(Participant.objects.filter(challenge=created, user=creator).exists())
+
+    def test_challenge_chat_sanitization(self):
+        # Create a private challenge
+        private_challenge = Challenge.objects.create(
+            name='Private Chat Challenge',
+            creator=self.owner,
+            milestone=50000,
+            entry_fee=Decimal('100.00'),
+            max_participants=10,
+            status='active',
+            start_date=date.today(),
+            end_date=date.today() + timedelta(days=7),
+            is_private=True,
+            is_public=False,
+        )
+        Participant.objects.create(challenge=private_challenge, user=self.owner)
+
+        self.client.force_authenticate(user=self.owner)
+
+        # Malicious payload with script tag
+        malicious_content = '<script>alert("xss")</script>Hello <img src=x onerror=alert(1)>'
+
+        response = self.client.post(
+            f'/api/challenges/{private_challenge.id}/chat/',
+            {'content': malicious_content},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        # Verify HTML is stripped
+        self.assertEqual(response.data['content'], 'alert("xss")Hello')
+
+        # Verify in database
+        from apps.challenges.models import ChallengeMessage
+        message = ChallengeMessage.objects.get(id=response.data['id'])
+        self.assertEqual(message.message, 'alert("xss")Hello')

@@ -5,12 +5,14 @@ from rest_framework.response import Response
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema, inline_serializer
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, models
 from django.db.models import Count, Q, F
 from datetime import date, timedelta
 from decimal import Decimal
 from .models import Challenge, Participant
 from .services import finalize_expired_challenges
+from apps.core.sanitizers import sanitize_chat_message
 from .serializers import (
     ChallengeSerializer,
     ChallengeDetailSerializer,
@@ -206,10 +208,12 @@ def join_challenge(request):
     
     try:
         with transaction.atomic():
+            # Lock both challenge and user to prevent race conditions
             challenge = Challenge.objects.select_for_update().get(
                 invite_code=invite_code,
                 status='active'
             )
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             
             # Check if challenge is full
             if challenge.participants.count() >= challenge.max_participants:
@@ -219,7 +223,7 @@ def join_challenge(request):
                 )
             
             # Check if already joined
-            if Participant.objects.filter(challenge=challenge, user=request.user).exists():
+            if Participant.objects.filter(challenge=challenge, user=user).exists():
                 return Response(
                     {'error': 'Already joined this challenge'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -241,7 +245,6 @@ def join_challenge(request):
                 )
             
             # Check balance (use available_balance, not wallet_balance)
-            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             if user.available_balance < challenge.entry_fee:
                 return Response(
                     {
@@ -675,22 +678,18 @@ def challenge_chat(request, pk):
     
     elif request.method == 'POST':
         from .models import ChallengeMessage
-        content = request.data.get('content', '').strip()
-        if not content:
-            content = request.data.get('message', '').strip()  # Fallback for old format
-        
-        if not content:
+        raw_content = request.data.get('content', '').strip()
+        if not raw_content:
+            raw_content = request.data.get('message', '').strip()  # Fallback for old format
+
+        try:
+            content = sanitize_chat_message(raw_content)
+        except DjangoValidationError as e:
             return Response(
-                {'error': 'Message cannot be empty'},
+                {'error': e.message if hasattr(e, 'message') else str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        if len(content) > 1000:
-            return Response(
-                {'error': 'Message too long (max 1000 chars)'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+
         message = ChallengeMessage.objects.create(
             challenge=challenge,
             user=request.user,
