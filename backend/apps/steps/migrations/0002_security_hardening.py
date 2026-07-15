@@ -1,6 +1,6 @@
 """
 Migration to add production security hardening models.
-Includes: DeviceRegistration, StepSession, StepSyncEvent, AntiCheatPolicy, 
+Includes: DeviceRegistration, StepSession, StepSyncEvent, AntiCheatPolicy,
 UserTrustProfile, SuspiciousSessionReview.
 """
 
@@ -178,20 +178,20 @@ class Migration(migrations.Migration):
             index=models.Index(fields=['expires_at', 'status'], name='session_expiry_status_idx'),
         ),
         migrations.AddConstraint(
-            model_name='stepssyncevent',
+            model_name='stepsyncevent',
             constraint=models.UniqueConstraint(fields=['user', 'client_event_id'], name='syncevent_unique_user_event'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
-            index=models.Index(fields=['session', 'sequence_number'], name='syncevent_session_sq_idx'),
+            model_name='stepsyncevent',
+            index=models.Index(fields=['session', 'sequence_number'], name='steps_steps_session_07bd06_idx'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
-            index=models.Index(fields=['user', 'created_at'], name='syncevent_user_created_idx'),
+            model_name='stepsyncevent',
+            index=models.Index(fields=['user', 'created_at'], name='steps_steps_user_id_35a32d_idx'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
-            index=models.Index(fields=['payload_hash'], name='syncevent_hash_idx'),
+            model_name='stepsyncevent',
+            index=models.Index(fields=['payload_hash'], name='steps_steps_payload_ce435b_idx'),
         ),
         migrations.AddIndex(
             model_name='suspicioussessionreview',
