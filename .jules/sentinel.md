@@ -1,4 +1,4 @@
 ## 2026-07-15 - Support Ticket XSS and Migration Blockers
 **Vulnerability:** Stored XSS in support ticket replies and a typo in a security migration ('stepssyncevent' instead of 'stepsyncevent').
 **Learning:** While serializers handle input sanitization for object creation, view-level logic for updates or replies can bypass these protections if not explicitly hardened. Additionally, typos in migration files can block the entire security hardening process by causing KeyErrors during test execution.
-**Prevention:** Always apply 'sanitize_text' to user-provided content in views that don't rely on serializers for input validation. Ensure migration models match actual model names to maintain CI/CD and test suite integrity.
+**Prevention:** Always apply 'sanitize_text' to user-provided content in views that don't rely on serializers for input validation. Ensure migration models match actual model names to maintain CI/CD and test suite integrity. For CI environments, allow secret fallbacks during bootstrap commands like 'test' and 'makemigrations' to avoid configuration errors, and ensure native platforms (like Android) are added before sync if they are gitignored.
