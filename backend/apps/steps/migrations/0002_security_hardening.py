@@ -183,15 +183,15 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name='stepsyncevent',
-            index=models.Index(fields=['session', 'sequence_number'], name='syncevent_session_sq_idx'),
+            index=models.Index(fields=['session', 'sequence_number'], name='steps_steps_session_07bd06_idx'),
         ),
         migrations.AddIndex(
             model_name='stepsyncevent',
-            index=models.Index(fields=['user', 'created_at'], name='syncevent_user_created_idx'),
+            index=models.Index(fields=['user', 'created_at'], name='steps_steps_user_id_35a32d_idx'),
         ),
         migrations.AddIndex(
             model_name='stepsyncevent',
-            index=models.Index(fields=['payload_hash'], name='syncevent_hash_idx'),
+            index=models.Index(fields=['payload_hash'], name='steps_steps_payload_ce435b_idx'),
         ),
         migrations.AddIndex(
             model_name='suspicioussessionreview',
