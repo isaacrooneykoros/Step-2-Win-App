@@ -13,6 +13,7 @@ from .serializers import (
     LegalDocumentVersionSerializer,
 )
 from .utils import process_uploaded_file
+from apps.core.sanitizers import sanitize_html
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,9 @@ def document_detail_admin(request, pk):
         except ValueError as e:
             return Response({'error': str(e)}, status=400)
 
+    if 'content_html' in data:
+        data['content_html'] = sanitize_html(data['content_html'])
+
     serializer = LegalDocumentAdminSerializer(
         doc, data=data, partial=(request.method == 'PATCH')
     )
@@ -197,7 +201,10 @@ def create_document_admin(request):
     Create a new legal document (e.g. a Cookie Policy).
     POST /api/legal/admin/documents/create/
     """
-    serializer = LegalDocumentAdminSerializer(data=request.data)
+    data = request.data.copy()
+    if 'content_html' in data:
+        data['content_html'] = sanitize_html(data['content_html'])
+    serializer = LegalDocumentAdminSerializer(data=data)
     if serializer.is_valid():
         doc = serializer.save(last_edited_by=request.user)
         return Response(
