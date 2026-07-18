@@ -1,3 +1,5 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
+from apps.core.sanitizers import sanitize_text
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -732,6 +734,14 @@ def reply_support_ticket(request, ticket_id):
         return Response({'error': 'Support ticket not found'}, status=status.HTTP_404_NOT_FOUND)
 
     message = str(request.data.get('message', '')).strip()
+    if not message:
+        return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        message = sanitize_text(message, max_length=5000)
+    except DjangoValidationError as e:
+        return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
+
     if not message:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
 
