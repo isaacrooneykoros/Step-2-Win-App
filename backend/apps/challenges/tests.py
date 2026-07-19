@@ -67,6 +67,7 @@ class ChallengeIntegrationTests(APITestCase):
             email='challenge_creator_new@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            challenges_joined=1,
         )
         self.client.force_authenticate(user=creator)
 
@@ -94,3 +95,32 @@ class ChallengeIntegrationTests(APITestCase):
         self.assertEqual(creator.locked_balance, Decimal('100.00'))
         self.assertEqual(created.total_pool, Decimal('100.00'))
         self.assertTrue(Participant.objects.filter(challenge=created, user=creator).exists())
+
+    def test_chat_sanitizes_html_tags(self):
+        self.client.force_authenticate(user=self.owner)
+        self.challenge.is_private = True
+        self.challenge.save()
+
+        response = self.client.post(
+            f'/api/challenges/{self.challenge.id}/chat/',
+            {'content': '<script>alert("XSS")</script>Hello!'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertNotIn('<script>', response.data['content'])
+        self.assertEqual(response.data['content'], 'alert("XSS")Hello!')
+
+    def test_chat_rejects_empty_messages(self):
+        self.client.force_authenticate(user=self.owner)
+        self.challenge.is_private = True
+        self.challenge.save()
+
+        response = self.client.post(
+            f'/api/challenges/{self.challenge.id}/chat/',
+            {'content': '   '},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('error', response.data)
