@@ -24,6 +24,7 @@ class AuthAndHealthTests(APITestCase):
             {
                 'username': username,
                 'email': f'{username}@example.com',
+                'phone_number': f'+254700{random.randint(100000, 999999)}',
                 'password': password,
                 'confirm_password': password,
             },
