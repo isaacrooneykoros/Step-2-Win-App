@@ -735,6 +735,13 @@ def reply_support_ticket(request, ticket_id):
     if not message:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
 
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    from apps.core.sanitizers import sanitize_text
+    try:
+        message = sanitize_text(message, max_length=5000)
+    except DjangoValidationError as e:
+        return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
+
     reply = SupportTicketMessage.objects.create(
         ticket=ticket,
         sender=request.user,

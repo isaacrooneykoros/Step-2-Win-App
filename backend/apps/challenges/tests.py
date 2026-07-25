@@ -68,6 +68,13 @@ class ChallengeIntegrationTests(APITestCase):
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
         )
+        creator.challenges_joined = 1
+        creator.save()
+        from apps.steps.security import get_or_create_user_trust_profile, update_trust_tier
+        profile = get_or_create_user_trust_profile(creator)
+        profile.trust_score = 65.0
+        profile.save()
+        update_trust_tier(profile)
         self.client.force_authenticate(user=creator)
 
         response = self.client.post(
