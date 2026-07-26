@@ -148,10 +148,11 @@ def create_challenge(request):
         # Create challenge
         challenge = serializer.save(creator=request.user)
         
-        # Deduct entry fee and lock it
+        # Deduct entry fee, lock it, and increment challenges joined
         user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
         user.wallet_balance -= entry_fee
         user.locked_balance += entry_fee
+        user.challenges_joined += 1
         user.save()
         
         # Add creator as first participant
@@ -206,6 +207,9 @@ def join_challenge(request):
     
     try:
         with transaction.atomic():
+            # Get and lock user object first to prevent race conditions and UnboundLocalError
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
+
             challenge = Challenge.objects.select_for_update().get(
                 invite_code=invite_code,
                 status='active'
@@ -219,7 +223,7 @@ def join_challenge(request):
                 )
             
             # Check if already joined
-            if Participant.objects.filter(challenge=challenge, user=request.user).exists():
+            if Participant.objects.filter(challenge=challenge, user=user).exists():
                 return Response(
                     {'error': 'Already joined this challenge'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -241,7 +245,6 @@ def join_challenge(request):
                 )
             
             # Check balance (use available_balance, not wallet_balance)
-            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             if user.available_balance < challenge.entry_fee:
                 return Response(
                     {
@@ -253,9 +256,10 @@ def join_challenge(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Deduct entry fee and lock it
+            # Deduct entry fee, lock it, and increment challenges joined in a single save
             user.wallet_balance -= challenge.entry_fee
             user.locked_balance += challenge.entry_fee
+            user.challenges_joined += 1
             user.save()
             
             # Update pool
@@ -266,10 +270,6 @@ def join_challenge(request):
             participant = Participant.objects.create(
                 challenge=challenge,
                 user=user
-            )
-
-            request.user.__class__.objects.filter(id=request.user.id).update(
-                challenges_joined=F('challenges_joined') + 1
             )
             
             # Create wallet transaction

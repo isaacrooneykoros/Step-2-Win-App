@@ -125,3 +125,23 @@ def sanitize_username(value: str) -> str:
         )
 
     return cleaned
+
+
+def sanitize_html(value: str) -> str:
+    """
+    Sanitizes HTML content, allowing only safe formatting tags for legal policies.
+    """
+    if not value:
+        return value
+
+    allowed_tags = [
+        'p', 'b', 'i', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'a', 'span', 'div'
+    ]
+    allowed_attrs = {
+        'a': ['href', 'title', 'target'],
+        'span': ['style'],
+        'div': ['style'],
+    }
+
+    return bleach.clean(str(value), tags=allowed_tags, attributes=allowed_attrs, strip=True)
