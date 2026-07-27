@@ -109,6 +109,7 @@ def run_backend_ci_checks(python_cmd: list[str], *, skip_tests: bool) -> None:
         'DEBUG': 'False',
         'USE_SQLITE': 'False',
         'SECRET_KEY': 'prod-check-secret-key-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+        'APP_SIGNING_SECRET': 'prod-check-app-signing-secret-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
         'ALLOWED_HOSTS': 'api.step2win.example',
         'CSRF_TRUSTED_ORIGINS': 'https://api.step2win.example',
         'DATABASE_URL': 'postgres://releasegate:releasegate@localhost:5432/releasegate',
