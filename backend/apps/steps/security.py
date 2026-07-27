@@ -53,8 +53,8 @@ def compute_payload_hash(payload: dict) -> str:
         'steps_delta': payload.get('steps_delta'),
         'steps_total': payload.get('steps_total'),
         'ml_motion_label': payload.get('ml_motion_label'),
-        'ml_walk_probability': round(payload.get('ml_walk_probability') or 0, 4),
-        'ml_shake_probability': round(payload.get('ml_shake_probability') or 0, 4),
+        'ml_walk_probability': round(float(payload.get('ml_walk_probability') or 0), 4),
+        'ml_shake_probability': round(float(payload.get('ml_shake_probability') or 0), 4),
         'ml_model_version': payload.get('ml_model_version'),
     }
     
