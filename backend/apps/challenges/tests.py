@@ -18,12 +18,14 @@ class ChallengeIntegrationTests(APITestCase):
             email='owner@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('1000.00'),
+            phone_number='254711111111',
         )
         self.joiner = User.objects.create_user(
             username='challenge_joiner',
             email='joiner@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('1000.00'),
+            phone_number='254722222222',
         )
         self.challenge = Challenge.objects.create(
             name='Integration Challenge',
@@ -67,6 +69,8 @@ class ChallengeIntegrationTests(APITestCase):
             email='challenge_creator_new@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            phone_number='254733333333',
+            challenges_joined=1,
         )
         self.client.force_authenticate(user=creator)
 
