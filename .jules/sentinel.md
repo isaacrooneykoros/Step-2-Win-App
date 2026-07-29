@@ -1,0 +1,4 @@
+## 2026-07-29 - Race Conditions in Wallet Balance Checks and Challenge Entry Limits
+**Vulnerability:** Checking a user's wallet balance, available balance, or maximum locked balance limits outside of an atomic database transaction or before locking the user model instance via `select_for_update()` allows concurrent requests to bypass checks, resulting in negative balances or exceeding safety limits (double-spending).
+**Learning:** Checking fields directly on `request.user` or performing checks before taking a row-level lock on the database is not thread-safe or process-safe under concurrent requests.
+**Prevention:** Always perform balance and limit verification inside a `with transaction.atomic()` block immediately after fetching and locking the user object via `select_for_update()`. Perform all state updates on the same locked object to guarantee atomicity.
