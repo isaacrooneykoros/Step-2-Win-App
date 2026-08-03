@@ -82,6 +82,10 @@ jobs:
         run: npm run build
         working-directory: step2win-web
 
+      - name: Add Android platform
+        run: npm exec cap add android
+        working-directory: step2win-web
+
       - name: Sync Capacitor Android
         run: npm exec cap sync android
         working-directory: step2win-web
