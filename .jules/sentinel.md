@@ -1,0 +1,6 @@
+# Sentinel Security Journal - Critical Learnings
+
+## 2026-08-10 - Concurrent Balance Lock Race Conditions in Challenges View
+**Vulnerability:** Concurrency double-spending vulnerability where concurrent requests for `create_challenge`, `join_challenge`, and `rematch_challenge` can bypass `available_balance` and `MAX_LOCKED_BALANCE_PERCENT` verification limits because validation checks occurred outside the database-locked transaction block.
+**Learning:** Performing business validation on active account balances or system resource limits prior to entering a database-locked block (`transaction.atomic()` with `select_for_update()`) allows malicious or fast concurrent requests to execute checks against stale balances, resulting in overallocation or negative/over-locked funds.
+**Prevention:** Always acquire critical database locks via `select_for_update()` at the *very start* of the atomic transaction block, and execute all subsequent conditional logic and validation checks directly against the locked instances. Ensure updates to related counters (e.g., `challenges_joined`) and balances are bundled together in a single database `.save()` call on the locked object for optimal execution and atomic safety.
