@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import User
 from apps.admin_api.models import SupportTicket, SupportTicketMessage
 from apps.core.image_utils import validate_and_normalize_profile_picture
-from apps.core.sanitizers import sanitize_username, sanitize_text
+from apps.core.sanitizers import sanitize_username, sanitize_text, sanitize_phone_number
 from apps.core.url_utils import build_absolute_media_url
 
 
@@ -55,13 +55,13 @@ class RegisterSerializer(serializers.ModelSerializer):
     def validate_phone_number(self, value):
         if not value:
             raise serializers.ValidationError('Phone number is required')
-        # Basic phone validation - should be digits and +/- only
-        phone_clean = value.replace('+', '').replace('-', '').replace(' ', '')
-        if not phone_clean.isdigit() or len(phone_clean) < 9:
-            raise serializers.ValidationError('Phone number must be at least 9 digits')
-        if User.objects.filter(phone_number=value).exists():
+        try:
+            cleaned = sanitize_phone_number(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message)
+        if User.objects.filter(phone_number=cleaned).exists():
             raise serializers.ValidationError('Phone number already registered')
-        return value
+        return cleaned
 
     def create(self, validated_data):
         validated_data.pop('confirm_password')
@@ -119,6 +119,39 @@ class UserProfileSerializer(serializers.ModelSerializer):
     def get_trust_status(self, obj) -> str:
         trust = getattr(obj, 'trust_score', None)
         return trust.status if trust else 'GOOD'
+
+    def validate_username(self, value):
+        if not value:
+            return value
+        try:
+            cleaned = sanitize_username(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message)
+        user_id = self.instance.id if self.instance else None
+        if User.objects.filter(username=cleaned).exclude(id=user_id).exists():
+            raise serializers.ValidationError('Username already taken')
+        return cleaned
+
+    def validate_email(self, value):
+        if not value:
+            return value
+        normalized = str(value).lower().strip()
+        user_id = self.instance.id if self.instance else None
+        if User.objects.filter(email=normalized).exclude(id=user_id).exists():
+            raise serializers.ValidationError('Email already registered')
+        return normalized
+
+    def validate_phone_number(self, value):
+        if not value:
+            return value
+        try:
+            cleaned = sanitize_phone_number(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message)
+        user_id = self.instance.id if self.instance else None
+        if User.objects.filter(phone_number=cleaned).exclude(id=user_id).exists():
+            raise serializers.ValidationError('Phone number already registered')
+        return cleaned
 
     def get_win_rate(self, obj) -> float:
         played = getattr(obj, 'challenges_joined', 0) or 0
