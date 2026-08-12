@@ -116,40 +116,40 @@ def create_challenge(request):
                 status=status.HTTP_403_FORBIDDEN,
             )
     
-    # Check if user has enough AVAILABLE balance (wallet - locked)
-    if request.user.available_balance < entry_fee:
-        logger.warning(
-            f"Insufficient available balance: {request.user.available_balance} < {entry_fee} "
-            f"(wallet={request.user.wallet_balance}, locked={request.user.locked_balance})"
-        )
-        return Response(
-            {
-                'error': f'Insufficient available balance. Required: KES {entry_fee}, Available: KES {request.user.available_balance}'
-            },
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # Check max locked balance (prevent over-locking)
-    max_locked_pct = Decimal(str(getattr(settings, 'MAX_LOCKED_BALANCE_PERCENT', 80)))
-    max_lockable = request.user.wallet_balance * (max_locked_pct / Decimal('100'))
-    if request.user.locked_balance + entry_fee > max_lockable:
-        return Response(
-            {
-                'error': (
-                    f'Cannot create challenge - would exceed max locked balance. '
-                    f'Currently locked: KES {request.user.locked_balance}, '
-                    f'Max allowed: KES {max_lockable}'
-                )
-            },
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
     with transaction.atomic():
-        # Create challenge
-        challenge = serializer.save(creator=request.user)
-        
         # Deduct entry fee and lock it
         user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
+
+        # Check if user has enough AVAILABLE balance (wallet - locked)
+        if user.available_balance < entry_fee:
+            logger.warning(
+                f"Insufficient available balance: {user.available_balance} < {entry_fee} "
+                f"(wallet={user.wallet_balance}, locked={user.locked_balance})"
+            )
+            return Response(
+                {
+                    'error': f'Insufficient available balance. Required: KES {entry_fee}, Available: KES {user.available_balance}'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check max locked balance (prevent over-locking)
+        max_locked_pct = Decimal(str(getattr(settings, 'MAX_LOCKED_BALANCE_PERCENT', 80)))
+        max_lockable = user.wallet_balance * (max_locked_pct / Decimal('100'))
+        if user.locked_balance + entry_fee > max_lockable:
+            return Response(
+                {
+                    'error': (
+                        f'Cannot create challenge - would exceed max locked balance. '
+                        f'Currently locked: KES {user.locked_balance}, '
+                        f'Max allowed: KES {max_lockable}'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create challenge
+        challenge = serializer.save(creator=user)
         user.wallet_balance -= entry_fee
         user.locked_balance += entry_fee
         user.save()
@@ -206,6 +206,8 @@ def join_challenge(request):
     
     try:
         with transaction.atomic():
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
+
             challenge = Challenge.objects.select_for_update().get(
                 invite_code=invite_code,
                 status='active'
@@ -219,7 +221,7 @@ def join_challenge(request):
                 )
             
             # Check if already joined
-            if Participant.objects.filter(challenge=challenge, user=request.user).exists():
+            if Participant.objects.filter(challenge=challenge, user=user).exists():
                 return Response(
                     {'error': 'Already joined this challenge'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -241,7 +243,6 @@ def join_challenge(request):
                 )
             
             # Check balance (use available_balance, not wallet_balance)
-            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             if user.available_balance < challenge.entry_fee:
                 return Response(
                     {
@@ -558,16 +559,27 @@ def rematch_challenge(request, pk):
         )
 
     entry_fee = source.entry_fee
-    if request.user.wallet_balance < entry_fee:
-        return Response(
-            {'error': 'Insufficient balance to start rematch'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
     duration_days = max(1, (source.end_date - source.start_date).days)
 
     with transaction.atomic():
         user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
+
+        if user.available_balance < entry_fee:
+            return Response(
+                {'error': 'Insufficient balance to start rematch'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check max locked balance
+        max_locked_pct = Decimal(str(getattr(settings, 'MAX_LOCKED_BALANCE_PERCENT', 80)))
+        max_lockable = user.wallet_balance * (max_locked_pct / Decimal('100'))
+        if user.locked_balance + entry_fee > max_lockable:
+            return Response(
+                {
+                    'error': 'Cannot rematch - would exceed max locked balance.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         challenge = Challenge.objects.create(
             name=source.name,

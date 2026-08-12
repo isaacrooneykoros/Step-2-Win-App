@@ -19,6 +19,7 @@ class AuthAndHealthTests(APITestCase):
         username = f"testuser_{random.randint(100000, 999999)}"
         password = 'TestPass123!'
 
+        phone_number = f"2547{random.randint(10000000, 99999999)}"
         register_response = self.client.post(
             '/api/auth/register/',
             {
@@ -26,6 +27,7 @@ class AuthAndHealthTests(APITestCase):
                 'email': f'{username}@example.com',
                 'password': password,
                 'confirm_password': password,
+                'phone_number': phone_number,
             },
             format='json',
         )
