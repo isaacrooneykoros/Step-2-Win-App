@@ -14,6 +14,8 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.shortcuts import get_object_or_404
 from django.core.cache import cache
+from django.core.exceptions import ValidationError as DjangoValidationError
+from apps.core.sanitizers import sanitize_text
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import AllowAny
 from datetime import timedelta
@@ -206,7 +208,7 @@ def admin_notifications(request):
 def admin_login(request):
     """Authenticate admin user and return JWT tokens"""
     from apps.admin_api.models import AuditLog
-    
+
     username = request.data.get('username', '').strip()
     password = request.data.get('password', '')
 
@@ -401,13 +403,13 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         """Reset user password"""
         user = self.get_object()
         new_password = request.data.get('new_password', '')
-        
+
         if not new_password:
             return Response(
                 {'error': 'new_password is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         try:
             validate_password(new_password, user)
             user.set_password(new_password)
@@ -420,14 +422,14 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     def update_user(self, request, pk=None):
         """Update user details - phone_number, email, and username are required fields"""
         user = self.get_object()
-        
+
         # Update allowed fields
         username = request.data.get('username')
         email = request.data.get('email')
         phone_number = request.data.get('phone_number')
-        
+
         errors = {}
-        
+
         # Validate username if provided
         if username is not None and username != user.username:
             if not username or len(username.strip()) == 0:
@@ -436,7 +438,7 @@ class AdminUserViewSet(viewsets.ModelViewSet):
                 errors['username'] = 'Username already exists'
             else:
                 user.username = username
-        
+
         # Validate email if provided
         if email is not None and email != user.email:
             if not email or len(email.strip()) == 0:
@@ -445,7 +447,7 @@ class AdminUserViewSet(viewsets.ModelViewSet):
                 errors['email'] = 'Email already exists'
             else:
                 user.email = email
-        
+
         # Validate phone_number if provided
         if phone_number is not None and phone_number != user.phone_number:
             if not phone_number or len(phone_number.strip()) == 0:
@@ -459,10 +461,10 @@ class AdminUserViewSet(viewsets.ModelViewSet):
                     errors['phone_number'] = 'Phone number already registered'
                 else:
                     user.phone_number = phone_number
-        
+
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
-        
+
         user.save()
         serializer = AdminUserSerializer(user)
         return Response(serializer.data)
@@ -534,21 +536,21 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     def delete_user(self, request, pk=None):
         """Delete user (hard delete)"""
         user = self.get_object()
-        
+
         # Prevent deleting self
         if user.id == request.user.id:
             return Response(
                 {'error': 'Cannot delete your own account'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Prevent deleting last admin
         if user.is_staff and User.objects.filter(is_staff=True).count() <= 1:
             return Response(
                 {'error': 'Cannot delete the last admin account'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         username = user.username
         user.delete()
         return Response({'status': f'User {username} has been permanently deleted'})
@@ -639,25 +641,25 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
     def update_challenge(self, request, pk=None):
         """Update challenge details"""
         challenge = self.get_object()
-        
+
         # Update allowed fields
         name = request.data.get('name')
         milestone = request.data.get('milestone')
         max_participants = request.data.get('max_participants')
         end_date = request.data.get('end_date')
-        
+
         if name:
             challenge.name = name
-        
+
         if milestone is not None:
             challenge.milestone = int(milestone)
-        
+
         if max_participants is not None:
             challenge.max_participants = int(max_participants)
-        
+
         if end_date:
             challenge.end_date = end_date
-        
+
         challenge.save()
         serializer = AdminChallengeSerializer(challenge)
         return Response(serializer.data)
@@ -666,14 +668,14 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
     def delete_challenge(self, request, pk=None):
         """Delete challenge (hard delete)"""
         challenge = self.get_object()
-        
+
         # Only allow deletion of cancelled or completed challenges
         if challenge.status in ['pending', 'active']:
             return Response(
                 {'error': 'Cannot delete pending or active challenges. Cancel them first.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         challenge_name = challenge.name
         challenge.delete()
         return Response({'status': f'Challenge {challenge_name} has been permanently deleted'})
@@ -682,34 +684,34 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
     def bulk_cancel(self, request):
         """Bulk cancel challenges"""
         challenge_ids = request.data.get('challenge_ids', [])
-        
+
         if not challenge_ids:
             return Response(
                 {'error': 'challenge_ids is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         challenges = Challenge.objects.filter(id__in=challenge_ids, status__in=['pending', 'active'])
         count = challenges.update(status='cancelled')
-        
+
         return Response({'status': f'{count} challenge(s) cancelled'})
 
     @action(detail=False, methods=['post'])
     def bulk_delete(self, request):
         """Bulk delete challenges"""
         challenge_ids = request.data.get('challenge_ids', [])
-        
+
         if not challenge_ids:
             return Response(
                 {'error': 'challenge_ids is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Only delete cancelled or completed challenges
         challenges = Challenge.objects.filter(id__in=challenge_ids, status__in=['cancelled', 'completed'])
         count = challenges.count()
         challenges.delete()
-        
+
         return Response({'status': f'{count} challenge(s) deleted'})
 
     @action(detail=False, methods=['get'])
@@ -734,7 +736,7 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
         """Get challenge results and leaderboard"""
         challenge = self.get_object()
         results = Participant.objects.filter(challenge=challenge).order_by('-steps', 'joined_at')
-        
+
         data = {
             'challenge': AdminChallengeSerializer(challenge).data,
             'results': [{
@@ -762,7 +764,7 @@ class AdminTransactionViewSet(viewsets.ReadOnlyModelViewSet):
     def transaction_stats(self, request):
         """Get transaction statistics"""
         transactions = WalletTransaction.objects.all()
-        
+
         deposits = transactions.filter(type='deposit').aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
         withdrawals = transactions.filter(type='withdrawal').aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
         total_volume = deposits + withdrawals
@@ -778,7 +780,7 @@ class AdminTransactionViewSet(viewsets.ReadOnlyModelViewSet):
     def daily_volume(self, request):
         """Get daily transaction volume for last 30 days"""
         days = int(request.query_params.get('days', 30))
-        
+
         daily_data = []
         for i in range(days):
             date = (timezone.now() - timedelta(days=i)).date()
@@ -786,7 +788,7 @@ class AdminTransactionViewSet(viewsets.ReadOnlyModelViewSet):
                 created_at__date=date,
                 type__in=['deposit', 'withdrawal']
             ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
-            
+
             daily_data.append({
                 'date': date.isoformat(),
                 'volume': str(volume),
@@ -835,7 +837,7 @@ class AdminWithdrawalViewSet(viewsets.ModelViewSet):
     def withdrawal_stats(self, request):
         """Get withdrawal statistics"""
         withdrawals = Withdrawal.objects.all()
-        
+
         total_pending = withdrawals.filter(status='pending').aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
         total_approved = withdrawals.filter(status='approved').aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
         total_rejected = withdrawals.filter(status='rejected').aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
@@ -864,7 +866,7 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
         """Award badge to a user"""
         badge = self.get_object()
         user_id = request.data.get('user_id')
-        
+
         if not user_id:
             return Response(
                 {'error': 'user_id is required'},
@@ -893,7 +895,7 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
     def badge_stats(self, request):
         """Get badge statistics"""
         badges = Badge.objects.all()
-        
+
         stats = []
         for badge in badges:
             user_count = UserBadge.objects.filter(badge=badge).count()
@@ -947,7 +949,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 day = start_day + timedelta(days=i)
                 data.append((day, by_day.get(day, 0.0)))
             return data
-        
+
         days_param = int(request.query_params.get('days', 7))
         now = timezone.now()
         start = now - timedelta(days=days_param)
@@ -960,13 +962,13 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         users_current = User.objects.filter(created_at__gte=start).count()
         users_previous = User.objects.filter(created_at__gte=prev_start, created_at__lt=start).count()
         user_growth_pct = percent_change(users_current, users_previous)
-        
+
         # User sparkline (last 7 days)
         user_spark = [
             int(value)
             for _, value in build_daily_series(7, User.objects.all(), value_key='users')
         ]
-        
+
         # Recent users (last 6)
         recent_users_qs = User.objects.order_by('-created_at')[:6]
         recent_users = [
@@ -985,7 +987,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         deposits_current = WalletTransaction.objects.filter(
             type='deposit', created_at__gte=start
         ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-        
+
         deposits_previous = WalletTransaction.objects.filter(
             type='deposit', created_at__gte=prev_start, created_at__lt=start
         ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
@@ -997,12 +999,12 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         fees_previous = WalletTransaction.objects.filter(
             type='fee', created_at__gte=prev_start, created_at__lt=start
         ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-        
+
         revenue_growth_pct = percent_change(float(fees_current), float(fees_previous))
-        
+
         # Prefer explicit fee transactions as true platform revenue.
         revenue_kes = float(fees_current)
-        
+
         # Revenue sparkline (last 7 days)
         revenue_spark = [
             float(value)
@@ -1023,7 +1025,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
 
         challenges_current = Challenge.objects.filter(created_at__gte=start).count()
         challenges_previous = Challenge.objects.filter(created_at__gte=prev_start, created_at__lt=start).count()
-        
+
         # Challenge sparkline
         challenge_spark = [
             int(value)
@@ -1040,7 +1042,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         pending_withdrawals_amount = pending_withdrawals_qs.aggregate(
             total=Sum('amount')
         )['total'] or Decimal('0.00')
-        
+
         # Pending withdrawals list (top 5 for dashboard)
         pending_list = []
         for w in pending_withdrawals_qs.order_by('-created_at')[:5]:
@@ -1055,7 +1057,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         # ═══════════════════════════════════════════════════════════════════
         # CHART DATA
         # ═══════════════════════════════════════════════════════════════════
-        
+
         # Revenue chart (deposits vs withdrawals per day)
         deposits_daily = dict(
             build_daily_series(
@@ -1083,13 +1085,13 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 'deposits': float(deposits_daily.get(day, 0.0)),
                 'withdrawals': float(withdrawals_daily.get(day, 0.0)),
             })
-        
+
         # User signup chart
         user_chart = [
             {'date': day.strftime('%b %d'), 'users': int(value)}
             for day, value in build_daily_series(days_param, User.objects.all(), value_key='users')
         ]
-        
+
         # Steps chart - aggregate from HealthRecord
         step_chart = []
         step_start_day = timezone.localdate() - timedelta(days=days_param - 1)
@@ -1115,25 +1117,25 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         # ═══════════════════════════════════════════════════════════════════
         week_ago = now - timedelta(days=7)
         month_ago = now - timedelta(days=30)
-        
+
         active_users_week = HealthRecord.objects.filter(
             date__gte=week_ago.date()
         ).values('user').distinct().count()
-        
+
         new_users_week = User.objects.filter(created_at__gte=week_ago).count()
-        
+
         week_deposits = WalletTransaction.objects.filter(
             type='deposit', created_at__gte=week_ago
         ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
-        
+
         week_withdrawals = WalletTransaction.objects.filter(
             type='withdrawal', created_at__gte=week_ago
         ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
-        
+
         total_xp_distributed = XPEvent.objects.filter(
             created_at__gte=week_ago
         ).aggregate(Sum('amount'))['amount__sum'] or 0
-        
+
         completed_challenges_month = Challenge.objects.filter(
             status='completed', end_date__gte=month_ago.date()
         ).count()
@@ -1154,21 +1156,21 @@ class AdminDashboardViewSet(viewsets.ViewSet):
             'challenge_spark': challenge_spark,
             'pending_withdrawals_count': pending_withdrawals_count,
             'pending_withdrawals_amount': float(pending_withdrawals_amount),
-            
+
             # Challenge breakdown
             'challenges_active': challenges_active,
             'challenges_pending': challenges_pending,
             'challenges_completed': challenges_completed,
-            
+
             # Charts
             'revenue_chart': revenue_chart,
             'user_chart': user_chart,
             'step_chart': step_chart,
-            
+
             # Activity feeds
             'recent_users': recent_users,
             'pending_withdrawals_list': pending_list,
-            
+
             # Legacy support (backward compatibility)
             'users': {
                 'total': total_users,
@@ -1195,23 +1197,23 @@ class AdminDashboardViewSet(viewsets.ViewSet):
     def revenue_chart(self, request):
         """Get revenue data for chart"""
         days = int(request.query_params.get('days', 30))
-        
+
         chart_data = []
         for i in range(days):
             date = (timezone.now() - timedelta(days=i)).date()
-            
+
             deposits = WalletTransaction.objects.filter(
                 type='deposit',
                 created_at__date=date
             ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
-            
+
             withdrawals = WalletTransaction.objects.filter(
                 type='withdrawal',
                 created_at__date=date
             ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
-            
+
             revenue = (deposits - withdrawals) * Decimal('0.05')  # 5% commission
-            
+
             chart_data.append({
                 'date': date.isoformat(),
                 'deposits': str(deposits),
@@ -1229,7 +1231,7 @@ def get_system_settings(request):
     """Get current system settings"""
     from apps.admin_api.models import SystemSettings
     from apps.admin_api.serializers import SystemSettingsSerializer
-    
+
     settings = SystemSettings.load()
     serializer = SystemSettingsSerializer(settings)
     return Response(serializer.data)
@@ -1242,13 +1244,13 @@ def update_system_settings(request):
     """Update system settings"""
     from apps.admin_api.models import SystemSettings, AuditLog
     from apps.admin_api.serializers import SystemSettingsSerializer
-    
+
     settings = SystemSettings.load()
     serializer = SystemSettingsSerializer(data=request.data, partial=True)
-    
+
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
     # Capture changes for audit log
     changes = {}
     for key, value in serializer.validated_data.items():
@@ -1258,14 +1260,14 @@ def update_system_settings(request):
                 'old': str(old_value) if old_value is not None else None,
                 'new': str(value) if value is not None else None,
             }
-    
+
     # Update settings
     for key, value in serializer.validated_data.items():
         setattr(settings, key, value)
-    
+
     settings.updated_by = request.user
     settings.save()
-    
+
     # Log the action
     AuditLog.log_action(
         admin=request.user,
@@ -1275,7 +1277,7 @@ def update_system_settings(request):
         changes=changes,
         request=request
     )
-    
+
     return Response(SystemSettingsSerializer(settings).data)
 
 
@@ -1286,40 +1288,40 @@ def get_audit_logs(request):
     """Get audit logs with filtering"""
     from apps.admin_api.models import AuditLog
     from apps.admin_api.serializers import AuditLogSerializer
-    
+
     logs = AuditLog.objects.all()
-    
+
     # Apply filters
     action = request.query_params.get('action')
     if action:
         logs = logs.filter(action=action)
-    
+
     resource_type = request.query_params.get('resource_type')
     if resource_type:
         logs = logs.filter(resource_type=resource_type)
-    
+
     admin_username = request.query_params.get('admin_username')
     if admin_username:
         logs = logs.filter(admin_username__icontains=admin_username)
-    
+
     # Date filtering
     from_date = request.query_params.get('from_date')
     if from_date:
         logs = logs.filter(created_at__gte=from_date)
-    
+
     to_date = request.query_params.get('to_date')
     if to_date:
         logs = logs.filter(created_at__lte=to_date)
-    
+
     # Pagination
     limit = int(request.query_params.get('limit', 100))
     offset = int(request.query_params.get('offset', 0))
-    
+
     total = logs.count()
     logs = logs[offset:offset + limit]
-    
+
     serializer = AuditLogSerializer(logs, many=True)
-    
+
     return Response({
         'total': total,
         'results': serializer.data,
@@ -1579,6 +1581,11 @@ def reply_support_ticket(request, ticket_id):
     if not message_text:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
 
+    try:
+        message_text = sanitize_text(message_text, max_length=5000)
+    except DjangoValidationError as exc:
+        return Response({'error': str(exc.message if hasattr(exc, 'message') else exc)}, status=status.HTTP_400_BAD_REQUEST)
+
     reply = SupportTicketMessage.objects.create(
         ticket=ticket,
         sender=request.user,
@@ -1760,14 +1767,14 @@ def get_revenue_report(request):
     """Get revenue breakdown by category and time period"""
     if not request.user.is_staff:
         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
-    
+
     from datetime import datetime, timedelta
     from django.db.models import Sum, Count, Q
-    
+
     # Get time period (default: 30 days)
     period_days = int(request.query_params.get('days', 30))
     start_date = timezone.now() - timedelta(days=period_days)
-    
+
     # Revenue from deposits (entry_fee transactions)
     deposits = WalletTransaction.objects.filter(
         type='entry_fee',
@@ -1776,7 +1783,7 @@ def get_revenue_report(request):
         total=Sum('amount'),
         count=Count('id')
     )
-    
+
     # Payouts (payout transactions)
     payouts = WalletTransaction.objects.filter(
         type='payout',
@@ -1785,7 +1792,7 @@ def get_revenue_report(request):
         total=Sum('amount'),
         count=Count('id')
     )
-    
+
     # Withdrawals processed
     withdrawals_data = Withdrawal.objects.filter(
         status='completed',
@@ -1794,35 +1801,35 @@ def get_revenue_report(request):
         total=Sum('amount'),
         count=Count('id')
     )
-    
+
     # Platform fees collected
     from apps.admin_api.models import SystemSettings
     settings = SystemSettings.load()
     fee_percentage = settings.platform_fee_percentage
-    
+
     total_deposits = deposits['total'] or Decimal('0')
     platform_fees = total_deposits * (fee_percentage / Decimal('100'))
-    
+
     # Revenue by day for chart
     daily_revenue = []
     for i in range(period_days):
         day = start_date + timedelta(days=i)
         day_end = day + timedelta(days=1)
-        
+
         day_deposits = WalletTransaction.objects.filter(
             type='entry_fee',
             created_at__gte=day,
             created_at__lt=day_end
         ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
-        
+
         day_fees = day_deposits * (fee_percentage / Decimal('100'))
-        
+
         daily_revenue.append({
             'date': day.strftime('%Y-%m-%d'),
             'revenue': float(day_fees),
             'deposits': float(day_deposits),
         })
-    
+
     return Response({
         'summary': {
             'total_deposits': float(total_deposits),
@@ -1845,45 +1852,45 @@ def get_user_retention(request):
     """Get user retention metrics and cohort analysis"""
     if not request.user.is_staff:
         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
-    
+
     from datetime import datetime, timedelta
     from django.db.models import Count, Q
-    
+
     # Get time period (default: 90 days)
     period_days = int(request.query_params.get('days', 90))
     start_date = timezone.now() - timedelta(days=period_days)
-    
+
     # New users by week
     weekly_signups = []
     weeks = period_days // 7
-    
+
     for i in range(weeks):
         week_start = start_date + timedelta(weeks=i)
         week_end = week_start + timedelta(weeks=1)
-        
+
         new_users = User.objects.filter(
             date_joined__gte=week_start,
             date_joined__lt=week_end
         ).count()
-        
+
         # Active users in that cohort (users who have transactions/challenges after signup)
         active_users = User.objects.filter(
             date_joined__gte=week_start,
             date_joined__lt=week_end
         ).filter(
-            Q(transactions__created_at__gte=week_end) | 
+            Q(transactions__created_at__gte=week_end) |
             Q(created_challenges__created_at__gte=week_end)
         ).distinct().count()
-        
+
         retention_rate = (active_users / new_users * 100) if new_users > 0 else 0
-        
+
         weekly_signups.append({
             'week_start': week_start.strftime('%Y-%m-%d'),
             'new_users': new_users,
             'active_users': active_users,
             'retention_rate': round(retention_rate, 2),
         })
-    
+
     # Overall stats
     total_users = User.objects.filter(date_joined__gte=start_date).count()
     active_users = User.objects.filter(
@@ -1893,7 +1900,7 @@ def get_user_retention(request):
         Q(transactions__created_at__gte=start_date) |
         Q(created_challenges__created_at__gte=start_date)
     ).distinct().count()
-    
+
     return Response({
         'summary': {
             'total_users': total_users,
@@ -1911,61 +1918,61 @@ def get_challenge_analytics(request):
     """Get challenge success rates and analytics"""
     if not request.user.is_staff:
         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
-    
+
     from datetime import timedelta
     from django.db.models import Count, Avg, Sum
-    
+
     # Get time period (default: 30 days)
     period_days = int(request.query_params.get('days', 30))
     start_date = timezone.now() - timedelta(days=period_days)
-    
+
     challenges = Challenge.objects.filter(created_at__gte=start_date)
-    
+
     # Status breakdown
     status_breakdown = challenges.values('status').annotate(count=Count('id'))
     status_dict = {item['status']: item['count'] for item in status_breakdown}
-    
+
     # Success metrics
     completed_challenges = challenges.filter(status='completed').count()
     cancelled_challenges = challenges.filter(status='cancelled').count()
     total_challenges = challenges.count()
-    
+
     completion_rate = (completed_challenges / total_challenges * 100) if total_challenges > 0 else 0
-    
+
     # Average participants (count participants per challenge)
     challenges_with_count = challenges.annotate(participant_count=Count('participants'))
     avg_participants = challenges_with_count.aggregate(avg=Avg('participant_count'))['avg'] or 0
-    
+
     # Total prize pool
     total_pool = challenges.aggregate(total=Sum('total_pool'))['total'] or Decimal('0')
-    
+
     # Challenge creation trend (daily)
     daily_challenges = []
     for i in range(period_days):
         day = start_date + timedelta(days=i)
         day_end = day + timedelta(days=1)
-        
+
         count = Challenge.objects.filter(
             created_at__gte=day,
             created_at__lt=day_end
         ).count()
-        
+
         daily_challenges.append({
             'date': day.strftime('%Y-%m-%d'),
             'count': count,
         })
-    
+
     # Participant engagement
     total_participants = Participant.objects.filter(
         challenge__created_at__gte=start_date
     ).count()
-    
+
     # Winners
     winners_count = Participant.objects.filter(
         challenge__created_at__gte=start_date,
         payout__gt=0
     ).count()
-    
+
     return Response({
         'summary': {
             'total_challenges': total_challenges,
@@ -1991,35 +1998,35 @@ def get_transaction_trends(request):
     """Get transaction volume trends over time"""
     if not request.user.is_staff:
         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
-    
+
     from datetime import timedelta
     from django.db.models import Sum, Count
-    
+
     # Get time period (default: 30 days)
     period_days = int(request.query_params.get('days', 30))
     start_date = timezone.now() - timedelta(days=period_days)
-    
+
     # Daily transaction data
     daily_data = []
     for i in range(period_days):
         day = start_date + timedelta(days=i)
         day_end = day + timedelta(days=1)
-        
+
         day_txs = WalletTransaction.objects.filter(
             created_at__gte=day,
             created_at__lt=day_end
         )
-        
+
         deposits = day_txs.filter(type='entry_fee').aggregate(
             total=Sum('amount'),
             count=Count('id')
         )
-        
+
         payouts = day_txs.filter(type='payout').aggregate(
             total=Sum('amount'),
             count=Count('id')
         )
-        
+
         daily_data.append({
             'date': day.strftime('%Y-%m-%d'),
             'deposit_amount': float(deposits['total'] or 0),
@@ -2028,21 +2035,21 @@ def get_transaction_trends(request):
             'payout_count': payouts['count'],
             'total_volume': float((deposits['total'] or 0) + (payouts['total'] or 0)),
         })
-    
+
     # Summary stats
     period_transactions = WalletTransaction.objects.filter(created_at__gte=start_date)
-    
+
     total_volume = period_transactions.aggregate(total=Sum('amount'))['total'] or Decimal('0')
     total_count = period_transactions.count()
-    
+
     deposits_total = period_transactions.filter(type='entry_fee').aggregate(
         total=Sum('amount')
     )['total'] or Decimal('0')
-    
+
     payouts_total = period_transactions.filter(type='payout').aggregate(
         total=Sum('amount')
     )['total'] or Decimal('0')
-    
+
     return Response({
         'summary': {
             'total_volume': float(total_volume),
