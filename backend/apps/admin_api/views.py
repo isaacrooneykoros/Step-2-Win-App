@@ -14,6 +14,8 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.shortcuts import get_object_or_404
 from django.core.cache import cache
+from django.core.exceptions import ValidationError as DjangoValidationError
+from apps.core.sanitizers import sanitize_text
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import AllowAny
 from datetime import timedelta
@@ -1578,6 +1580,11 @@ def reply_support_ticket(request, ticket_id):
     message_text = request.data.get('message', '').strip()
     if not message_text:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        message_text = sanitize_text(message_text, max_length=5000)
+    except DjangoValidationError as e:
+        return Response({'error': e.message if hasattr(e, 'message') else str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     reply = SupportTicketMessage.objects.create(
         ticket=ticket,
