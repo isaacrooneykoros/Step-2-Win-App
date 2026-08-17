@@ -244,6 +244,7 @@ def join_challenge(request):
                 )
             
             # Check balance (use available_balance, not wallet_balance)
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             if user.available_balance < challenge.entry_fee:
                 return Response(
                     {
@@ -560,30 +561,16 @@ def rematch_challenge(request, pk):
         )
 
     entry_fee = source.entry_fee
+    if request.user.wallet_balance < entry_fee:
+        return Response(
+            {'error': 'Insufficient balance to start rematch'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     duration_days = max(1, (source.end_date - source.start_date).days)
 
     with transaction.atomic():
         user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
-
-        if user.available_balance < entry_fee:
-            return Response(
-                {'error': f'Insufficient available balance. Required: KES {entry_fee}, Available: KES {user.available_balance}'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        max_locked_pct = Decimal(str(getattr(settings, 'MAX_LOCKED_BALANCE_PERCENT', 80)))
-        max_lockable = user.wallet_balance * (max_locked_pct / Decimal('100'))
-        if user.locked_balance + entry_fee > max_lockable:
-            return Response(
-                {
-                    'error': (
-                        f'Cannot start rematch - would exceed max locked balance. '
-                        f'Currently locked: KES {user.locked_balance}, '
-                        f'Max allowed: KES {max_lockable}'
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
 
         challenge = Challenge.objects.create(
             name=source.name,
