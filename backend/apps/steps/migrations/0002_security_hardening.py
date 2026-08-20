@@ -114,7 +114,7 @@ class Migration(migrations.Migration):
                 ('timestamp_server', models.DateTimeField(auto_now_add=True)),
                 ('payload_hash', models.CharField(db_index=True, max_length=255)),
                 ('signature_valid', models.BooleanField(default=False)),
-                ('replay_detected', models.BooleanField(db_index=True, default=False)),
+                ('replay_detected', models.BooleanField(default=False)),
                 ('steps_delta', models.IntegerField(default=0)),
                 ('raw_steps_total', models.IntegerField(blank=True, null=True)),
                 ('ml_motion_label', models.CharField(blank=True, max_length=20, null=True)),
@@ -177,10 +177,6 @@ class Migration(migrations.Migration):
             model_name='stepsession',
             index=models.Index(fields=['expires_at', 'status'], name='session_expiry_status_idx'),
         ),
-        migrations.AddConstraint(
-            model_name='stepsyncevent',
-            constraint=models.UniqueConstraint(fields=['user', 'client_event_id'], name='syncevent_unique_user_event'),
-        ),
         migrations.AddIndex(
             model_name='stepsyncevent',
             index=models.Index(fields=['session', 'sequence_number'], name='syncevent_session_sq_idx'),
@@ -188,6 +184,10 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name='stepsyncevent',
             index=models.Index(fields=['user', 'created_at'], name='syncevent_user_created_idx'),
+        ),
+        migrations.AddConstraint(
+            model_name='stepsyncevent',
+            constraint=models.UniqueConstraint(fields=['user', 'client_event_id'], name='syncevent_unique_user_event'),
         ),
         migrations.AddIndex(
             model_name='stepsyncevent',
