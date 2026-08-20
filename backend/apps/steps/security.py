@@ -44,6 +44,9 @@ def compute_payload_hash(payload: dict) -> str:
     
     Do NOT include volatile fields that change server-side.
     """
+    walk_prob = payload.get('ml_walk_probability')
+    shake_prob = payload.get('ml_shake_probability')
+
     # Extract and normalize fields
     hashable_fields = {
         'session_id': payload.get('session_id'),
@@ -53,8 +56,8 @@ def compute_payload_hash(payload: dict) -> str:
         'steps_delta': payload.get('steps_delta'),
         'steps_total': payload.get('steps_total'),
         'ml_motion_label': payload.get('ml_motion_label'),
-        'ml_walk_probability': round(payload.get('ml_walk_probability') or 0, 4),
-        'ml_shake_probability': round(payload.get('ml_shake_probability') or 0, 4),
+        'ml_walk_probability': round(float(walk_prob), 4) if walk_prob is not None else 0,
+        'ml_shake_probability': round(float(shake_prob), 4) if shake_prob is not None else 0,
         'ml_model_version': payload.get('ml_model_version'),
     }
     
