@@ -114,7 +114,7 @@ class Migration(migrations.Migration):
                 ('timestamp_server', models.DateTimeField(auto_now_add=True)),
                 ('payload_hash', models.CharField(db_index=True, max_length=255)),
                 ('signature_valid', models.BooleanField(default=False)),
-                ('replay_detected', models.BooleanField(db_index=True, default=False)),
+                ('replay_detected', models.BooleanField(default=False)),
                 ('steps_delta', models.IntegerField(default=0)),
                 ('raw_steps_total', models.IntegerField(blank=True, null=True)),
                 ('ml_motion_label', models.CharField(blank=True, max_length=20, null=True)),
@@ -152,53 +152,56 @@ class Migration(migrations.Migration):
                 'ordering': ['-created_at'],
             },
         ),
-        # Add unique constraints
-        migrations.AddConstraint(
-            model_name='deviceregistration',
-            constraint=models.UniqueConstraint(fields=['user', 'device_id'], name='device_registration_unique'),
+        migrations.AlterUniqueTogether(
+            name='deviceregistration',
+            unique_together={('user', 'device_id')},
+        ),
+        migrations.AlterUniqueTogether(
+            name='stepsyncevent',
+            unique_together={('user', 'client_event_id')},
         ),
         migrations.AddIndex(
             model_name='deviceregistration',
-            index=models.Index(fields=['user', 'is_active'], name='device_reg_user_active_idx'),
+            index=models.Index(fields=['user', 'is_active'], name='steps_devic_user_id_ae956a_idx'),
         ),
-        migrations.AddConstraint(
-            model_name='stepsession',
-            constraint=models.UniqueConstraint(fields=['user', 'session_token_hash'], name='session_unique_token_hash'),
+        migrations.AddIndex(
+            model_name='deviceregistration',
+            index=models.Index(fields=['device_id'], name='steps_devic_device__16e427_idx'),
         ),
         migrations.AddIndex(
             model_name='stepsession',
-            index=models.Index(fields=['user', 'status'], name='session_user_status_idx'),
+            index=models.Index(fields=['user', 'status'], name='steps_steps_user_id_fe7d80_idx'),
         ),
         migrations.AddIndex(
             model_name='stepsession',
-            index=models.Index(fields=['user', '-created_at'], name='session_user_created_idx'),
+            index=models.Index(fields=['user', '-created_at'], name='steps_steps_user_id_502435_idx'),
         ),
         migrations.AddIndex(
             model_name='stepsession',
-            index=models.Index(fields=['expires_at', 'status'], name='session_expiry_status_idx'),
-        ),
-        migrations.AddConstraint(
-            model_name='stepssyncevent',
-            constraint=models.UniqueConstraint(fields=['user', 'client_event_id'], name='syncevent_unique_user_event'),
+            index=models.Index(fields=['expires_at', 'status'], name='steps_steps_expires_b2762c_idx'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
-            index=models.Index(fields=['session', 'sequence_number'], name='syncevent_session_sq_idx'),
+            model_name='stepsyncevent',
+            index=models.Index(fields=['session', 'sequence_number'], name='steps_steps_session_07bd06_idx'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
-            index=models.Index(fields=['user', 'created_at'], name='syncevent_user_created_idx'),
+            model_name='stepsyncevent',
+            index=models.Index(fields=['user', 'created_at'], name='steps_steps_user_id_35a32d_idx'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
-            index=models.Index(fields=['payload_hash'], name='syncevent_hash_idx'),
+            model_name='stepsyncevent',
+            index=models.Index(fields=['payload_hash'], name='steps_steps_payload_ce435b_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='stepsyncevent',
+            index=models.Index(fields=['replay_detected'], name='steps_steps_replay__6bf624_idx'),
         ),
         migrations.AddIndex(
             model_name='suspicioussessionreview',
-            index=models.Index(fields=['status', '-created_at'], name='review_status_created_idx'),
+            index=models.Index(fields=['status', '-created_at'], name='steps_suspi_status_83e963_idx'),
         ),
         migrations.AddIndex(
             model_name='suspicioussessionreview',
-            index=models.Index(fields=['user', '-created_at'], name='review_user_created_idx'),
+            index=models.Index(fields=['user', '-created_at'], name='steps_suspi_user_id_dd70f6_idx'),
         ),
     ]
