@@ -1569,13 +1569,24 @@ def reply_support_ticket(request, ticket_id):
     """Post an admin reply to a support ticket"""
     from apps.admin_api.models import SupportTicket, SupportTicketMessage, AuditLog
     from apps.admin_api.realtime import broadcast_support_message, broadcast_support_ticket
+    from apps.core.sanitizers import sanitize_text
+    from django.core.exceptions import ValidationError as DjangoValidationError
 
     try:
         ticket = SupportTicket.objects.get(id=ticket_id)
     except SupportTicket.DoesNotExist:
         return Response({'error': 'Support ticket not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    message_text = request.data.get('message', '').strip()
+    raw_message = request.data.get('message', '')
+    if not raw_message or not str(raw_message).strip():
+        return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Sanitize input text to strip HTML tags and enforce 5000 char limit (prevent Stored XSS)
+        message_text = sanitize_text(raw_message, max_length=5000)
+    except DjangoValidationError as exc:
+        return Response({'error': exc.message}, status=status.HTTP_400_BAD_REQUEST)
+
     if not message_text:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
 
