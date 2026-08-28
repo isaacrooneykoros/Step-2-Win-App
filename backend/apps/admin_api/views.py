@@ -12,12 +12,14 @@ from django.db import transaction as db_transaction
 from django.db.models import Sum, Count, Min, Max, Q
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
 from django.core.cache import cache
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import AllowAny
 from datetime import timedelta
 from decimal import Decimal
+from apps.core.sanitizers import sanitize_text
 
 logger = logging.getLogger(__name__)
 
@@ -1575,7 +1577,15 @@ def reply_support_ticket(request, ticket_id):
     except SupportTicket.DoesNotExist:
         return Response({'error': 'Support ticket not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    message_text = request.data.get('message', '').strip()
+    raw_message = request.data.get('message', '').strip()
+    if not raw_message:
+        return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        message_text = sanitize_text(raw_message, max_length=5000)
+    except DjangoValidationError as e:
+        return Response({'error': str(e.message if hasattr(e, 'message') else e)}, status=status.HTTP_400_BAD_REQUEST)
+
     if not message_text:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
 

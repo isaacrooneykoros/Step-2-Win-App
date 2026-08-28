@@ -7,10 +7,12 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.throttling import UserRateThrottle
 from drf_spectacular.utils import extend_schema, inline_serializer
 from django.contrib.auth import authenticate
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.conf import settings
 from django.utils.text import slugify
 from django.utils import timezone
+from apps.core.sanitizers import sanitize_text
 import hashlib
 import hmac
 import json
@@ -731,7 +733,15 @@ def reply_support_ticket(request, ticket_id):
     except SupportTicket.DoesNotExist:
         return Response({'error': 'Support ticket not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    message = str(request.data.get('message', '')).strip()
+    raw_message = str(request.data.get('message', '')).strip()
+    if not raw_message:
+        return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        message = sanitize_text(raw_message, max_length=5000)
+    except DjangoValidationError as e:
+        return Response({'error': str(e.message if hasattr(e, 'message') else e)}, status=status.HTTP_400_BAD_REQUEST)
+
     if not message:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
 
