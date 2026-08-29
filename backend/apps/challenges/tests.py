@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.challenges.models import Challenge, Participant
+from apps.challenges.models import Challenge, Participant, ChallengeMessage
 
 
 User = get_user_model()
@@ -67,6 +67,7 @@ class ChallengeIntegrationTests(APITestCase):
             email='challenge_creator_new@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            challenges_joined=1,
         )
         self.client.force_authenticate(user=creator)
 
@@ -94,3 +95,56 @@ class ChallengeIntegrationTests(APITestCase):
         self.assertEqual(creator.locked_balance, Decimal('100.00'))
         self.assertEqual(created.total_pool, Decimal('100.00'))
         self.assertTrue(Participant.objects.filter(challenge=created, user=creator).exists())
+
+    def test_challenge_chat_sanitizes_html_content(self):
+        private_challenge = Challenge.objects.create(
+            name='Private Chat Challenge',
+            creator=self.owner,
+            milestone=50000,
+            entry_fee=Decimal('0.00'),
+            status='active',
+            start_date=date.today(),
+            end_date=date.today() + timedelta(days=7),
+            is_private=True,
+            is_public=False,
+        )
+        Participant.objects.create(challenge=private_challenge, user=self.owner)
+        self.client.force_authenticate(user=self.owner)
+
+        xss_payload = "<script>alert('xss')</script>Hello World <b>Bold</b>"
+        response = self.client.post(
+            f'/api/challenges/{private_challenge.id}/chat/',
+            {'content': xss_payload},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['content'], "alert('xss')Hello World Bold")
+
+        msg = ChallengeMessage.objects.get(id=response.data['id'])
+        self.assertEqual(msg.message, "alert('xss')Hello World Bold")
+
+    def test_challenge_chat_rejects_empty_after_sanitization(self):
+        private_challenge = Challenge.objects.create(
+            name='Private Chat Challenge Empty',
+            creator=self.owner,
+            milestone=50000,
+            entry_fee=Decimal('0.00'),
+            status='active',
+            start_date=date.today(),
+            end_date=date.today() + timedelta(days=7),
+            is_private=True,
+            is_public=False,
+        )
+        Participant.objects.create(challenge=private_challenge, user=self.owner)
+        self.client.force_authenticate(user=self.owner)
+
+        empty_html_payload = "<p>   </p>"
+        response = self.client.post(
+            f'/api/challenges/{private_challenge.id}/chat/',
+            {'content': empty_html_payload},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('error', response.data)
