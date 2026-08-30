@@ -165,6 +165,7 @@ def run_frontend_checks(*, skip_web: bool, skip_admin: bool) -> None:
 def run_android_build_if_requested(*, requested: bool) -> None:
     if requested:
         run([NPM_CMD, 'run', 'build'], WEB)
+        run([NPM_CMD, 'exec', 'cap', 'add', 'android'], WEB)
         run([NPM_CMD, 'exec', 'cap', 'sync', 'android'], WEB)
         run([ANDROID_GRADLE, ':app:assembleDebug', '--no-daemon'], WEB / 'android')
 
