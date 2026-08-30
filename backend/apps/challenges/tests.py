@@ -67,6 +67,7 @@ class ChallengeIntegrationTests(APITestCase):
             email='challenge_creator_new@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            challenges_joined=1,
         )
         self.client.force_authenticate(user=creator)
 
@@ -94,3 +95,32 @@ class ChallengeIntegrationTests(APITestCase):
         self.assertEqual(creator.locked_balance, Decimal('100.00'))
         self.assertEqual(created.total_pool, Decimal('100.00'))
         self.assertTrue(Participant.objects.filter(challenge=created, user=creator).exists())
+
+    def test_rematch_challenge_validates_available_balance_and_locked_limit(self):
+        completed_challenge = Challenge.objects.create(
+            name='Completed Challenge',
+            creator=self.owner,
+            milestone=50000,
+            entry_fee=Decimal('200.00'),
+            total_pool=Decimal('200.00'),
+            max_participants=10,
+            status='completed',
+            start_date=date.today() - timedelta(days=7),
+            end_date=date.today(),
+            is_private=False,
+            is_public=True,
+        )
+        Participant.objects.create(challenge=completed_challenge, user=self.joiner)
+
+        self.joiner.wallet_balance = Decimal('200.00')
+        self.joiner.locked_balance = Decimal('150.00')
+        self.joiner.save()
+
+        self.client.force_authenticate(user=self.joiner)
+
+        response = self.client.post(
+            f'/api/challenges/{completed_challenge.id}/rematch/',
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Insufficient available balance', response.data.get('error', ''))
