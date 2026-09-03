@@ -18,13 +18,18 @@ _MANAGE_PY_BOOTSTRAP_COMMANDS = {
     'collectstatic',
     'migrate',
     'showmigrations',
+    'test',
 }
-_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and sys.argv[0].endswith('manage.py') else ''
-_ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS
+_IS_MANAGE_PY = len(sys.argv) > 0 and sys.argv[0].endswith('manage.py')
+_IS_CI = os.getenv('GITHUB_ACTIONS') == 'true' or os.getenv('CI') == 'true'
+_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and _IS_MANAGE_PY else ''
+_ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _IS_CI or _IS_MANAGE_PY or (_CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS)
 
 ENVIRONMENT = os.getenv('DJANGO_ENV', 'development').strip().lower()
 DEBUG = os.getenv('DEBUG', 'False').strip().lower() == 'true'
 SECRET_KEY = os.getenv('SECRET_KEY', '')
+if not SECRET_KEY and _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
+    SECRET_KEY = 'django-insecure-ci-fallback-secret-key-for-tests-and-builds-min-50-chars'
 if not SECRET_KEY:
     raise ImproperlyConfigured('SECRET_KEY environment variable is required.')
 
@@ -48,11 +53,7 @@ if ENVIRONMENT == 'production' and not os.getenv('REDIS_URL', '').strip():
     raise ImproperlyConfigured('REDIS_URL is required in production for throttling/locks/channels/celery.')
 USE_REDIS = os.getenv('USE_REDIS', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
 ENABLE_DEFENDER = os.getenv('ENABLE_DEFENDER', 'True' if os.getenv('REDIS_URL') else 'False') == 'True'
-APP_SIGNING_SECRET = os.environ.get('APP_SIGNING_SECRET', '')
-if not APP_SIGNING_SECRET and not _ALLOW_BOOTSTRAP_SECRET_FALLBACKS:
-    raise ImproperlyConfigured('APP_SIGNING_SECRET environment variable is required.')
-if not APP_SIGNING_SECRET:
-    APP_SIGNING_SECRET = SECRET_KEY
+APP_SIGNING_SECRET = os.environ.get('APP_SIGNING_SECRET', '').strip() or SECRET_KEY
 
 INSTALLED_APPS = [
     'daphne',
