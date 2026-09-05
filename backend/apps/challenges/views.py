@@ -206,6 +206,7 @@ def join_challenge(request):
     
     try:
         with transaction.atomic():
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             challenge = Challenge.objects.select_for_update().get(
                 invite_code=invite_code,
                 status='active'
@@ -219,7 +220,7 @@ def join_challenge(request):
                 )
             
             # Check if already joined
-            if Participant.objects.filter(challenge=challenge, user=request.user).exists():
+            if Participant.objects.filter(challenge=challenge, user=user).exists():
                 return Response(
                     {'error': 'Already joined this challenge'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -241,7 +242,6 @@ def join_challenge(request):
                 )
             
             # Check balance (use available_balance, not wallet_balance)
-            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             if user.available_balance < challenge.entry_fee:
                 return Response(
                     {
