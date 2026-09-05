@@ -13,14 +13,18 @@ from django.core.exceptions import ImproperlyConfigured
 load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+_IS_MANAGE_PY = len(sys.argv) > 0 and sys.argv[0].endswith('manage.py')
+_IS_CI = os.getenv('GITHUB_ACTIONS') == 'true' or os.getenv('CI') == 'true'
 _MANAGE_PY_BOOTSTRAP_COMMANDS = {
     'check',
     'collectstatic',
+    'makemigrations',
     'migrate',
     'showmigrations',
+    'test',
 }
-_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and sys.argv[0].endswith('manage.py') else ''
-_ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS
+_CURRENT_MANAGEMENT_COMMAND = sys.argv[1] if len(sys.argv) > 1 and _IS_MANAGE_PY else ''
+_ALLOW_BOOTSTRAP_SECRET_FALLBACKS = _IS_CI or (_CURRENT_MANAGEMENT_COMMAND in _MANAGE_PY_BOOTSTRAP_COMMANDS)
 
 ENVIRONMENT = os.getenv('DJANGO_ENV', 'development').strip().lower()
 DEBUG = os.getenv('DEBUG', 'False').strip().lower() == 'true'

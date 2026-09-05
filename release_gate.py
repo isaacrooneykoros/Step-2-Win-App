@@ -114,6 +114,7 @@ def run_backend_ci_checks(python_cmd: list[str], *, skip_tests: bool) -> None:
         'DATABASE_URL': 'postgres://releasegate:releasegate@localhost:5432/releasegate',
         'DATABASE_POOL_URL': 'postgres://releasegate:releasegate@localhost:6432/releasegate',
         'REDIS_URL': 'redis://localhost:6379/1',
+        'APP_SIGNING_SECRET': 'prod-check-app-signing-secret-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
     }
 
     backend_test_env = {
@@ -122,6 +123,7 @@ def run_backend_ci_checks(python_cmd: list[str], *, skip_tests: bool) -> None:
         'USE_SQLITE': 'True',
         'SECRET_KEY': 'test-secret-key-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
         'ALLOWED_HOSTS': 'localhost,127.0.0.1,testserver',
+        'APP_SIGNING_SECRET': 'test-app-signing-secret-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
     }
 
     run(python_cmd + ['manage.py', 'check', '--deploy'], BACKEND, backend_prod_env)
@@ -165,6 +167,8 @@ def run_frontend_checks(*, skip_web: bool, skip_admin: bool) -> None:
 def run_android_build_if_requested(*, requested: bool) -> None:
     if requested:
         run([NPM_CMD, 'run', 'build'], WEB)
+        if not (WEB / 'android').exists():
+            run([NPM_CMD, 'exec', 'cap', 'add', 'android'], WEB)
         run([NPM_CMD, 'exec', 'cap', 'sync', 'android'], WEB)
         run([ANDROID_GRADLE, ':app:assembleDebug', '--no-daemon'], WEB / 'android')
 
