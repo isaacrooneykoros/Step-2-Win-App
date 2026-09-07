@@ -5,7 +5,9 @@ from rest_framework.response import Response
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema, inline_serializer
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, models
+from apps.core.sanitizers import sanitize_chat_message
 from django.db.models import Count, Q, F
 from datetime import date, timedelta
 from decimal import Decimal
@@ -225,7 +227,8 @@ def join_challenge(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Check max locked balance (prevent over-locking) - typically 80% of wallet
+            # Lock user object and check balance & max locked limit
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
             max_locked_pct = Decimal(str(getattr(settings, 'MAX_LOCKED_BALANCE_PERCENT', 80)))
             max_lockable = user.wallet_balance * (max_locked_pct / Decimal('100'))
             if user.locked_balance + challenge.entry_fee > max_lockable:
@@ -675,22 +678,18 @@ def challenge_chat(request, pk):
     
     elif request.method == 'POST':
         from .models import ChallengeMessage
-        content = request.data.get('content', '').strip()
-        if not content:
-            content = request.data.get('message', '').strip()  # Fallback for old format
-        
-        if not content:
+        raw_content = request.data.get('content')
+        if raw_content is None:
+            raw_content = request.data.get('message', '')  # Fallback for old format
+
+        try:
+            content = sanitize_chat_message(raw_content)
+        except DjangoValidationError as ve:
             return Response(
-                {'error': 'Message cannot be empty'},
+                {'error': ve.message if hasattr(ve, 'message') else str(ve)},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        if len(content) > 1000:
-            return Response(
-                {'error': 'Message too long (max 1000 chars)'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+
         message = ChallengeMessage.objects.create(
             challenge=challenge,
             user=request.user,
