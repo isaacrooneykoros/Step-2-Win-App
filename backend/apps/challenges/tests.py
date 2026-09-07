@@ -67,6 +67,7 @@ class ChallengeIntegrationTests(APITestCase):
             email='challenge_creator_new@example.com',
             password='TestPass123!',
             wallet_balance=Decimal('500.00'),
+            challenges_joined=1,
         )
         self.client.force_authenticate(user=creator)
 
@@ -94,3 +95,30 @@ class ChallengeIntegrationTests(APITestCase):
         self.assertEqual(creator.locked_balance, Decimal('100.00'))
         self.assertEqual(created.total_pool, Decimal('100.00'))
         self.assertTrue(Participant.objects.filter(challenge=created, user=creator).exists())
+
+    def test_challenge_chat_sanitizes_xss_content(self):
+        private_challenge = Challenge.objects.create(
+            name='Private Chat Challenge',
+            creator=self.owner,
+            milestone=50000,
+            entry_fee=Decimal('0.00'),
+            total_pool=Decimal('0.00'),
+            max_participants=5,
+            status='active',
+            start_date=date.today(),
+            end_date=date.today() + timedelta(days=7),
+            is_private=True,
+            is_public=False,
+        )
+        Participant.objects.create(challenge=private_challenge, user=self.owner)
+        self.client.force_authenticate(user=self.owner)
+
+        xss_payload = "<script>alert('xss')</script>Hello World"
+        response = self.client.post(
+            f'/api/challenges/{private_challenge.id}/chat/',
+            {'content': xss_payload},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['content'], "alert('xss')Hello World")
