@@ -12,6 +12,7 @@ from django.db import transaction as db_transaction
 from django.db.models import Sum, Count, Min, Max, Q
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.core.cache import cache
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -56,6 +57,7 @@ from apps.admin_api.serializers import (
     SupportTicketSerializer,
     SupportTicketMessageSerializer,
 )
+from apps.core.sanitizers import sanitize_text
 
 User = get_user_model()
 
@@ -1575,9 +1577,17 @@ def reply_support_ticket(request, ticket_id):
     except SupportTicket.DoesNotExist:
         return Response({'error': 'Support ticket not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    message_text = request.data.get('message', '').strip()
+    message_text = str(request.data.get('message', '')).strip()
     if not message_text:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        message_text = sanitize_text(message_text, max_length=5000)
+    except ValidationError as err:
+        return Response({'error': err.message if hasattr(err, 'message') else str(err)}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not message_text:
+        return Response({'error': 'message cannot be empty'}, status=status.HTTP_400_BAD_REQUEST)
 
     reply = SupportTicketMessage.objects.create(
         ticket=ticket,

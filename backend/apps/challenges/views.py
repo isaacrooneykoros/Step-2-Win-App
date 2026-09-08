@@ -225,6 +225,8 @@ def join_challenge(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
+
             # Check max locked balance (prevent over-locking) - typically 80% of wallet
             max_locked_pct = Decimal(str(getattr(settings, 'MAX_LOCKED_BALANCE_PERCENT', 80)))
             max_lockable = user.wallet_balance * (max_locked_pct / Decimal('100'))
