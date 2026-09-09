@@ -225,6 +225,8 @@ def join_challenge(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
+            user = request.user.__class__.objects.select_for_update().get(id=request.user.id)
+
             # Check max locked balance (prevent over-locking) - typically 80% of wallet
             max_locked_pct = Decimal(str(getattr(settings, 'MAX_LOCKED_BALANCE_PERCENT', 80)))
             max_lockable = user.wallet_balance * (max_locked_pct / Decimal('100'))
@@ -675,22 +677,16 @@ def challenge_chat(request, pk):
     
     elif request.method == 'POST':
         from .models import ChallengeMessage
-        content = request.data.get('content', '').strip()
-        if not content:
-            content = request.data.get('message', '').strip()  # Fallback for old format
-        
-        if not content:
-            return Response(
-                {'error': 'Message cannot be empty'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if len(content) > 1000:
-            return Response(
-                {'error': 'Message too long (max 1000 chars)'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+        from apps.core.sanitizers import sanitize_chat_message
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        raw_content = request.data.get('content') or request.data.get('message')
+        try:
+            content = sanitize_chat_message(raw_content)
+        except DjangoValidationError as e:
+            err_msg = e.message if hasattr(e, 'message') else str(e)
+            return Response({'error': err_msg}, status=status.HTTP_400_BAD_REQUEST)
+
         message = ChallengeMessage.objects.create(
             challenge=challenge,
             user=request.user,
