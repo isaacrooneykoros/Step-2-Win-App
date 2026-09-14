@@ -6,7 +6,9 @@ from drf_spectacular.types import OpenApiTypes
 from django.utils import timezone
 from django.db.models import Q, Sum
 from datetime import timedelta
+from django.core.exceptions import ValidationError as DjangoValidationError
 
+from apps.core.sanitizers import sanitize_text
 from apps.gamification.models import Badge, UserBadge, XPEvent, LevelMilestone, DailyLoginStreak
 from apps.gamification.serializers import (
     BadgeSerializer,
@@ -115,24 +117,45 @@ class UserXPViewSet(viewsets.ViewSet):
     def award_xp(self, request):
         """Admin endpoint to award XP to a user"""
         user_id = request.data.get('user_id')
-        amount = request.data.get('amount', 0)
-        reason = request.data.get('reason', 'manual_award')
+        raw_amount = request.data.get('amount')
+        raw_reason = request.data.get('reason', 'manual_award')
 
-        if not user_id or not amount:
+        if not user_id or raw_amount is None:
             return Response(
                 {'error': 'user_id and amount are required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
+            amount = int(raw_amount)
+            if amount <= 0 or amount > 100000:
+                return Response(
+                    {'error': 'amount must be between 1 and 100,000'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'amount must be a valid integer'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            reason = sanitize_text(raw_reason, max_length=255) if raw_reason else 'manual_award'
+        except DjangoValidationError as exc:
+            return Response(
+                {'error': exc.message if hasattr(exc, 'message') else str(exc)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
             xp_profile = UserXP.objects.get(user_id=user_id)
-            result = xp_profile.add_xp(int(amount), source=reason)
+            result = xp_profile.add_xp(amount, source=reason)
             
             # Create XP event
             XPEvent.objects.create(
                 user_id=user_id,
                 event_type='manual_award',
-                amount=int(amount),
+                amount=amount,
                 description=reason,
             )
 
