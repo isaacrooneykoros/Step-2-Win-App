@@ -21,6 +21,8 @@ from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+from apps.core.sanitizers import sanitize_text
 from django.contrib.auth import get_user_model
 from apps.users.models import UserXP
 from apps.challenges.models import Challenge, Participant
@@ -1681,7 +1683,11 @@ def update_support_ticket(request, ticket_id):
             updates['assigned_to'] = admin_user
 
     if 'admin_notes' in request.data:
-        updates['admin_notes'] = str(request.data.get('admin_notes') or '').strip()
+        admin_notes_raw = str(request.data.get('admin_notes') or '').strip()
+        try:
+            updates['admin_notes'] = sanitize_text(admin_notes_raw, max_length=5000)
+        except DjangoValidationError as exc:
+            return Response({'error': exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
     if not updates:
         return Response({'error': 'No valid fields to update'}, status=status.HTTP_400_BAD_REQUEST)
