@@ -291,18 +291,25 @@ class UserTrustProfileTestCase(TestCase):
         # Low trust
         profile.trust_score = 30.0
         profile.save()
+        from apps.steps.security import update_trust_tier
+        update_trust_tier(profile)
+        profile.refresh_from_db()
         modif = get_trust_reward_modifier(self.user)
         self.assertEqual(modif, 0.75)
         
         # Standard trust
         profile.trust_score = 60.0
         profile.save()
+        update_trust_tier(profile)
+        profile.refresh_from_db()
         modif = get_trust_reward_modifier(self.user)
         self.assertEqual(modif, 0.95)
         
         # Trusted
         profile.trust_score = 85.0
         profile.save()
+        update_trust_tier(profile)
+        profile.refresh_from_db()
         modif = get_trust_reward_modifier(self.user)
         self.assertEqual(modif, 1.00)
 
