@@ -122,6 +122,7 @@ def run_backend_ci_checks(python_cmd: list[str], *, skip_tests: bool) -> None:
         'DEBUG': 'True',
         'USE_SQLITE': 'True',
         'SECRET_KEY': 'test-secret-key-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+        'APP_SIGNING_SECRET': 'test-signing-secret-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
         'ALLOWED_HOSTS': 'localhost,127.0.0.1,testserver',
     }
 
