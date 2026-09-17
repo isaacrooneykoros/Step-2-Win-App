@@ -55,7 +55,7 @@ function safeParseJson(value: string): unknown | null {
 function normalizeErrorText(value: string): string {
   return value
     .replace(/ErrorDetail\(string='([^']+)'(?:,\s*code='[^']*')?\)/g, '$1')
-    .replace(/[{}\[\]']/g, ' ')
+    .replace(/[{}[\]']/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
