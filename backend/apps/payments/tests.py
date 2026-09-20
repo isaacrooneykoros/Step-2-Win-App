@@ -228,3 +228,29 @@ class PaymentWorkflowTests(APITestCase):
         self.assertEqual(txn.status, 'failed')
         self.assertEqual(withdrawal.status, 'failed')
         self.assertEqual(self.user.wallet_balance, Decimal('100.00'))
+
+    def test_cancel_withdrawal_refunds_and_prevents_double_refund(self):
+        withdrawal = WithdrawalRequest.objects.create(
+            user=self.user,
+            status='pending_review',
+            amount_kes=Decimal('30.00'),
+            method='mpesa',
+            phone_number='254700000005',
+        )
+        self.user.wallet_balance = Decimal('70.00')
+        self.user.save(update_fields=['wallet_balance'])
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(f'/api/payments/withdrawal/{withdrawal.id}/cancel/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.user.refresh_from_db()
+        withdrawal.refresh_from_db()
+        self.assertEqual(withdrawal.status, 'cancelled')
+        self.assertEqual(self.user.wallet_balance, Decimal('100.00'))
+
+        # Second cancellation attempt should fail with HTTP 400 and not double refund
+        retry_response = self.client.post(f'/api/payments/withdrawal/{withdrawal.id}/cancel/')
+        self.assertEqual(retry_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.wallet_balance, Decimal('100.00'))

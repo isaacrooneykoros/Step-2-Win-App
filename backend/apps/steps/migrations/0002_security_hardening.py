@@ -178,19 +178,19 @@ class Migration(migrations.Migration):
             index=models.Index(fields=['expires_at', 'status'], name='session_expiry_status_idx'),
         ),
         migrations.AddConstraint(
-            model_name='stepssyncevent',
+            model_name='stepsyncevent',
             constraint=models.UniqueConstraint(fields=['user', 'client_event_id'], name='syncevent_unique_user_event'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
+            model_name='stepsyncevent',
             index=models.Index(fields=['session', 'sequence_number'], name='syncevent_session_sq_idx'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
+            model_name='stepsyncevent',
             index=models.Index(fields=['user', 'created_at'], name='syncevent_user_created_idx'),
         ),
         migrations.AddIndex(
-            model_name='stepssyncevent',
+            model_name='stepsyncevent',
             index=models.Index(fields=['payload_hash'], name='syncevent_hash_idx'),
         ),
         migrations.AddIndex(
