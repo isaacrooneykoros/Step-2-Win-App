@@ -9,12 +9,14 @@ from drf_spectacular.utils import extend_schema, inline_serializer
 from django.contrib.auth import authenticate
 from django.db import transaction
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.utils.text import slugify
 from django.utils import timezone
 import hashlib
 import hmac
 import json
 import requests
+from apps.core.sanitizers import sanitize_text
 from .models import User
 from .serializers import (
     RegisterSerializer,
@@ -731,7 +733,12 @@ def reply_support_ticket(request, ticket_id):
     except SupportTicket.DoesNotExist:
         return Response({'error': 'Support ticket not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    message = str(request.data.get('message', '')).strip()
+    raw_message = request.data.get('message', '')
+    try:
+        message = sanitize_text(raw_message, max_length=5000)
+    except ValidationError as err:
+        return Response({'error': err.message}, status=status.HTTP_400_BAD_REQUEST)
+
     if not message:
         return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
 
