@@ -7,7 +7,7 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.conf import settings
 from django.core.cache import cache
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Avg, Max, Sum
 from django.utils import timezone
 from django_ratelimit.decorators import ratelimit
@@ -566,18 +566,18 @@ def sync_health(request):
                 status=400,
             )
 
-    trust, _ = TrustScore.objects.get_or_create(user=user)
-    if trust.status == "BAN":
-        return Response({"error": "Account suspended. Contact support."}, status=403)
-    if trust.status == "SUSPEND":
-        return Response({"error": "Challenge participation paused."}, status=403)
-
     anti_v2_enabled = bool(getattr(settings, "STEP_ANTICHEAT_V2_ENABLED", False))
     anti_v2_shadow = bool(getattr(settings, "STEP_ANTICHEAT_V2_SHADOW_MODE", True))
     anti_v2_version = str(getattr(settings, "STEP_ANTICHEAT_V2_VERSION", "v2"))
     anti_cfg = VerificationConfig.from_settings(settings)
 
-    trust_score_before = trust.score
+    trust_score_before = 0
+    approved_steps = submitted_steps
+    anti_is_suspicious = False
+    legacy_is_suspicious = False
+    record = None
+    v2_decision = None
+
     v2_payload = {
         "steps": submitted_steps,
         "distance_km": data.get("distance_km"),
@@ -599,245 +599,256 @@ def sync_health(request):
         "ml_shake_probability": data.get("ml_shake_probability"),
         "ml_model_version": data.get("ml_model_version"),
     }
-    v2_decision = None
 
-    if anti_v2_enabled:
-        v2_decision = evaluate_daily_submission(
-            user=user,
-            payload=v2_payload,
-            day=date,
-            submitted_at=now,
-            trust_score=trust.score,
-            trust_status=trust.status,
-            source_platform=data.get("source", "device_sensor"),
-            source_device=user.device_platform,
-            source_app="steps.sync_health",
-            config=anti_cfg,
-        )
-        result = decision_to_check_result(v2_decision)
-    else:
-        result = run_anti_cheat(
-            user=user,
-            steps=submitted_steps,
-            date=date,
-            distance_km=data.get("distance_km"),
-            calories=data.get("calories_active"),
-            active_minutes=data.get("active_minutes"),
-            cadence_spm=data.get("cadence_spm"),
-            burst_steps_5s=data.get("burst_steps_5s"),
-            gait_state=data.get("gait_state"),
-            gait_confidence=data.get("gait_confidence"),
-            gait_dominant_freq_hz=data.get("gait_dominant_freq_hz"),
-            gait_autocorr=data.get("gait_autocorr"),
-            gait_interval_std_ms=data.get("gait_interval_std_ms"),
-            gait_valid_peaks_2s=data.get("gait_valid_peaks_2s"),
-            gait_gyro_variance=data.get("gait_gyro_variance"),
-            gait_jerk_rms=data.get("gait_jerk_rms"),
-            carry_mode=data.get("carry_mode"),
-            ml_motion_label=data.get("ml_motion_label"),
-            ml_walk_probability=data.get("ml_walk_probability"),
-            ml_shake_probability=data.get("ml_shake_probability"),
-            ml_model_version=data.get("ml_model_version"),
-            submitted_at=now,
-        )
-        if anti_v2_shadow:
-            v2_decision = evaluate_daily_submission(
-                user=user,
-                payload=v2_payload,
-                day=date,
-                submitted_at=now,
-                trust_score=trust.score,
-                trust_status=trust.status,
-                source_platform=data.get("source", "device_sensor"),
-                source_device=user.device_platform,
-                source_app="steps.sync_health",
-                config=anti_cfg,
-            )
-
-    if result.should_block:
-        for flag in result.flags:
-            FraudFlag.objects.create(user=user, date=date, **flag)
-        trust.deduct(result.trust_deduction)
-        SuspiciousActivity.objects.create(
-            user=user,
-            reason="Critical anti-cheat block",
-            steps_submitted=submitted_steps,
-            date=date,
-        )
-        return Response(
-            {
-                "error": "Submission could not be processed. Contact support if this is an error."
-            },
-            status=400,
-        )
-
-    anti_flags_count = len(result.flags)
-    anti_is_suspicious = anti_flags_count > 0
-    for flag in result.flags:
-        FraudFlag.objects.create(user=user, date=date, **flag)
-
-    if result.trust_deduction > 0:
-        trust.deduct(result.trust_deduction)
-    else:
-        trust.recover(1)
-
-    approved_steps = result.approved_steps
-    if trust.status == "RESTRICT" and not anti_v2_enabled:
-        approved_steps = int(approved_steps * 0.5)
-
-    legacy_is_suspicious = False
-
-    if submitted_steps > DAILY_STEP_CAP:
-        SuspiciousActivity.objects.create(
-            user=user,
-            reason="Exceeds daily step cap",
-            steps_submitted=submitted_steps,
-            date=date,
-        )
-        legacy_is_suspicious = True
-
-    recent_avg = (
-        HealthRecord.objects.filter(
-            user=user,
-            date__gte=date - timedelta(days=7),
-        )
-        .exclude(date=date)
-        .aggregate(avg=Avg("steps"))["avg"]
-        or 0
-    )
-
-    if recent_avg > 0 and approved_steps > recent_avg * 10:
-        SuspiciousActivity.objects.create(
-            user=user,
-            reason="Step spike  10 recent average",
-            steps_submitted=approved_steps,
-            date=date,
-        )
-        legacy_is_suspicious = True
-
-    is_suspicious = anti_is_suspicious or legacy_is_suspicious
-
-    previous_steps = existing_record.steps if existing_record else None
-
-    record, _ = HealthRecord.objects.update_or_create(
-        user=user,
-        date=date,
-        defaults={
-            "source": data.get("source", "device_sensor"),
-            "steps": approved_steps,
-            "distance_km": data.get("distance_km"),
-            "calories_active": data.get("calories_active"),
-            "active_minutes": data.get("active_minutes"),
-            "is_suspicious": is_suspicious,
-        },
-    )
-
-    if record.steps > request.user.best_day_steps:
-        request.user.__class__.objects.filter(id=request.user.id).update(
-            best_day_steps=record.steps
-        )
-
-    # Persist step event + session aggregates for verified or legacy syncs.
     try:
-        event_steps_delta = int(
-            data.get("steps_delta")
-            or max(
-                0, submitted_steps - (existing_record.steps if existing_record else 0)
-            )
-        )
-        event = StepSyncEvent.objects.create(
-            user=user,
-            session=session,
-            device=session.device if session else None,
-            client_event_id=client_event_id
-            or f"legacy-{user.id}-{date}-{submitted_steps}",
-            sequence_number=sequence_number
-            or (session.last_sequence_number + 1 if session else 0),
-            timestamp_client=timestamp_client,
-            payload_hash=payload_hash,
-            signature_valid=bool(session),
-            replay_detected=False,
-            steps_delta=event_steps_delta,
-            raw_steps_total=data.get("steps_total") or submitted_steps,
-            ml_motion_label=data.get("ml_motion_label"),
-            ml_walk_probability=data.get("ml_walk_probability"),
-            ml_shake_probability=data.get("ml_shake_probability"),
-            ml_model_version=data.get("ml_model_version"),
-            interval_risk_score=float(
-                sum(flag.get("severity") == "high" for flag in result.flags) * 10.0
-            ),
-            accepted=not result.should_block,
-            rejection_reason=None,
-            raw_payload=request.data,
-        )
+        with transaction.atomic():
+            trust, _ = TrustScore.objects.select_for_update().get_or_create(user=user)
+            if trust.status == "BAN":
+                return Response(
+                    {"error": "Account suspended. Contact support."}, status=403
+                )
+            if trust.status == "SUSPEND":
+                return Response(
+                    {"error": "Challenge participation paused."}, status=403
+                )
 
-        if session:
-            session.total_steps += event_steps_delta
-            if not result.should_block:
-                session.accepted_steps += approved_steps
+            trust_score_before = trust.score
+
+            if anti_v2_enabled:
+                v2_decision = evaluate_daily_submission(
+                    user=user,
+                    payload=v2_payload,
+                    day=date,
+                    submitted_at=now,
+                    trust_score=trust.score,
+                    trust_status=trust.status,
+                    source_platform=data.get("source", "device_sensor"),
+                    source_device=user.device_platform,
+                    source_app="steps.sync_health",
+                    config=anti_cfg,
+                )
+                result = decision_to_check_result(v2_decision)
             else:
-                session.rejected_steps += submitted_steps
-            session.last_sequence_number = max(
-                session.last_sequence_number,
-                sequence_number or session.last_sequence_number + 1,
-            )
-            session.policy_version = session.policy_version or anti_v2_version
-            session.ml_model_version = session.ml_model_version or data.get(
-                "ml_model_version"
-            )
-            if data.get("ml_walk_probability") is not None:
-                prev = session.avg_walk_probability or 0.0
-                session.avg_walk_probability = (
-                    (prev + float(data.get("ml_walk_probability"))) / 2.0
-                    if prev
-                    else float(data.get("ml_walk_probability"))
+                result = run_anti_cheat(
+                    user=user,
+                    steps=submitted_steps,
+                    date=date,
+                    distance_km=data.get("distance_km"),
+                    calories=data.get("calories_active"),
+                    active_minutes=data.get("active_minutes"),
+                    cadence_spm=data.get("cadence_spm"),
+                    burst_steps_5s=data.get("burst_steps_5s"),
+                    gait_state=data.get("gait_state"),
+                    gait_confidence=data.get("gait_confidence"),
+                    gait_dominant_freq_hz=data.get("gait_dominant_freq_hz"),
+                    gait_autocorr=data.get("gait_autocorr"),
+                    gait_interval_std_ms=data.get("gait_interval_std_ms"),
+                    gait_valid_peaks_2s=data.get("gait_valid_peaks_2s"),
+                    gait_gyro_variance=data.get("gait_gyro_variance"),
+                    gait_jerk_rms=data.get("gait_jerk_rms"),
+                    carry_mode=data.get("carry_mode"),
+                    ml_motion_label=data.get("ml_motion_label"),
+                    ml_walk_probability=data.get("ml_walk_probability"),
+                    ml_shake_probability=data.get("ml_shake_probability"),
+                    ml_model_version=data.get("ml_model_version"),
+                    submitted_at=now,
                 )
-            if data.get("ml_shake_probability") is not None:
-                prev = session.avg_shake_probability or 0.0
-                session.avg_shake_probability = (
-                    (prev + float(data.get("ml_shake_probability"))) / 2.0
-                    if prev
-                    else float(data.get("ml_shake_probability"))
+                if anti_v2_shadow:
+                    v2_decision = evaluate_daily_submission(
+                        user=user,
+                        payload=v2_payload,
+                        day=date,
+                        submitted_at=now,
+                        trust_score=trust.score,
+                        trust_status=trust.status,
+                        source_platform=data.get("source", "device_sensor"),
+                        source_device=user.device_platform,
+                        source_app="steps.sync_health",
+                        config=anti_cfg,
+                    )
+
+            if result.should_block:
+                for flag in result.flags:
+                    FraudFlag.objects.create(user=user, date=date, **flag)
+                trust.deduct(result.trust_deduction)
+                SuspiciousActivity.objects.create(
+                    user=user,
+                    reason="Critical anti-cheat block",
+                    steps_submitted=submitted_steps,
+                    date=date,
                 )
-            session.avg_risk_score = (
-                (session.avg_risk_score + event.interval_risk_score) / 2.0
-                if session.avg_risk_score is not None
-                else event.interval_risk_score
-            )
-            session.session_risk_score = max(
-                session.session_risk_score, event.interval_risk_score
-            )
-            session.save(
-                update_fields=[
-                    "total_steps",
-                    "accepted_steps",
-                    "rejected_steps",
-                    "last_sequence_number",
-                    "policy_version",
-                    "ml_model_version",
-                    "avg_walk_probability",
-                    "avg_shake_probability",
-                    "avg_risk_score",
-                    "session_risk_score",
-                    "updated_at",
-                ]
-            )
-    except Exception:
-        logger.exception("Failed to persist step sync event/session aggregate")
+                return Response(
+                    {
+                        "error": "Submission could not be processed. Contact support if this is an error."
+                    },
+                    status=400,
+                )
 
-    if v2_decision is not None:
-        _persist_verification_artifacts(
-            user=user,
-            day=date,
-            decision=v2_decision,
-            mode="active" if anti_v2_enabled else "shadow",
-            version=anti_v2_version,
-            trust_before=trust_score_before,
-            trust_after=trust.score,
-        )
+            anti_flags_count = len(result.flags)
+            anti_is_suspicious = anti_flags_count > 0
+            for flag in result.flags:
+                FraudFlag.objects.create(user=user, date=date, **flag)
 
-    # Keep streak counters fresh whenever step sync updates a daily record.
-    update_streak(user)
+            if result.trust_deduction > 0:
+                trust.deduct(result.trust_deduction)
+            else:
+                trust.recover(1)
+
+            approved_steps = result.approved_steps
+            if trust.status == "RESTRICT" and not anti_v2_enabled:
+                approved_steps = int(approved_steps * 0.5)
+
+            if submitted_steps > DAILY_STEP_CAP:
+                SuspiciousActivity.objects.create(
+                    user=user,
+                    reason="Exceeds daily step cap",
+                    steps_submitted=submitted_steps,
+                    date=date,
+                )
+                legacy_is_suspicious = True
+
+            recent_avg = (
+                HealthRecord.objects.filter(
+                    user=user,
+                    date__gte=date - timedelta(days=7),
+                )
+                .exclude(date=date)
+                .aggregate(avg=Avg("steps"))["avg"]
+                or 0
+            )
+
+            if recent_avg > 0 and approved_steps > recent_avg * 10:
+                SuspiciousActivity.objects.create(
+                    user=user,
+                    reason="Step spike  10 recent average",
+                    steps_submitted=approved_steps,
+                    date=date,
+                )
+                legacy_is_suspicious = True
+
+            is_suspicious = anti_is_suspicious or legacy_is_suspicious
+
+            previous_steps = existing_record.steps if existing_record else None
+
+            record, _ = HealthRecord.objects.update_or_create(
+                user=user,
+                date=date,
+                defaults={
+                    "source": data.get("source", "device_sensor"),
+                    "steps": approved_steps,
+                    "distance_km": data.get("distance_km"),
+                    "calories_active": data.get("calories_active"),
+                    "active_minutes": data.get("active_minutes"),
+                    "is_suspicious": is_suspicious,
+                },
+            )
+
+            if record.steps > request.user.best_day_steps:
+                request.user.__class__.objects.filter(id=request.user.id).update(
+                    best_day_steps=record.steps
+                )
+
+            # Persist step event + session aggregates for verified or legacy syncs.
+            event_steps_delta = int(
+                data.get("steps_delta")
+                or max(
+                    0, submitted_steps - (existing_record.steps if existing_record else 0)
+                )
+            )
+            event = StepSyncEvent.objects.create(
+                user=user,
+                session=session,
+                device=session.device if session else None,
+                client_event_id=client_event_id
+                or f"legacy-{user.id}-{date}-{submitted_steps}",
+                sequence_number=sequence_number
+                or (session.last_sequence_number + 1 if session else 0),
+                timestamp_client=timestamp_client,
+                payload_hash=payload_hash,
+                signature_valid=bool(session),
+                replay_detected=False,
+                steps_delta=event_steps_delta,
+                raw_steps_total=data.get("steps_total") or submitted_steps,
+                ml_motion_label=data.get("ml_motion_label"),
+                ml_walk_probability=data.get("ml_walk_probability"),
+                ml_shake_probability=data.get("ml_shake_probability"),
+                ml_model_version=data.get("ml_model_version"),
+                interval_risk_score=float(
+                    sum(flag.get("severity") == "high" for flag in result.flags) * 10.0
+                ),
+                accepted=not result.should_block,
+                rejection_reason=None,
+                raw_payload=request.data,
+            )
+
+            if session:
+                session.total_steps += event_steps_delta
+                if not result.should_block:
+                    session.accepted_steps += approved_steps
+                else:
+                    session.rejected_steps += submitted_steps
+                session.last_sequence_number = max(
+                    session.last_sequence_number,
+                    sequence_number or session.last_sequence_number + 1,
+                )
+                session.policy_version = session.policy_version or anti_v2_version
+                session.ml_model_version = session.ml_model_version or data.get(
+                    "ml_model_version"
+                )
+                if data.get("ml_walk_probability") is not None:
+                    prev = session.avg_walk_probability or 0.0
+                    session.avg_walk_probability = (
+                        (prev + float(data.get("ml_walk_probability"))) / 2.0
+                        if prev
+                        else float(data.get("ml_walk_probability"))
+                    )
+                if data.get("ml_shake_probability") is not None:
+                    prev = session.avg_shake_probability or 0.0
+                    session.avg_shake_probability = (
+                        (prev + float(data.get("ml_shake_probability"))) / 2.0
+                        if prev
+                        else float(data.get("ml_shake_probability"))
+                    )
+                session.avg_risk_score = (
+                    (session.avg_risk_score + event.interval_risk_score) / 2.0
+                    if session.avg_risk_score is not None
+                    else event.interval_risk_score
+                )
+                session.session_risk_score = max(
+                    session.session_risk_score, event.interval_risk_score
+                )
+                session.save(
+                    update_fields=[
+                        "total_steps",
+                        "accepted_steps",
+                        "rejected_steps",
+                        "last_sequence_number",
+                        "policy_version",
+                        "ml_model_version",
+                        "avg_walk_probability",
+                        "avg_shake_probability",
+                        "avg_risk_score",
+                        "session_risk_score",
+                        "updated_at",
+                    ]
+                )
+
+            if v2_decision is not None:
+                _persist_verification_artifacts(
+                    user=user,
+                    day=date,
+                    decision=v2_decision,
+                    mode="active" if anti_v2_enabled else "shadow",
+                    version=anti_v2_version,
+                    trust_before=trust_score_before,
+                    trust_after=trust.score,
+                )
+
+            # Keep streak counters fresh whenever step sync updates a daily record.
+            update_streak(user)
+    except IntegrityError:
+        logger.warning("Duplicate step sync rejected for user=%s date=%s", user.id, date)
+        return Response({"error": "Duplicate sync request."}, status=409)
 
     from apps.challenges.models import Challenge, Participant
     from apps.challenges.services import finalize_expired_challenges
