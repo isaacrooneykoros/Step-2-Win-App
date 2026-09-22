@@ -37,7 +37,9 @@ export function AdminFraudPage() {
 
   useEffect(() => {
     // initial load + polling; loadFraudData is hoisted above
-    loadFraudData();
+    queueMicrotask(() => {
+      void loadFraudData();
+    });
     const interval = setInterval(loadFraudData, 30000);
     return () => clearInterval(interval);
   }, []);

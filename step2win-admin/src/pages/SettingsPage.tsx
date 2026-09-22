@@ -114,9 +114,38 @@ export function SettingsPage() {
   const [profileOnlyView, setProfileOnlyView] = useState(false);
   const profilePictureInputRef = useRef<HTMLInputElement | null>(null);
 
+  async function loadSettings() {
+    try {
+      const data = await adminApi.getSettings() as SystemSettings;
+      setSettings(data);
+      setFormData(data);
+      setSettingsError('');
+    } catch (err) {
+      setSettingsError((err as Error).message);
+    }
+  }
+
+  async function loadProfile() {
+    try {
+      const data = await adminApi.getMyProfile();
+      const normalized: AdminProfileForm = {
+        ...data,
+        profile_picture: data.profile_picture ?? null,
+      };
+      setProfile(normalized);
+      setProfilePreview(withCacheBuster(data.profile_picture_url));
+      setRemoveProfilePicture(false);
+      setProfileError('');
+    } catch (err) {
+      setProfileError(formatProfileErrorMessage((err as Error).message));
+    }
+  }
+
   useEffect(() => {
-    loadSettings();
-    loadProfile();
+    queueMicrotask(() => {
+      void loadSettings();
+      void loadProfile();
+    });
   }, []);
 
   useEffect(() => {
@@ -139,33 +168,6 @@ export function SettingsPage() {
     const timer = window.setTimeout(() => setSettingsError(''), 8000);
     return () => window.clearTimeout(timer);
   }, [settingsError]);
-
-  const loadSettings = async () => {
-    try {
-      const data = await adminApi.getSettings() as SystemSettings;
-      setSettings(data);
-      setFormData(data);
-      setSettingsError('');
-    } catch (err) {
-      setSettingsError((err as Error).message);
-    }
-  };
-
-  const loadProfile = async () => {
-    try {
-      const data = await adminApi.getMyProfile();
-      const normalized: AdminProfileForm = {
-        ...data,
-        profile_picture: data.profile_picture ?? null,
-      };
-      setProfile(normalized);
-      setProfilePreview(withCacheBuster(data.profile_picture_url));
-      setRemoveProfilePicture(false);
-      setProfileError('');
-    } catch (err) {
-      setProfileError(formatProfileErrorMessage((err as Error).message));
-    }
-  };
 
   const showSettingsSuccess = (msg: string) => {
     setSettingsSuccessMsg(msg);

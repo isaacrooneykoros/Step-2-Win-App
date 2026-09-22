@@ -133,7 +133,6 @@ export function StepsPage() {
 
   useEffect(() => {
     if (!accessToken) {
-      setLiveConnected(false)
       return
     }
 
