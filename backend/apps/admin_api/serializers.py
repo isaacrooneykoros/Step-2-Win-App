@@ -374,6 +374,10 @@ class SystemSettingsSerializer(serializers.Serializer):
     max_challenge_entry_fee = serializers.DecimalField(max_digits=10, decimal_places=2)
     min_challenge_milestone = serializers.IntegerField()
     max_challenge_milestone = serializers.IntegerField()
+    challenge_milestones = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=False,
+    )
     max_challenge_participants = serializers.IntegerField()
     challenge_approval_required = serializers.BooleanField()
 
@@ -405,6 +409,19 @@ class SystemSettingsSerializer(serializers.Serializer):
         if obj.updated_by:
             return obj.updated_by.username
         return None
+
+    def validate_challenge_milestones(self, value):
+        unique_values = []
+        seen = set()
+        for milestone in value:
+            if milestone not in seen:
+                unique_values.append(milestone)
+                seen.add(milestone)
+
+        if not unique_values:
+            raise serializers.ValidationError("At least one milestone is required")
+
+        return sorted(unique_values)
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

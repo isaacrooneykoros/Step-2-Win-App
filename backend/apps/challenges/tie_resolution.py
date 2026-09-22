@@ -81,7 +81,7 @@ def resolve_challenge(challenge) -> List[ResolvedParticipant]:
         )
         return []
 
-    net_pool = challenge.total_pool * Decimal("0.95")
+    net_pool = challenge.net_pool
     qualified = [p for p in all_participants if p.steps >= challenge.milestone]
     dnq = [p for p in all_participants if p.steps < challenge.milestone]
 

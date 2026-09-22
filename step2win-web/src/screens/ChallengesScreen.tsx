@@ -13,6 +13,24 @@ import { formatKES } from '../utils/currency';
 const ChallengesLobbyScreen = lazy(() => import('./ChallengesLobbyScreen'));
 const ChallengesMineSection = lazy(() => import('./challenges/ChallengesMineSection'));
 
+const MILESTONE_OPTIONS = [
+  { value: '10000', label: '10,000 steps · Starter' },
+  { value: '15000', label: '15,000 steps · Warm-up' },
+  { value: '20000', label: '20,000 steps · Walker' },
+  { value: '25000', label: '25,000 steps · Steady' },
+  { value: '30000', label: '30,000 steps · Active' },
+  { value: '40000', label: '40,000 steps · Strong' },
+  { value: '50000', label: '50,000 steps · Endurance' },
+  { value: '65000', label: '65,000 steps · Power' },
+  { value: '80000', label: '80,000 steps · Athletic' },
+  { value: '100000', label: '100,000 steps · Runner' },
+  { value: '125000', label: '125,000 steps · Advanced Runner' },
+  { value: '150000', label: '150,000 steps · Elite' },
+  { value: '200000', label: '200,000 steps · Pro' },
+  { value: '250000', label: '250,000 steps · Heavyweight' },
+  { value: '300000', label: '300,000 steps · Ultra' },
+] as const;
+
 type QrScanner = {
   start: (
     cameraIdOrConfig: string | MediaTrackConstraints,
@@ -113,20 +131,18 @@ export default function ChallengesScreen() {
   });
 
   const getMilestoneMeta = (milestone: number) => {
-    if (milestone === 50000) return { 
-      name: '50K Steps', 
-      bg: '#ECFDF5', 
-      color: '#059669'
-    };
-    if (milestone === 70000) return { 
-      name: '70K Steps', 
-      bg: '#EFF6FF', 
-      color: '#2563EB'
-    };
-    return { 
-      name: '90K Steps', 
-      bg: '#F5F3FF', 
-      color: '#7C3AED'
+    const option = MILESTONE_OPTIONS.find((entry) => Number(entry.value) === milestone);
+    if (option) {
+      return {
+        name: option.label.replace(' steps', ' Steps'),
+        bg: '#EFF6FF',
+        color: '#2563EB',
+      };
+    }
+    return {
+      name: `${milestone.toLocaleString()} Steps`,
+      bg: '#F5F3FF',
+      color: '#7C3AED',
     };
   };
 
@@ -607,9 +623,11 @@ export default function ChallengesScreen() {
               onChange={(e) => setCreateForm({ ...createForm, milestone: e.target.value })}
               className="input-field w-full"
             >
-              <option value="50000">50,000 steps</option>
-              <option value="70000">70,000 steps</option>
-              <option value="90000">90,000 steps</option>
+              {MILESTONE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -741,5 +759,4 @@ export default function ChallengesScreen() {
     </div>
   );
 }
-
 

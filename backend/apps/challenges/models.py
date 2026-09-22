@@ -6,6 +6,47 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
+DEFAULT_MILESTONE_LABELS = {
+    10000: "Starter - 10K steps",
+    15000: "Warm-up - 15K steps",
+    20000: "Walker - 20K steps",
+    25000: "Steady - 25K steps",
+    30000: "Active - 30K steps",
+    40000: "Strong - 40K steps",
+    50000: "Endurance - 50K steps",
+    65000: "Power - 65K steps",
+    80000: "Athletic - 80K steps",
+    100000: "Runner - 100K steps",
+    125000: "Advanced Runner - 125K steps",
+    150000: "Elite - 150K steps",
+    200000: "Pro - 200K steps",
+    250000: "Heavyweight - 250K steps",
+    300000: "Ultra - 300K steps",
+}
+
+
+def format_milestone_label(milestone: int) -> str:
+    return DEFAULT_MILESTONE_LABELS.get(milestone, f"{milestone:,} steps")
+
+
+def get_configured_milestones() -> list[int]:
+    from apps.admin_api.models import DEFAULT_CHALLENGE_MILESTONES, SystemSettings
+
+    settings = SystemSettings.load()
+    milestones = settings.challenge_milestones or list(DEFAULT_CHALLENGE_MILESTONES)
+    unique_milestones = []
+    seen = set()
+    for milestone in milestones:
+        try:
+            value = int(milestone)
+        except (TypeError, ValueError):
+            continue
+        if value not in seen:
+            unique_milestones.append(value)
+            seen.add(value)
+    return unique_milestones
+
+
 def generate_invite_code():
     """Generate a unique 8-character invite code"""
     return uuid.uuid4().hex[:8].upper()
@@ -17,9 +58,21 @@ class Challenge(models.Model):
     """
 
     MILESTONE_CHOICES = [
-        (50000, "Beginner - 50K steps"),
-        (70000, "Intermediate - 70K steps"),
-        (90000, "Advanced - 90K steps"),
+        (10000, "Starter - 10K steps"),
+        (15000, "Warm-up - 15K steps"),
+        (20000, "Walker - 20K steps"),
+        (25000, "Steady - 25K steps"),
+        (30000, "Active - 30K steps"),
+        (40000, "Strong - 40K steps"),
+        (50000, "Endurance - 50K steps"),
+        (65000, "Power - 65K steps"),
+        (80000, "Athletic - 80K steps"),
+        (100000, "Runner - 100K steps"),
+        (125000, "Advanced Runner - 125K steps"),
+        (150000, "Elite - 150K steps"),
+        (200000, "Pro - 200K steps"),
+        (250000, "Heavyweight - 250K steps"),
+        (300000, "Ultra - 300K steps"),
     ]
 
     STATUS_CHOICES = [
@@ -122,7 +175,7 @@ class Challenge(models.Model):
     # NEW: Enhanced payout structure for tie resolution
     PAYOUT_CHOICES = [
         ("proportional", "Proportional"),  # default — steps % share
-        ("winner_takes_all", "Winner Takes All"),  # 1st place gets 95% net pool
+        ("winner_takes_all", "Winner Takes All"),  # 1st place gets the net pool
         ("top_3", "Top 3 Split"),  # 50% / 30% / 20%
     ]
     payout_structure = models.CharField(
@@ -151,7 +204,7 @@ class Challenge(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.name} - {self.get_milestone_display()}"
+        return f"{self.name} - {format_milestone_label(self.milestone)}"
 
     @property
     def current_participants(self):
@@ -172,7 +225,12 @@ class Challenge(models.Model):
 
     @property
     def platform_fee(self):
-        return self.total_pool * Decimal("0.05")
+        from apps.admin_api.models import SystemSettings
+
+        fee_percentage = Decimal(str(SystemSettings.load().platform_fee_percentage))
+        return (self.total_pool * fee_percentage / Decimal("100")).quantize(
+            Decimal("0.01")
+        )
 
     @property
     def net_pool(self):

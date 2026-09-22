@@ -1314,7 +1314,10 @@ class AdminDashboardViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def revenue_chart(self, request):
         """Get revenue data for chart"""
+        from apps.admin_api.models import SystemSettings
+
         days = int(request.query_params.get("days", 30))
+        fee_percentage = Decimal(str(SystemSettings.load().platform_fee_percentage))
 
         chart_data = []
         for i in range(days):
@@ -1328,7 +1331,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
                 type="withdrawal", created_at__date=date
             ).aggregate(Sum("amount"))["amount__sum"] or Decimal("0.00")
 
-            revenue = (deposits - withdrawals) * Decimal("0.05")  # 5% commission
+            revenue = (deposits - withdrawals) * (fee_percentage / Decimal("100"))
 
             chart_data.append(
                 {
@@ -1371,6 +1374,27 @@ def update_system_settings(request):
 
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    merged_settings = {
+        "min_challenge_milestone": settings.min_challenge_milestone,
+        "max_challenge_milestone": settings.max_challenge_milestone,
+        "challenge_milestones": list(settings.challenge_milestones or []),
+    }
+    merged_settings.update(serializer.validated_data)
+
+    min_milestone = int(merged_settings["min_challenge_milestone"])
+    max_milestone = int(merged_settings["max_challenge_milestone"])
+    milestones = merged_settings.get("challenge_milestones") or []
+    out_of_range = [m for m in milestones if m < min_milestone or m > max_milestone]
+    if out_of_range:
+        return Response(
+            {
+                "challenge_milestones": (
+                    f"All milestone options must be between {min_milestone:,} and {max_milestone:,} steps"
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     # Capture changes for audit log
     changes = {}

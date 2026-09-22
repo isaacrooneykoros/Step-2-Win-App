@@ -1,6 +1,25 @@
 from django.db import models
 
 
+DEFAULT_CHALLENGE_MILESTONES = [
+    10000,
+    15000,
+    20000,
+    25000,
+    30000,
+    40000,
+    50000,
+    65000,
+    80000,
+    100000,
+    125000,
+    150000,
+    200000,
+    250000,
+    300000,
+]
+
+
 class SystemSettings(models.Model):
     """Platform-wide system settings - singleton model"""
 
@@ -8,7 +27,7 @@ class SystemSettings(models.Model):
     platform_fee_percentage = models.DecimalField(
         max_digits=5,
         decimal_places=2,
-        default=5.00,
+        default=10.00,
         help_text="Platform fee percentage on challenge pools",
     )
 
@@ -37,10 +56,15 @@ class SystemSettings(models.Model):
         help_text="Maximum entry fee for challenges",
     )
     min_challenge_milestone = models.IntegerField(
-        default=1000, help_text="Minimum steps milestone for challenges"
+        default=10000, help_text="Minimum steps milestone for challenges"
     )
     max_challenge_milestone = models.IntegerField(
-        default=100000, help_text="Maximum steps milestone for challenges"
+        default=300000, help_text="Maximum steps milestone for challenges"
+    )
+    challenge_milestones = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Ordered milestone options exposed to the customer app",
     )
     max_challenge_participants = models.IntegerField(
         default=100, help_text="Maximum participants per challenge"
@@ -110,6 +134,8 @@ class SystemSettings(models.Model):
     def save(self, *args, **kwargs):
         """Ensure only one instance exists (singleton pattern)"""
         self.pk = 1
+        if not self.challenge_milestones:
+            self.challenge_milestones = list(DEFAULT_CHALLENGE_MILESTONES)
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -120,6 +146,9 @@ class SystemSettings(models.Model):
     def load(cls):
         """Load the singleton instance, create if doesn't exist"""
         obj, created = cls.objects.get_or_create(pk=1)
+        if created and not obj.challenge_milestones:
+            obj.challenge_milestones = list(DEFAULT_CHALLENGE_MILESTONES)
+            obj.save(update_fields=["challenge_milestones"])
         return obj
 
     def __str__(self):

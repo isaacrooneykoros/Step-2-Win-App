@@ -3,9 +3,10 @@ from datetime import date, timedelta
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
+from apps.admin_api.models import SystemSettings
 from apps.core.sanitizers import sanitize_text
 
-from .models import Challenge, ChallengeMessage, Participant
+from .models import Challenge, ChallengeMessage, Participant, format_milestone_label, get_configured_milestones
 
 
 class ParticipantSerializer(serializers.ModelSerializer):
@@ -38,9 +39,7 @@ class ChallengeSerializer(serializers.ModelSerializer):
     """
 
     creator_username = serializers.CharField(source="creator.username", read_only=True)
-    milestone_display = serializers.CharField(
-        source="get_milestone_display", read_only=True
-    )
+    milestone_display = serializers.SerializerMethodField()
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     win_condition_display = serializers.CharField(
         source="get_win_condition_display", read_only=True
@@ -93,6 +92,9 @@ class ChallengeSerializer(serializers.ModelSerializer):
         if value > 10000:
             raise serializers.ValidationError("Maximum entry fee is KES 10,000")
         return value
+
+    def get_milestone_display(self, obj) -> str:
+        return format_milestone_label(obj.milestone)
 
     def validate_max_participants(self, value):
         if value < 2:
@@ -201,11 +203,15 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
         }
 
     def validate_milestone(self, value):
-        """Validate milestone is one of the valid choices"""
-        valid_milestones = [50000, 70000, 90000]
-        if value not in valid_milestones:
+        """Validate milestone matches the configured challenge options."""
+        configured_milestones = get_configured_milestones()
+        settings = SystemSettings.load()
+        min_milestone = int(settings.min_challenge_milestone or 1000)
+        max_milestone = int(settings.max_challenge_milestone or 300000)
+
+        if value not in configured_milestones:
             raise serializers.ValidationError(
-                f"Milestone must be one of: {valid_milestones}"
+                f"Milestone must be one of the configured challenge levels between {min_milestone:,} and {max_milestone:,} steps"
             )
         return value
 
@@ -438,8 +444,7 @@ class LobbyCardSerializer(serializers.ModelSerializer):
         return obj.participants.filter(user=request.user).exists()
 
     def get_milestone_label(self, obj) -> str:
-        labels = {50000: "Beginner", 70000: "Intermediate", 90000: "Advanced"}
-        return labels.get(obj.milestone, f"{obj.milestone:,} steps")
+        return format_milestone_label(obj.milestone)
 
 
 class SpectatorLeaderboardSerializer(serializers.ModelSerializer):

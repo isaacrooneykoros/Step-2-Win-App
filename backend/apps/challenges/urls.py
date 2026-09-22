@@ -5,6 +5,7 @@ from . import views
 app_name = "challenges"
 
 urlpatterns = [
+    path("config/", views.challenge_config, name="config"),
     path("", views.ChallengeListView.as_view(), name="list"),
     path("lobby/", views.public_lobby, name="lobby"),
     path("lobby/<int:pk>/", views.challenge_lobby_card, name="lobby_card"),

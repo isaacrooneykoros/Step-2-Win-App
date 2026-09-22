@@ -8,18 +8,45 @@ from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import generics, serializers, status
 from rest_framework.decorators import (api_view, permission_classes,
                                        throttle_classes)
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
 from apps.core.throttles import DashboardReadRateThrottle
 
-from .models import Challenge, Participant
+from .models import (
+    Challenge,
+    Participant,
+    format_milestone_label,
+    get_configured_milestones,
+)
 from .serializers import (ChallengeDetailSerializer,
                           ChallengeMessageSerializer, ChallengeSerializer,
                           CreateChallengeSerializer, JoinChallengeSerializer,
                           LobbyCardSerializer, ParticipantSerializer,
                           SpectatorLeaderboardSerializer)
 from .services import finalize_expired_challenges
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def challenge_config(request):
+    """Public challenge configuration for the customer app."""
+    from apps.admin_api.models import SystemSettings
+
+    settings = SystemSettings.load()
+    milestones = [
+        {"value": milestone, "label": format_milestone_label(milestone)}
+        for milestone in get_configured_milestones()
+    ]
+    return Response(
+        {
+            "platform_fee_percentage": str(settings.platform_fee_percentage),
+            "min_challenge_milestone": settings.min_challenge_milestone,
+            "max_challenge_milestone": settings.max_challenge_milestone,
+            "max_challenge_participants": settings.max_challenge_participants,
+            "challenge_milestones": milestones,
+        }
+    )
 
 
 class ChallengeListView(generics.ListAPIView):
@@ -128,42 +155,42 @@ def create_challenge(request):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-    # Check if user has enough AVAILABLE balance (wallet - locked)
-    if request.user.available_balance < entry_fee:
-        logger.warning(
-            f"Insufficient available balance: {request.user.available_balance} < {entry_fee} "
-            f"(wallet={request.user.wallet_balance}, locked={request.user.locked_balance})"
-        )
-        return Response(
-            {
-                "error": f"Insufficient available balance. Required: KES {entry_fee}, Available: KES {request.user.available_balance}"
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    # Check max locked balance (prevent over-locking)
-    max_locked_pct = Decimal(str(getattr(settings, "MAX_LOCKED_BALANCE_PERCENT", 80)))
-    max_lockable = request.user.wallet_balance * (max_locked_pct / Decimal("100"))
-    if request.user.locked_balance + entry_fee > max_lockable:
-        return Response(
-            {
-                "error": (
-                    f"Cannot create challenge - would exceed max locked balance. "
-                    f"Currently locked: KES {request.user.locked_balance}, "
-                    f"Max allowed: KES {max_lockable}"
-                )
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
     with transaction.atomic():
-        # Create challenge
-        challenge = serializer.save(creator=request.user)
-
-        # Deduct entry fee and lock it
         user = request.user.__class__.objects.select_for_update().get(
             id=request.user.id
         )
+        available_balance = user.available_balance
+        if available_balance < entry_fee:
+            logger.warning(
+                f"Insufficient available balance: {available_balance} < {entry_fee} "
+                f"(wallet={user.wallet_balance}, locked={user.locked_balance})"
+            )
+            return Response(
+                {
+                    "error": f"Insufficient available balance. Required: KES {entry_fee}, Available: KES {available_balance}"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        max_locked_pct = Decimal(str(getattr(settings, "MAX_LOCKED_BALANCE_PERCENT", 80)))
+        max_lockable = user.wallet_balance * (max_locked_pct / Decimal("100"))
+        if user.locked_balance + entry_fee > max_lockable:
+            return Response(
+                {
+                    "error": (
+                        f"Cannot create challenge - would exceed max locked balance. "
+                        f"Currently locked: KES {user.locked_balance}, "
+                        f"Max allowed: KES {max_lockable}"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Create challenge after the wallet lock passes so the whole operation
+        # is scoped to the same transaction and the creator lock can't drift.
+        challenge = serializer.save(creator=user)
+
+        # Deduct entry fee and lock it
         user.wallet_balance -= entry_fee
         user.locked_balance += entry_fee
         user.save()
@@ -598,11 +625,6 @@ def rematch_challenge(request, pk):
         )
 
     entry_fee = source.entry_fee
-    if request.user.wallet_balance < entry_fee:
-        return Response(
-            {"error": "Insufficient balance to start rematch"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
 
     duration_days = max(1, (source.end_date - source.start_date).days)
 
@@ -610,6 +632,11 @@ def rematch_challenge(request, pk):
         user = request.user.__class__.objects.select_for_update().get(
             id=request.user.id
         )
+        if user.available_balance < entry_fee:
+            return Response(
+                {"error": "Insufficient balance to start rematch"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         challenge = Challenge.objects.create(
             name=source.name,
@@ -1229,7 +1256,7 @@ def challenge_results(request, pk):
         .order_by("final_rank", "-final_steps")
     )
 
-    net_pool = challenge.total_pool * Decimal("0.95")
+    net_pool = challenge.net_pool
     is_refund = results.filter(payout_method="refund").exists()
 
     # Find the viewing user's own result

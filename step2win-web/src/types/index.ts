@@ -38,9 +38,22 @@ export interface User {
 
 // ==================== Challenge Types ====================
 
-export type MilestoneType = 50000 | 70000 | 90000;
+export type MilestoneType = number;
 export type ChallengeStatus = 'pending' | 'active' | 'completed' | 'cancelled';
 export type ChallengeWinCondition = 'proportional' | 'winner_takes_all' | 'qualification_only';
+
+export interface ChallengeMilestoneOption {
+  value: number;
+  label: string;
+}
+
+export interface ChallengeConfig {
+  platform_fee_percentage: string;
+  min_challenge_milestone: number;
+  max_challenge_milestone: number;
+  max_challenge_participants: number;
+  challenge_milestones: ChallengeMilestoneOption[];
+}
 
 export interface Challenge {
   id: number;
@@ -256,7 +269,7 @@ export interface MyRecentResults {
 
 export type LobbyFilter = 'all' | 'joinable' | 'active' | 'ending_soon';
 export type LobbySort = 'featured' | 'pool' | 'ending' | 'newest' | 'filling';
-export type MilestoneFilter = 'all' | '50000' | '70000' | '90000';
+export type MilestoneFilter = string;
 
 // ==================== Wallet Types ====================
 

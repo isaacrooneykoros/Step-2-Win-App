@@ -2,6 +2,7 @@ import api from './client';
 import type {
   Challenge,
   ChallengeDetail,
+  ChallengeConfig,
   ChallengeStats,
   Participant,
   CreateChallengeForm,
@@ -25,6 +26,14 @@ export const challengesService = {
     show_full?: boolean;
   }): Promise<Challenge[]> => {
     const response = await api.get<Challenge[]>('/api/challenges/', { params });
+    return response.data;
+  },
+
+  /**
+   * Get public challenge configuration
+   */
+  getConfig: async (): Promise<ChallengeConfig> => {
+    const response = await api.get<ChallengeConfig>('/api/challenges/config/');
     return response.data;
   },
 

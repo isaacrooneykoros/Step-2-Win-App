@@ -33,9 +33,21 @@ const FILTERS: { key: LobbyFilter; label: string; icon: React.ReactNode }[] = [
 
 const MILESTONES: { key: MilestoneFilter; label: string }[] = [
   { key: 'all', label: 'All Levels' },
-  { key: '50000', label: '50K Beginner' },
-  { key: '70000', label: '70K Mid' },
-  { key: '90000', label: '90K Hard' },
+  { key: '10000', label: '10K Starter' },
+  { key: '15000', label: '15K Warm-up' },
+  { key: '20000', label: '20K Walker' },
+  { key: '25000', label: '25K Steady' },
+  { key: '30000', label: '30K Active' },
+  { key: '40000', label: '40K Strong' },
+  { key: '50000', label: '50K Endurance' },
+  { key: '65000', label: '65K Power' },
+  { key: '80000', label: '80K Athletic' },
+  { key: '100000', label: '100K Runner' },
+  { key: '125000', label: '125K Advanced Runner' },
+  { key: '150000', label: '150K Elite' },
+  { key: '200000', label: '200K Pro' },
+  { key: '250000', label: '250K Heavyweight' },
+  { key: '300000', label: '300K Ultra' },
 ];
 
 interface ChallengesLobbyScreenProps {
@@ -345,5 +357,4 @@ function LobbyCard({
     </button>
   );
 }
-
 

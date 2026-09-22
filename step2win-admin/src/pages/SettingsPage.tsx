@@ -16,6 +16,7 @@ interface SystemSettings {
   max_challenge_entry_fee: number;
   min_challenge_milestone: number;
   max_challenge_milestone: number;
+  challenge_milestones: number[];
   max_challenge_participants: number;
   challenge_approval_required: boolean;
   
@@ -108,6 +109,7 @@ export function SettingsPage() {
   const [profileError, setProfileError] = useState('');
   const [settingsSuccessMsg, setSettingsSuccessMsg] = useState('');
   const [profileSuccessMsg, setProfileSuccessMsg] = useState('');
+  const [challengeMilestonesText, setChallengeMilestonesText] = useState('');
   const [saving, setSaving] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [removeProfilePicture, setRemoveProfilePicture] = useState(false);
@@ -119,6 +121,7 @@ export function SettingsPage() {
       const data = await adminApi.getSettings() as SystemSettings;
       setSettings(data);
       setFormData(data);
+      setChallengeMilestonesText((data.challenge_milestones || []).join('\n'));
       setSettingsError('');
     } catch (err) {
       setSettingsError((err as Error).message);
@@ -181,14 +184,24 @@ export function SettingsPage() {
 
   const handleSave = async () => {
     if (!formData) return;
-    
+
     setSaving(true);
     setSettingsError('');
-    
+
     try {
-      const updated = await adminApi.updateSettings(formData as Record<string, unknown>) as SystemSettings;
+      const parsedMilestones = challengeMilestonesText
+        .split(/[\n,]+/)
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map((value) => Number.parseInt(value, 10))
+        .filter((value) => Number.isFinite(value) && value > 0);
+      const updated = await adminApi.updateSettings({
+        ...formData,
+        challenge_milestones: Array.from(new Set(parsedMilestones)).sort((a, b) => a - b),
+      } as Record<string, unknown>) as SystemSettings;
       setSettings(updated);
       setFormData(updated);
+      setChallengeMilestonesText((updated.challenge_milestones || []).join('\n'));
       showSettingsSuccess('Settings saved successfully');
     } catch (err) {
       setSettingsError((err as Error).message);
@@ -612,6 +625,21 @@ export function SettingsPage() {
               onChange={(e) => updateField('max_challenge_milestone', parseInt(e.target.value) || 0)}
               className="w-full px-4 py-2.5 bg-surface-input border border-surface-border rounded-xl text-ink-primary focus:outline-none focus:border-info transition-colors"
             />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-ink-secondary mb-2">
+              Challenge Milestone Options
+            </label>
+            <textarea
+              value={challengeMilestonesText}
+              onChange={(e) => setChallengeMilestonesText(e.target.value)}
+              rows={6}
+              className="w-full px-4 py-2.5 bg-surface-input border border-surface-border rounded-xl text-ink-primary focus:outline-none focus:border-info transition-colors"
+              placeholder="10000&#10;15000&#10;20000"
+            />
+            <p className="mt-2 text-xs text-ink-muted">
+              Enter one milestone per line or comma-separated. Customer challenge screens will use this list.
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-ink-secondary mb-2">

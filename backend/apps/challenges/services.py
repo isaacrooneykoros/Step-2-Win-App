@@ -111,7 +111,7 @@ def finalize_challenge(challenge):
             challenge.save(update_fields=["status", "updated_at"])
             return True
 
-        net_pool = challenge.total_pool * Decimal("0.95")
+        net_pool = challenge.net_pool
         is_refund = all(r.payout_method == "refund" for r in resolved)
 
         # ── Process each participant ───────────────────────────────
@@ -215,8 +215,10 @@ def finalize_challenge(challenge):
         # ── Record platform fee in PlatformRevenue (not orphan transaction) ────
         if not is_refund:
             from apps.payments.models import PlatformRevenue
+            from apps.admin_api.models import SystemSettings
 
-            platform_fee = challenge.total_pool * Decimal("0.05")
+            fee_percentage = Decimal(str(SystemSettings.load().platform_fee_percentage))
+            platform_fee = challenge.total_pool * (fee_percentage / Decimal("100"))
             PlatformRevenue.objects.create(
                 challenge=challenge,
                 amount_kes=platform_fee,
