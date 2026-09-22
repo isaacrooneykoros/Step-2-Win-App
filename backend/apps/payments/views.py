@@ -533,18 +533,20 @@ def cancel_withdrawal(request, withdrawal_id):
     Only possible when status='pending_review'.
     Refunds the balance immediately.
     """
-    try:
-        withdrawal = WithdrawalRequest.objects.get(id=withdrawal_id, user=request.user)
-    except WithdrawalRequest.DoesNotExist:
-        return Response({"error": "Withdrawal not found"}, status=404)
-
-    if withdrawal.status != "pending_review":
-        return Response(
-            {"error": f"Cannot cancel a withdrawal with status: {withdrawal.status}"},
-            status=400,
-        )
-
     with db_transaction.atomic():
+        try:
+            withdrawal = WithdrawalRequest.objects.select_for_update().get(
+                id=withdrawal_id, user=request.user
+            )
+        except WithdrawalRequest.DoesNotExist:
+            return Response({"error": "Withdrawal not found"}, status=404)
+
+        if withdrawal.status != "pending_review":
+            return Response(
+                {"error": f"Cannot cancel a withdrawal with status: {withdrawal.status}"},
+                status=400,
+            )
+
         locked_user = request.user.__class__.objects.select_for_update().get(
             id=request.user.id
         )
