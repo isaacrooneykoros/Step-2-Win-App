@@ -7,6 +7,7 @@ __pycache__/
 venv/
 env/
 ENV/
+.env.example/
 
 # Django
 *.log
@@ -20,10 +21,9 @@ db.sqlite3-journal
 # Environment
 .env
 .env.local
+.env.example
 
 # IDE
-.vscode/
-.idea/
 *.swp
 *.swo
 *~

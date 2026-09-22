@@ -65,18 +65,20 @@ export function SupportPage() {
   }, [assignedFilter, offset, priorityFilter, searchTerm, statusFilter]);
 
   useEffect(() => {
-    loadAdmins();
+    // Defer admin list load to microtask to avoid synchronous setState-in-effect
+    queueMicrotask(() => { void loadAdmins(); });
   }, [loadAdmins]);
 
   useEffect(() => {
-    loadTickets();
+    // Defer ticket list load to microtask to avoid synchronous setState-in-effect
+    queueMicrotask(() => { void loadTickets(); });
   }, [loadTickets]);
 
   useEffect(() => {
     if (!selectedTicket?.id) return;
     const ticketId = selectedTicket.id;
     const interval = setInterval(() => {
-      loadTicketDetail(ticketId);
+      void loadTicketDetail(ticketId);
     }, 5000);
     return () => clearInterval(interval);
   }, [selectedTicket?.id]);
@@ -133,7 +135,7 @@ export function SupportPage() {
     }
   }, [messages, selectedTicket]);
 
-  const loadTicketDetail = async (ticketId: number) => {
+  async function loadTicketDetail(ticketId: number) {
     setModalLoading(true);
     try {
       const detail = await adminApi.getSupportTicketDetail(ticketId);
@@ -148,7 +150,7 @@ export function SupportPage() {
     } finally {
       setModalLoading(false);
     }
-  };
+  }
 
   const handleApplySearch = () => {
     setOffset(0);

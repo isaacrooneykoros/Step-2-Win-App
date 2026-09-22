@@ -16,9 +16,9 @@ class StepsSyncConsumer(AsyncWebsocketConsumer):
     """
 
     async def connect(self):
-        query_string = self.scope.get('query_string', b'').decode()
+        query_string = self.scope.get("query_string", b"").decode()
         params = parse_qs(query_string)
-        token = (params.get('token') or [None])[0]
+        token = (params.get("token") or [None])[0]
 
         if not token:
             await self.close(code=4401)
@@ -30,29 +30,33 @@ class StepsSyncConsumer(AsyncWebsocketConsumer):
             return
 
         self.user = user
-        self.group_name = f'user_steps_{self.user.id}'
+        self.group_name = f"user_steps_{self.user.id}"
 
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
-        await self.send(text_data=json.dumps({'type': 'steps.connected'}))
+        await self.send(text_data=json.dumps({"type": "steps.connected"}))
 
     async def disconnect(self, _close_code):
-        if hasattr(self, 'group_name'):
+        if hasattr(self, "group_name"):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive(self, text_data=None, _bytes_data=None):
         return
 
     async def steps_update(self, event):
-        await self.send(text_data=json.dumps({
-            'type': 'steps.update',
-            'payload': event.get('payload', {}),
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "steps.update",
+                    "payload": event.get("payload", {}),
+                }
+            )
+        )
 
     async def _get_user_from_token(self, token):
         try:
             access = AccessToken(token)
-            user_id = access.get('user_id')
+            user_id = access.get("user_id")
             if not user_id:
                 return None
             return await User.objects.filter(id=user_id).afirst()

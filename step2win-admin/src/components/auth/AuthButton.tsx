@@ -11,12 +11,12 @@ export function AuthButton({ loading, children, disabled, ...props }: AuthButton
     <button
       {...props}
       disabled={disabled || loading}
-      className="w-full py-3.5 rounded-xl font-bold text-sm text-white transition-all duration-150 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed hover:opacity-90 hover:-translate-y-px active:translate-y-0"
+      className="flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-bold text-white transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-60 hover:-translate-y-px hover:opacity-95 active:translate-y-0"
       style={{
         fontFamily: 'Syne, sans-serif',
-        background: 'linear-gradient(135deg, #7C6FF7 0%, #4F9CF9 100%)',
-        boxShadow: loading ? 'none' : '0 4px 14px rgba(124,111,247,0.3)',
-        letterSpacing: '0.2px',
+        background: 'linear-gradient(135deg, #22C55E 0%, #4F9CF9 100%)',
+        boxShadow: loading ? 'none' : '0 12px 30px rgba(34,197,94,0.22)',
+        letterSpacing: 0,
       }}>
       {loading && <Loader2 size={15} className="animate-spin" />}
       {children}

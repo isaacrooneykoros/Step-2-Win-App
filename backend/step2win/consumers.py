@@ -8,7 +8,7 @@ class HealthCheckConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
         await self.accept()
-        await self.send(text_data=json.dumps({'type': 'ws.health', 'status': 'ok'}))
+        await self.send(text_data=json.dumps({"type": "ws.health", "status": "ok"}))
 
     async def receive(self, text_data=None, bytes_data=None):
         return

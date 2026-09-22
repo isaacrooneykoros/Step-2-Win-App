@@ -107,7 +107,8 @@ export function ReportsPage() {
   }, [timePeriod]);
 
   useEffect(() => {
-    loadReports();
+    // Defer report loading to avoid synchronous setState in effect
+    queueMicrotask(() => { void loadReports(); });
   }, [loadReports]);
 
   const exportSummaryCSV = () => {

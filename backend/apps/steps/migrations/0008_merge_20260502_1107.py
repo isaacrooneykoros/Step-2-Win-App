@@ -6,9 +6,8 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('steps', '0002_security_hardening'),
-        ('steps', '0007_interval_daily_verification_storage'),
+        ("steps", "0002_security_hardening"),
+        ("steps", "0007_interval_daily_verification_storage"),
     ]
 
-    operations = [
-    ]
+    operations = []

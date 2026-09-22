@@ -25,13 +25,13 @@ class AntiCheatDriftThresholds:
 
 
 def _safe_alert(payload: dict[str, Any]) -> None:
-    webhook = (getattr(settings, 'OPS_ALERT_WEBHOOK_URL', '') or '').strip()
+    webhook = (getattr(settings, "OPS_ALERT_WEBHOOK_URL", "") or "").strip()
     if not webhook:
         return
     try:
         requests.post(webhook, json=payload, timeout=4)
     except Exception as exc:
-        logger.warning('Failed to send anti-cheat drift alert webhook: %s', exc)
+        logger.warning("Failed to send anti-cheat drift alert webhook: %s", exc)
 
 
 def _pct(value: int, total: int) -> float:
@@ -56,11 +56,11 @@ def run_anticheat_shadow_drift_monitor(
 
     shadow_rows = list(
         DailyVerificationSummary.objects.filter(
-            mode='shadow',
+            mode="shadow",
             created_at__gte=since,
         )
-        .select_related('user')
-        .order_by('-created_at')
+        .select_related("user")
+        .order_by("-created_at")
     )
 
     date_keys = {(row.user_id, row.date) for row in shadow_rows}
@@ -70,8 +70,8 @@ def run_anticheat_shadow_drift_monitor(
     )
     health_map = {
         (row.user_id, row.date): {
-            'steps': int(row.steps),
-            'is_suspicious': bool(row.is_suspicious),
+            "steps": int(row.steps),
+            "is_suspicious": bool(row.is_suspicious),
         }
         for row in health_rows
     }
@@ -94,7 +94,7 @@ def run_anticheat_shadow_drift_monitor(
 
         matched_samples += 1
         legacy_record = health_map[key]
-        legacy_steps = max(0, int(legacy_record['steps']))
+        legacy_steps = max(0, int(legacy_record["steps"]))
         shadow_steps = max(0, int(row.verified_steps_total))
         delta_steps = shadow_steps - legacy_steps
         drift_pct = _delta_pct(legacy_steps, shadow_steps)
@@ -106,22 +106,26 @@ def run_anticheat_shadow_drift_monitor(
         if drift_pct >= thresholds.per_sample_alert_pct:
             high_drift_samples += 1
 
-        legacy_suspicious = bool(legacy_record['is_suspicious'])
-        shadow_review = row.review_state in {'pending', 'required'}
+        legacy_suspicious = bool(legacy_record["is_suspicious"])
+        shadow_review = row.review_state in {"pending", "required"}
         if legacy_suspicious != shadow_review:
             review_mismatch_samples += 1
 
-        top_drift_examples.append({
-            'user_id': row.user_id,
-            'date': str(row.date),
-            'legacy_steps': legacy_steps,
-            'shadow_verified_steps': shadow_steps,
-            'delta_steps': delta_steps,
-            'abs_delta_pct': round(drift_pct, 2),
-            'shadow_review_state': row.review_state,
-        })
+        top_drift_examples.append(
+            {
+                "user_id": row.user_id,
+                "date": str(row.date),
+                "legacy_steps": legacy_steps,
+                "shadow_verified_steps": shadow_steps,
+                "delta_steps": delta_steps,
+                "abs_delta_pct": round(drift_pct, 2),
+                "shadow_review_state": row.review_state,
+            }
+        )
 
-    top_drift_examples = sorted(top_drift_examples, key=lambda item: item['abs_delta_pct'], reverse=True)[:10]
+    top_drift_examples = sorted(
+        top_drift_examples, key=lambda item: item["abs_delta_pct"], reverse=True
+    )[:10]
 
     avg_abs_delta_pct = 0.0
     if matched_samples > 0:
@@ -132,58 +136,69 @@ def run_anticheat_shadow_drift_monitor(
     review_mismatch_ratio_pct = _pct(review_mismatch_samples, matched_samples)
 
     breaches: list[str] = []
-    enough_samples = sample_count >= thresholds.min_samples and matched_samples >= thresholds.min_samples
+    enough_samples = (
+        sample_count >= thresholds.min_samples
+        and matched_samples >= thresholds.min_samples
+    )
     if enough_samples:
         if avg_abs_delta_pct > thresholds.max_avg_abs_delta_pct:
-            breaches.append(f'avg_abs_delta_pct={avg_abs_delta_pct:.2f} > {thresholds.max_avg_abs_delta_pct}')
+            breaches.append(
+                f"avg_abs_delta_pct={avg_abs_delta_pct:.2f} > {thresholds.max_avg_abs_delta_pct}"
+            )
         if high_drift_ratio_pct > thresholds.max_high_drift_ratio_pct:
-            breaches.append(f'high_drift_ratio_pct={high_drift_ratio_pct:.2f} > {thresholds.max_high_drift_ratio_pct}')
+            breaches.append(
+                f"high_drift_ratio_pct={high_drift_ratio_pct:.2f} > {thresholds.max_high_drift_ratio_pct}"
+            )
         if review_mismatch_ratio_pct > thresholds.max_review_mismatch_ratio_pct:
-            breaches.append(f'review_mismatch_ratio_pct={review_mismatch_ratio_pct:.2f} > {thresholds.max_review_mismatch_ratio_pct}')
+            breaches.append(
+                f"review_mismatch_ratio_pct={review_mismatch_ratio_pct:.2f} > {thresholds.max_review_mismatch_ratio_pct}"
+            )
 
     result = {
-        'timestamp': now.isoformat(),
-        'window': {
-            'since': since.isoformat(),
-            'hours': thresholds.lookback_hours,
-            'enough_samples': enough_samples,
+        "timestamp": now.isoformat(),
+        "window": {
+            "since": since.isoformat(),
+            "hours": thresholds.lookback_hours,
+            "enough_samples": enough_samples,
         },
-        'metrics': {
-            'sample_count': sample_count,
-            'matched_samples': matched_samples,
-            'missing_legacy_records': missing_legacy_records,
-            'legacy_steps_total': legacy_total,
-            'shadow_verified_steps_total': shadow_total,
-            'avg_abs_delta_pct': avg_abs_delta_pct,
-            'high_drift_samples': high_drift_samples,
-            'high_drift_ratio_pct': high_drift_ratio_pct,
-            'review_mismatch_samples': review_mismatch_samples,
-            'review_mismatch_ratio_pct': review_mismatch_ratio_pct,
-            'top_drift_examples': top_drift_examples,
+        "metrics": {
+            "sample_count": sample_count,
+            "matched_samples": matched_samples,
+            "missing_legacy_records": missing_legacy_records,
+            "legacy_steps_total": legacy_total,
+            "shadow_verified_steps_total": shadow_total,
+            "avg_abs_delta_pct": avg_abs_delta_pct,
+            "high_drift_samples": high_drift_samples,
+            "high_drift_ratio_pct": high_drift_ratio_pct,
+            "review_mismatch_samples": review_mismatch_samples,
+            "review_mismatch_ratio_pct": review_mismatch_ratio_pct,
+            "top_drift_examples": top_drift_examples,
         },
-        'thresholds': {
-            'lookback_hours': thresholds.lookback_hours,
-            'min_samples': thresholds.min_samples,
-            'per_sample_alert_pct': thresholds.per_sample_alert_pct,
-            'max_avg_abs_delta_pct': thresholds.max_avg_abs_delta_pct,
-            'max_high_drift_ratio_pct': thresholds.max_high_drift_ratio_pct,
-            'max_review_mismatch_ratio_pct': thresholds.max_review_mismatch_ratio_pct,
+        "thresholds": {
+            "lookback_hours": thresholds.lookback_hours,
+            "min_samples": thresholds.min_samples,
+            "per_sample_alert_pct": thresholds.per_sample_alert_pct,
+            "max_avg_abs_delta_pct": thresholds.max_avg_abs_delta_pct,
+            "max_high_drift_ratio_pct": thresholds.max_high_drift_ratio_pct,
+            "max_review_mismatch_ratio_pct": thresholds.max_review_mismatch_ratio_pct,
         },
-        'breaches': breaches,
-        'ok': len(breaches) == 0,
+        "breaches": breaches,
+        "ok": len(breaches) == 0,
     }
 
     if breaches:
-        logger.error('Anti-cheat shadow drift breaches: %s', '; '.join(breaches))
+        logger.error("Anti-cheat shadow drift breaches: %s", "; ".join(breaches))
         if send_alerts:
-            _safe_alert({
-                'event': 'anticheat_shadow_drift_breach',
-                'timestamp': result['timestamp'],
-                'breaches': breaches,
-                'metrics': result['metrics'],
-                'thresholds': result['thresholds'],
-            })
+            _safe_alert(
+                {
+                    "event": "anticheat_shadow_drift_breach",
+                    "timestamp": result["timestamp"],
+                    "breaches": breaches,
+                    "metrics": result["metrics"],
+                    "thresholds": result["thresholds"],
+                }
+            )
     else:
-        logger.info('Anti-cheat shadow drift monitor OK')
+        logger.info("Anti-cheat shadow drift monitor OK")
 
     return result

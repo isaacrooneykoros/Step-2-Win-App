@@ -1,4 +1,5 @@
 from rest_framework import serializers
+
 from .models import HealthRecord, HourlyStepRecord, LocationWaypoint
 
 
@@ -6,19 +7,26 @@ class HealthRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = HealthRecord
         fields = [
-            'id', 'date', 'source', 'synced_at',
-            'steps', 'distance_km', 'calories_active', 'active_minutes',
-            'is_suspicious',
+            "id",
+            "date",
+            "source",
+            "synced_at",
+            "steps",
+            "distance_km",
+            "calories_active",
+            "active_minutes",
+            "is_suspicious",
         ]
-        read_only_fields = ['id', 'synced_at', 'is_suspicious']
+        read_only_fields = ["id", "synced_at", "is_suspicious"]
 
 
 class HealthSyncSerializer(serializers.Serializer):
     """Validates incoming sync payload from the Capacitor app."""
+
     date = serializers.DateField()
     source = serializers.ChoiceField(
-        choices=['device_sensor', 'google_fit', 'apple_health', 'manual'],
-        default='device_sensor'
+        choices=["device_sensor", "google_fit", "apple_health", "manual"],
+        default="device_sensor",
     )
     steps = serializers.IntegerField(min_value=0, max_value=100000, default=0)
     distance_km = serializers.FloatField(
@@ -52,7 +60,7 @@ class HealthSyncSerializer(serializers.Serializer):
         allow_null=True,
     )
     gait_state = serializers.ChoiceField(
-        choices=['idle', 'possible_walking', 'confirmed_walking', 'suspicious_motion'],
+        choices=["idle", "possible_walking", "confirmed_walking", "suspicious_motion"],
         required=False,
         allow_null=True,
     )
@@ -99,12 +107,12 @@ class HealthSyncSerializer(serializers.Serializer):
         allow_null=True,
     )
     carry_mode = serializers.ChoiceField(
-        choices=['unknown', 'in_hand', 'pocket', 'bag'],
+        choices=["unknown", "in_hand", "pocket", "bag"],
         required=False,
         allow_null=True,
     )
     ml_motion_label = serializers.ChoiceField(
-        choices=['walk', 'shake', 'other'],
+        choices=["walk", "shake", "other"],
         required=False,
         allow_null=True,
     )
@@ -131,17 +139,18 @@ class HealthSyncSerializer(serializers.Serializer):
 class HourlyStepSerializer(serializers.ModelSerializer):
     class Meta:
         model = HourlyStepRecord
-        fields = ['hour', 'steps', 'distance_km', 'calories']
+        fields = ["hour", "steps", "distance_km", "calories"]
 
 
 class LocationWaypointSerializer(serializers.ModelSerializer):
     class Meta:
         model = LocationWaypoint
-        fields = ['hour', 'recorded_at', 'latitude', 'longitude', 'accuracy_m']
+        fields = ["hour", "recorded_at", "latitude", "longitude", "accuracy_m"]
 
 
 class DayDetailSerializer(serializers.Serializer):
     """Combined response for a full day detail view."""
+
     date = serializers.DateField()
     total_steps = serializers.IntegerField()
     total_km = serializers.FloatField()
@@ -164,11 +173,9 @@ class DayDetailSerializer(serializers.Serializer):
 
 class StepSessionStartSerializer(serializers.Serializer):
     """Validates request to start a new step session."""
+
     device_id = serializers.CharField(max_length=255, required=True)
-    platform = serializers.ChoiceField(
-        choices=['android', 'ios', 'web'],
-        required=True
-    )
+    platform = serializers.ChoiceField(choices=["android", "ios", "web"], required=True)
     app_version = serializers.CharField(
         max_length=64,
         required=False,
@@ -185,6 +192,7 @@ class StepSessionStartSerializer(serializers.Serializer):
 
 class StepSessionStartResponseSerializer(serializers.Serializer):
     """Response when session is started."""
+
     session_id = serializers.UUIDField()
     session_token = serializers.CharField()
     server_nonce = serializers.CharField()
@@ -195,12 +203,14 @@ class StepSessionStartResponseSerializer(serializers.Serializer):
 
 class StepSessionEndSerializer(serializers.Serializer):
     """Validates request to end a session."""
+
     session_id = serializers.UUIDField(required=True)
     session_token = serializers.CharField(max_length=255, required=True)
 
 
 class StepSessionEndResponseSerializer(serializers.Serializer):
     """Response when session is ended."""
+
     session_id = serializers.UUIDField()
     status = serializers.CharField()
     session_risk_score = serializers.FloatField()
@@ -213,11 +223,12 @@ class StepSessionEndResponseSerializer(serializers.Serializer):
 
 class HealthSyncSerializerV2(serializers.Serializer):
     """Extended sync serializer with replay protection and session fields."""
+
     # Original fields (unchanged)
     date = serializers.DateField()
     source = serializers.ChoiceField(
-        choices=['device_sensor', 'google_fit', 'apple_health', 'manual'],
-        default='device_sensor'
+        choices=["device_sensor", "google_fit", "apple_health", "manual"],
+        default="device_sensor",
     )
     steps = serializers.IntegerField(min_value=0, max_value=100000, default=0)
     distance_km = serializers.FloatField(
@@ -251,7 +262,7 @@ class HealthSyncSerializerV2(serializers.Serializer):
         allow_null=True,
     )
     gait_state = serializers.ChoiceField(
-        choices=['idle', 'possible_walking', 'confirmed_walking', 'suspicious_motion'],
+        choices=["idle", "possible_walking", "confirmed_walking", "suspicious_motion"],
         required=False,
         allow_null=True,
     )
@@ -298,12 +309,12 @@ class HealthSyncSerializerV2(serializers.Serializer):
         allow_null=True,
     )
     carry_mode = serializers.ChoiceField(
-        choices=['unknown', 'in_hand', 'pocket', 'bag'],
+        choices=["unknown", "in_hand", "pocket", "bag"],
         required=False,
         allow_null=True,
     )
     ml_motion_label = serializers.ChoiceField(
-        choices=['walk', 'shake', 'other'],
+        choices=["walk", "shake", "other"],
         required=False,
         allow_null=True,
     )
@@ -395,6 +406,7 @@ class HealthSyncSerializerV2(serializers.Serializer):
 
 class UserTrustProfileSerializer(serializers.Serializer):
     """User trust profile data for client response."""
+
     trust_score = serializers.FloatField()
     trust_tier = serializers.CharField()
     verified_sessions_count = serializers.IntegerField()
@@ -405,6 +417,7 @@ class UserTrustProfileSerializer(serializers.Serializer):
 
 class AntiCheatPolicyPublicSerializer(serializers.Serializer):
     """Public anti-cheat policy configuration (non-sensitive operational values)."""
+
     version = serializers.CharField()
     session_max_hours = serializers.IntegerField()
     sync_interval_seconds = serializers.IntegerField()

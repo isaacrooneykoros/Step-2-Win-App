@@ -2,24 +2,28 @@
 Custom authentication views with device session tracking.
 These views handle login, logout, token refresh, and session management.
 """
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
-from rest_framework_simplejwt.exceptions import TokenError
-from rest_framework.views import APIView
+
+import logging
+
+from django.conf import settings
+from django.contrib.auth import authenticate, get_user_model
+from django.core.cache import cache
+from django.utils import timezone
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import serializers, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
-from rest_framework import serializers
-from django.contrib.auth import authenticate, get_user_model
-from django.core.cache import cache
-from django.conf import settings
-from django.utils import timezone
+from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.token_blacklist.models import (BlacklistedToken,
+                                                             OutstandingToken)
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import (TokenObtainPairView,
+                                            TokenRefreshView)
+
 from apps.users.models import DeviceSession
 from apps.users.serializers import UserProfileSerializer
-from drf_spectacular.utils import extend_schema, inline_serializer
-import logging
 
 logger = logging.getLogger(__name__)
 UserModel = get_user_model()
@@ -27,11 +31,11 @@ UserModel = get_user_model()
 
 def get_client_ip(request) -> str:
     """Extract the real client IP, accounting for proxies."""
-    remote_addr = (request.META.get('REMOTE_ADDR') or '').strip()
-    trusted_proxies = set(getattr(settings, 'TRUSTED_PROXY_IPS', []) or [])
-    x_forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
+    remote_addr = (request.META.get("REMOTE_ADDR") or "").strip()
+    trusted_proxies = set(getattr(settings, "TRUSTED_PROXY_IPS", []) or [])
+    x_forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
     if x_forwarded and remote_addr in trusted_proxies:
-        return x_forwarded.split(',')[0].strip()
+        return x_forwarded.split(",")[0].strip()
     return remote_addr
 
 
@@ -52,17 +56,19 @@ class CustomLoginView(TokenObtainPairView):
 
     def post(self, request, *args, **kwargs):
         # ── Check brute force lockout ─────────────────────────────────────
-        username = request.data.get('username', '')
-        cache_key = f'login_attempts:{username}'
+        username = request.data.get("username", "")
+        cache_key = f"login_attempts:{username}"
         attempts = cache.get(cache_key, 0)
 
-        max_attempts = getattr(settings, 'MAX_LOGIN_ATTEMPTS', 5)
-        lockout_minutes = getattr(settings, 'LOGIN_LOCKOUT_MINUTES', 15)
+        max_attempts = getattr(settings, "MAX_LOGIN_ATTEMPTS", 5)
+        lockout_minutes = getattr(settings, "LOGIN_LOCKOUT_MINUTES", 15)
 
         if attempts >= max_attempts:
             return Response(
-                {'error': f'Account temporarily locked. Try again in {lockout_minutes} minutes.'},
-                status=status.HTTP_429_TOO_MANY_REQUESTS
+                {
+                    "error": f"Account temporarily locked. Try again in {lockout_minutes} minutes."
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
         # ── Attempt login ─────────────────────────────────────────────────
@@ -78,31 +84,31 @@ class CustomLoginView(TokenObtainPairView):
 
         # ── Create DeviceSession ──────────────────────────────────────────
         try:
-            refresh_token = response.data.get('refresh')
+            refresh_token = response.data.get("refresh")
             refresh_obj = RefreshToken(refresh_token)
-            jti = refresh_obj.get('jti')
-            user = UserModel.objects.get(id=refresh_obj.get('user_id'))
+            jti = refresh_obj.get("jti")
+            user = UserModel.objects.get(id=refresh_obj.get("user_id"))
 
             session = DeviceSession.objects.create(
                 user=user,
                 refresh_jti=jti,
-                device_type=request.data.get('device_type', 'unknown'),
-                device_name=request.data.get('device_name', ''),
-                app_version=request.data.get('app_version', ''),
+                device_type=request.data.get("device_type", "unknown"),
+                device_name=request.data.get("device_name", ""),
+                app_version=request.data.get("app_version", ""),
                 ip_address=get_client_ip(request),
             )
 
             # Add session_id to response so frontend can store it
-            response.data['session_id'] = str(session.id)
-            response.data['user'] = UserProfileSerializer(user).data
+            response.data["session_id"] = str(session.id)
+            response.data["user"] = UserProfileSerializer(user).data
 
             logger.info(
-                f'Login: user={user.username} | device={session.device_name} | '
-                f'ip={session.ip_address}'
+                f"Login: user={user.username} | device={session.device_name} | "
+                f"ip={session.ip_address}"
             )
 
         except Exception as e:
-            logger.error(f'DeviceSession creation failed: {e}')
+            logger.error(f"DeviceSession creation failed: {e}")
             # Don't fail the login just because session tracking failed
 
         return response
@@ -117,50 +123,53 @@ class CustomLogoutView(APIView):
 
     Always returns 200 — even if token is already invalid.
     """
+
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
         request=inline_serializer(
-            name='CustomLogoutRequest',
-            fields={'refresh': serializers.CharField()},
+            name="CustomLogoutRequest",
+            fields={"refresh": serializers.CharField()},
         ),
         responses={
             200: inline_serializer(
-                name='CustomLogoutResponse',
-                fields={'message': serializers.CharField()},
+                name="CustomLogoutResponse",
+                fields={"message": serializers.CharField()},
             ),
             400: inline_serializer(
-                name='CustomLogoutError',
-                fields={'error': serializers.CharField()},
+                name="CustomLogoutError",
+                fields={"error": serializers.CharField()},
             ),
         },
     )
     def post(self, request):
-        refresh_token = request.data.get('refresh')
+        refresh_token = request.data.get("refresh")
         if not refresh_token:
-            return Response({'error': 'refresh token required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "refresh token required"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             token = RefreshToken(refresh_token)
-            jti = token.get('jti')
+            jti = token.get("jti")
 
             # Blacklist the token — makes it immediately invalid
             token.blacklist()
 
             # Deactivate the DeviceSession
-            DeviceSession.objects.filter(
-                user=request.user, refresh_jti=jti
-            ).update(is_active=False)
+            DeviceSession.objects.filter(user=request.user, refresh_jti=jti).update(
+                is_active=False
+            )
 
-            logger.info(f'Logout: user={request.user.username} | jti={jti[:8]}...')
+            logger.info(f"Logout: user={request.user.username} | jti={jti[:8]}...")
 
         except TokenError:
             # Token already expired or invalid — still return 200
             pass
         except Exception as e:
-            logger.error(f'Logout error: {e}')
+            logger.error(f"Logout error: {e}")
 
-        return Response({'message': 'Logged out successfully.'})
+        return Response({"message": "Logged out successfully."})
 
 
 class CustomRefreshView(TokenRefreshView):
@@ -171,21 +180,21 @@ class CustomRefreshView(TokenRefreshView):
     """
 
     def post(self, request, *args, **kwargs):
-        refresh_token = request.data.get('refresh')
+        refresh_token = request.data.get("refresh")
         old_jti = None
 
         # ── Check if this session has been force-revoked ──────────────────
         if refresh_token:
             try:
                 token = RefreshToken(refresh_token)
-                jti = token.get('jti')
+                jti = token.get("jti")
                 old_jti = jti
 
                 session = DeviceSession.objects.filter(refresh_jti=jti).first()
                 if session and not session.is_active:
                     return Response(
-                        {'error': 'Session has been revoked. Please log in again.'},
-                        status=status.HTTP_401_UNAUTHORIZED
+                        {"error": "Session has been revoked. Please log in again."},
+                        status=status.HTTP_401_UNAUTHORIZED,
                     )
             except Exception:
                 pass  # Let simplejwt handle invalid tokens
@@ -195,10 +204,10 @@ class CustomRefreshView(TokenRefreshView):
         # ── Update session activity on successful refresh ─────────────────
         if response.status_code == 200 and old_jti:
             try:
-                new_refresh = response.data.get('refresh')
+                new_refresh = response.data.get("refresh")
                 if new_refresh:
                     new_token = RefreshToken(new_refresh)
-                    new_jti = new_token.get('jti')
+                    new_jti = new_token.get("jti")
 
                     # Update session with new JTI (since we rotate tokens)
                     DeviceSession.objects.filter(refresh_jti=old_jti).update(
@@ -206,7 +215,7 @@ class CustomRefreshView(TokenRefreshView):
                         last_active_at=timezone.now(),
                     )
             except Exception as e:
-                logger.warning(f'Session refresh update warning: {e}')
+                logger.warning(f"Session refresh update warning: {e}")
 
         return response
 
@@ -216,21 +225,24 @@ class ActiveSessionsView(APIView):
     Returns all active sessions for the current user.
     User sees this in their Profile → Security → Active Devices screen.
     """
+
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
         responses={
             200: inline_serializer(
-                name='ActiveSessionResponse',
+                name="ActiveSessionResponse",
                 many=True,
                 fields={
-                    'id': serializers.CharField(),
-                    'device_name': serializers.CharField(),
-                    'device_type': serializers.CharField(),
-                    'ip_address': serializers.CharField(allow_blank=True, allow_null=True),
-                    'last_active_at': serializers.CharField(),
-                    'created_at': serializers.CharField(),
-                    'is_current': serializers.BooleanField(),
+                    "id": serializers.CharField(),
+                    "device_name": serializers.CharField(),
+                    "device_type": serializers.CharField(),
+                    "ip_address": serializers.CharField(
+                        allow_blank=True, allow_null=True
+                    ),
+                    "last_active_at": serializers.CharField(),
+                    "created_at": serializers.CharField(),
+                    "is_current": serializers.BooleanField(),
                 },
             )
         }
@@ -238,20 +250,22 @@ class ActiveSessionsView(APIView):
     def get(self, request):
         sessions = DeviceSession.objects.filter(
             user=request.user, is_active=True
-        ).order_by('-last_active_at')
+        ).order_by("-last_active_at")
 
-        return Response([
-            {
-                'id': str(s.id),
-                'device_name': s.display_name,
-                'device_type': s.device_type,
-                'ip_address': s.ip_address,
-                'last_active_at': s.last_active_at.isoformat(),
-                'created_at': s.created_at.isoformat(),
-                'is_current': False,  # Frontend marks current session
-            }
-            for s in sessions
-        ])
+        return Response(
+            [
+                {
+                    "id": str(s.id),
+                    "device_name": s.display_name,
+                    "device_type": s.device_type,
+                    "ip_address": s.ip_address,
+                    "last_active_at": s.last_active_at.isoformat(),
+                    "created_at": s.created_at.isoformat(),
+                    "is_current": False,  # Frontend marks current session
+                }
+                for s in sessions
+            ]
+        )
 
 
 class RevokeSessionView(APIView):
@@ -261,18 +275,19 @@ class RevokeSessionView(APIView):
 
     URL: POST /api/users/sessions/<session_id>/revoke/
     """
+
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
         request=None,
         responses={
             200: inline_serializer(
-                name='RevokeSessionResponse',
-                fields={'message': serializers.CharField()},
+                name="RevokeSessionResponse",
+                fields={"message": serializers.CharField()},
             ),
             404: inline_serializer(
-                name='RevokeSessionNotFound',
-                fields={'error': serializers.CharField()},
+                name="RevokeSessionNotFound",
+                fields={"error": serializers.CharField()},
             ),
         },
     )
@@ -283,10 +298,12 @@ class RevokeSessionView(APIView):
                 user=request.user,  # CRITICAL: user can only revoke their own sessions
             )
         except DeviceSession.DoesNotExist:
-            return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Session not found"}, status=status.HTTP_404_NOT_FOUND
+            )
 
         if not session.is_active:
-            return Response({'message': 'Session already revoked'})
+            return Response({"message": "Session already revoked"})
 
         try:
             # Blacklist the refresh token
@@ -296,16 +313,16 @@ class RevokeSessionView(APIView):
             if outstanding:
                 BlacklistedToken.objects.get_or_create(token=outstanding)
         except Exception as e:
-            logger.error(f'Token blacklist error during revoke: {e}')
+            logger.error(f"Token blacklist error during revoke: {e}")
 
         session.is_active = False
-        session.save(update_fields=['is_active'])
+        session.save(update_fields=["is_active"])
 
         logger.info(
-            f'Session revoked: user={request.user.username} | '
-            f'device={session.display_name} | by_user=True'
+            f"Session revoked: user={request.user.username} | "
+            f"device={session.display_name} | by_user=True"
         )
-        return Response({'message': f'"{session.display_name}" has been logged out.'})
+        return Response({"message": f'"{session.display_name}" has been logged out.'})
 
 
 class RevokeAllSessionsView(APIView):
@@ -316,42 +333,47 @@ class RevokeAllSessionsView(APIView):
     Request body:
         { "current_refresh": "..." }   ← current device's refresh token (kept active)
     """
+
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
         request=inline_serializer(
-            name='RevokeAllSessionsRequest',
+            name="RevokeAllSessionsRequest",
             fields={
-                'current_refresh': serializers.CharField(required=False),
+                "current_refresh": serializers.CharField(required=False),
             },
         ),
         responses={
             200: inline_serializer(
-                name='RevokeAllSessionsResponse',
+                name="RevokeAllSessionsResponse",
                 fields={
-                    'message': serializers.CharField(),
-                    'revoked_count': serializers.IntegerField(),
+                    "message": serializers.CharField(),
+                    "revoked_count": serializers.IntegerField(),
                 },
             )
         },
     )
     def post(self, request):
-        current_refresh = request.data.get('current_refresh')
+        current_refresh = request.data.get("current_refresh")
         current_jti = None
 
         if current_refresh:
             try:
-                current_jti = RefreshToken(current_refresh).get('jti')
+                current_jti = RefreshToken(current_refresh).get("jti")
             except Exception:
                 pass
 
         # Get all OTHER active sessions
-        other_sessions = DeviceSession.objects.filter(
-            user=request.user,
-            is_active=True,
-        ).exclude(refresh_jti=current_jti) if current_jti else DeviceSession.objects.filter(
-            user=request.user,
-            is_active=True,
+        other_sessions = (
+            DeviceSession.objects.filter(
+                user=request.user,
+                is_active=True,
+            ).exclude(refresh_jti=current_jti)
+            if current_jti
+            else DeviceSession.objects.filter(
+                user=request.user,
+                is_active=True,
+            )
         )
 
         revoked_count = 0
@@ -363,19 +385,21 @@ class RevokeAllSessionsView(APIView):
                 if outstanding:
                     BlacklistedToken.objects.get_or_create(token=outstanding)
                 session.is_active = False
-                session.save(update_fields=['is_active'])
+                session.save(update_fields=["is_active"])
                 revoked_count += 1
             except Exception as e:
-                logger.error(f'Error revoking session {session.id}: {e}')
+                logger.error(f"Error revoking session {session.id}: {e}")
 
         logger.info(
-            f'All sessions revoked: user={request.user.username} | '
-            f'count={revoked_count}'
+            f"All sessions revoked: user={request.user.username} | "
+            f"count={revoked_count}"
         )
-        return Response({
-            'message': f'{revoked_count} other devices logged out.',
-            'revoked_count': revoked_count,
-        })
+        return Response(
+            {
+                "message": f"{revoked_count} other devices logged out.",
+                "revoked_count": revoked_count,
+            }
+        )
 
 
 class CustomChangePasswordView(APIView):
@@ -383,57 +407,56 @@ class CustomChangePasswordView(APIView):
     Changes the user's password AND logs out all other devices.
     This is critical security — if password is changed, old sessions must die.
     """
+
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
         request=inline_serializer(
-            name='CustomChangePasswordRequest',
+            name="CustomChangePasswordRequest",
             fields={
-                'old_password': serializers.CharField(),
-                'new_password': serializers.CharField(),
+                "old_password": serializers.CharField(),
+                "new_password": serializers.CharField(),
             },
         ),
         responses={
             200: inline_serializer(
-                name='CustomChangePasswordResponse',
-                fields={'message': serializers.CharField()},
+                name="CustomChangePasswordResponse",
+                fields={"message": serializers.CharField()},
             ),
             400: inline_serializer(
-                name='CustomChangePasswordError',
-                fields={'error': serializers.CharField()},
+                name="CustomChangePasswordError",
+                fields={"error": serializers.CharField()},
             ),
         },
     )
     def post(self, request):
-        old_password = request.data.get('old_password')
-        new_password = request.data.get('new_password')
+        old_password = request.data.get("old_password")
+        new_password = request.data.get("new_password")
 
         if not old_password or not new_password:
             return Response(
-                {'error': 'old_password and new_password are required'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "old_password and new_password are required"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if not request.user.check_password(old_password):
             return Response(
-                {'error': 'Current password is incorrect'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "Current password is incorrect"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if len(new_password) < 8:
             return Response(
-                {'error': 'Password must be at least 8 characters'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "Password must be at least 8 characters"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Change password
         request.user.set_password(new_password)
-        request.user.save(update_fields=['password'])
+        request.user.save(update_fields=["password"])
 
         # Revoke ALL sessions (user must log in again on all devices)
-        all_sessions = DeviceSession.objects.filter(
-            user=request.user, is_active=True
-        )
+        all_sessions = DeviceSession.objects.filter(user=request.user, is_active=True)
         for session in all_sessions:
             try:
                 outstanding = OutstandingToken.objects.filter(
@@ -447,9 +470,8 @@ class CustomChangePasswordView(APIView):
         all_sessions.update(is_active=False)
 
         logger.info(
-            f'Password changed: user={request.user.username} | '
-            f'all sessions revoked'
+            f"Password changed: user={request.user.username} | " f"all sessions revoked"
         )
-        return Response({
-            'message': 'Password changed. Please log in again on all devices.'
-        })
+        return Response(
+            {"message": "Password changed. Please log in again on all devices."}
+        )

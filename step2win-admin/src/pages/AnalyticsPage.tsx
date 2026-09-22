@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import {
@@ -74,7 +74,7 @@ export function AnalyticsPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const loadAnalytics = () => {
+  const loadAnalytics = useCallback(() => {
     setLoading(true)
     Promise.all([
       adminApi.getOverview(timeframe === 'week' ? 7 : timeframe === 'month' ? 30 : 90),
@@ -93,11 +93,13 @@ export function AnalyticsPage() {
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false))
-  }
+  }, [timeframe])
 
   useEffect(() => {
-    loadAnalytics()
-  }, [timeframe])
+    queueMicrotask(() => {
+      loadAnalytics()
+    })
+  }, [loadAnalytics])
 
   const days = timeframe === 'week' ? 7 : timeframe === 'month' ? 30 : 90
 

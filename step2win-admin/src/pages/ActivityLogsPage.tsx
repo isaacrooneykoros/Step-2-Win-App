@@ -94,7 +94,8 @@ export function ActivityLogsPage() {
   }, [limit, offset, searchTerm, actionFilter, resourceFilter, fromDate, toDate]);
 
   useEffect(() => {
-    void loadLogs();
+    // Defer to microtask to avoid synchronous setState inside effect
+    queueMicrotask(() => { void loadLogs(); });
   }, [loadLogs]);
 
   const handleSearch = () => {

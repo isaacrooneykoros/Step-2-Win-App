@@ -98,7 +98,7 @@ export default function LoginPage() {
     <AuthLayout mode="login">
       <h1
         className="text-3xl font-extrabold mb-1.5 leading-tight"
-        style={{ fontFamily: 'Syne, sans-serif', color: '#F0F2F8', letterSpacing: '-0.5px' }}>
+        style={{ fontFamily: 'Syne, sans-serif', color: '#F0F2F8', letterSpacing: 0 }}>
         Welcome back
       </h1>
       <p className="text-sm mb-8 leading-relaxed" style={{ color: '#7B82A0' }}>

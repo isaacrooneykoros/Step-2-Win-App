@@ -238,23 +238,29 @@ export function UsersPage() {
 
   useEffect(() => {
     if (!selected) {
-      setIsEditing(false)
-      setEditError('')
+      queueMicrotask(() => {
+        setIsEditing(false)
+        setEditError('')
+      })
       return
     }
 
     if (!isEditing) {
-      setEditDraft({
-        username: selected.username,
-        email: selected.email,
-        phone_number: selected.phone_number || '',
+      queueMicrotask(() => {
+        setEditDraft({
+          username: selected.username,
+          email: selected.email,
+          phone_number: selected.phone_number || '',
+        })
       })
     }
   }, [isEditing, selected])
 
   useEffect(() => {
     if (!accessToken) {
-      setLiveConnected(false)
+      queueMicrotask(() => {
+        setLiveConnected(false)
+      })
       return
     }
 
@@ -331,12 +337,14 @@ export function UsersPage() {
       return
     }
 
-    openDrawer(target)
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current)
-      next.delete('openUserId')
-      return next
-    }, { replace: true })
+    queueMicrotask(() => {
+      openDrawer(target)
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current)
+        next.delete('openUserId')
+        return next
+      }, { replace: true })
+    })
   }, [data?.results, searchParams, setSearchParams])
 
   // ── Table columns ────────────────────────────────────────────────────

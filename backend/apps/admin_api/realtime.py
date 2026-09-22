@@ -13,8 +13,8 @@ def broadcast_support_message(ticket_id: int, message_payload: dict):
     async_to_sync(channel_layer.group_send)(
         _group_name(ticket_id),
         {
-            'type': 'support.message',
-            'message': message_payload,
+            "type": "support.message",
+            "message": message_payload,
         },
     )
 
@@ -26,14 +26,14 @@ def broadcast_support_ticket(ticket_id: int, ticket_payload: dict):
     async_to_sync(channel_layer.group_send)(
         _group_name(ticket_id),
         {
-            'type': 'support.ticket',
-            'ticket': ticket_payload,
+            "type": "support.ticket",
+            "ticket": ticket_payload,
         },
     )
 
 
 def _admin_steps_group_name() -> str:
-    return 'admin_steps_live'
+    return "admin_steps_live"
 
 
 def broadcast_admin_steps_update(step_payload: dict):
@@ -43,7 +43,7 @@ def broadcast_admin_steps_update(step_payload: dict):
     async_to_sync(channel_layer.group_send)(
         _admin_steps_group_name(),
         {
-            'type': 'admin.steps.update',
-            'payload': step_payload,
+            "type": "admin.steps.update",
+            "payload": step_payload,
         },
     )

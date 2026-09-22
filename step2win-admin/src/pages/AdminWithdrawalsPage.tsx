@@ -50,8 +50,8 @@ export function AdminWithdrawalsPage() {
   }, [activeTab]);
 
   useEffect(() => {
-    setLoading(true);
-    load();
+    // Defer loading to next microtask to avoid synchronous setState in effect
+    queueMicrotask(() => { setLoading(true); void load(); });
   }, [load]);
 
   const filteredItems = useMemo(() => {

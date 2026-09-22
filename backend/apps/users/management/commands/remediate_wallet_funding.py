@@ -98,7 +98,9 @@ class Command(BaseCommand):
         )
 
         if not candidates:
-            self.stdout.write(self.style.SUCCESS("No eligible users found for remediation."))
+            self.stdout.write(
+                self.style.SUCCESS("No eligible users found for remediation.")
+            )
             return
 
         total_reset = Decimal("0.00")
@@ -125,7 +127,9 @@ class Command(BaseCommand):
 
                 if locked_user.wallet_balance <= Decimal("0.00"):
                     self.stdout.write(
-                        self.style.WARNING("  skipped during apply (balance already <= 0)")
+                        self.style.WARNING(
+                            "  skipped during apply (balance already <= 0)"
+                        )
                     )
                     continue
 

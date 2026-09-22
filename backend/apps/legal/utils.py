@@ -4,6 +4,7 @@ Converts uploaded DOCX and PDF files to clean HTML for display in the mobile app
 DOCX → HTML: uses mammoth (preserves headings, bold, lists, tables)
 PDF  → HTML: extracts text (formatting limited — recommend DOCX for best results)
 """
+
 import importlib
 import logging
 
@@ -31,17 +32,17 @@ def docx_to_html(file_obj) -> str:
         th                        => th
     """
     try:
-        mammoth = importlib.import_module('mammoth')
+        mammoth = importlib.import_module("mammoth")
         result = mammoth.convert_to_html(file_obj, style_map=style_map)
-        html   = result.value
+        html = result.value
         if result.messages:
-            logger.info(f'mammoth warnings: {result.messages}')
+            logger.info(f"mammoth warnings: {result.messages}")
         return html
     except ModuleNotFoundError:
-        raise ValueError('mammoth not installed. Run: pip install mammoth')
+        raise ValueError("mammoth not installed. Run: pip install mammoth")
     except Exception as e:
-        logger.error(f'DOCX conversion failed: {e}')
-        raise ValueError(f'Could not parse DOCX file: {e}')
+        logger.error(f"DOCX conversion failed: {e}")
+        raise ValueError(f"Could not parse DOCX file: {e}")
 
 
 def pdf_to_html(file_obj) -> str:
@@ -51,35 +52,35 @@ def pdf_to_html(file_obj) -> str:
     For best results, upload DOCX instead of PDF.
     """
     try:
-        pypdf2 = importlib.import_module('PyPDF2')
+        pypdf2 = importlib.import_module("PyPDF2")
         reader = pypdf2.PdfReader(file_obj)
-        pages  = []
+        pages = []
         for page in reader.pages:
-            text = page.extract_text() or ''
+            text = page.extract_text() or ""
             # Wrap each paragraph in <p> tags
-            paragraphs = [f'<p>{line.strip()}</p>'
-                          for line in text.split('\n')
-                          if line.strip()]
-            pages.append('\n'.join(paragraphs))
-        return '\n<hr/>\n'.join(pages)
+            paragraphs = [
+                f"<p>{line.strip()}</p>" for line in text.split("\n") if line.strip()
+            ]
+            pages.append("\n".join(paragraphs))
+        return "\n<hr/>\n".join(pages)
     except ModuleNotFoundError:
-        raise ValueError('PyPDF2 not installed. Run: pip install PyPDF2')
+        raise ValueError("PyPDF2 not installed. Run: pip install PyPDF2")
     except Exception as e:
-        logger.error(f'PDF extraction failed: {e}')
-        raise ValueError(f'Could not parse PDF file: {e}')
+        logger.error(f"PDF extraction failed: {e}")
+        raise ValueError(f"Could not parse PDF file: {e}")
 
 
 def detect_file_type(filename: str) -> str:
     name = filename.lower()
-    if name.endswith('.docx'):
-        return 'docx'
-    if name.endswith('.doc'):
-        return 'doc'
-    if name.endswith('.pdf'):
-        return 'pdf'
-    if name.endswith('.html'):
-        return 'html'
-    return 'unknown'
+    if name.endswith(".docx"):
+        return "docx"
+    if name.endswith(".doc"):
+        return "doc"
+    if name.endswith(".pdf"):
+        return "pdf"
+    if name.endswith(".html"):
+        return "html"
+    return "unknown"
 
 
 def process_uploaded_file(file_obj, filename: str) -> tuple[str, str]:
@@ -90,21 +91,21 @@ def process_uploaded_file(file_obj, filename: str) -> tuple[str, str]:
     """
     file_type = detect_file_type(filename)
 
-    if file_type == 'docx':
+    if file_type == "docx":
         html = docx_to_html(file_obj)
-    elif file_type == 'pdf':
+    elif file_type == "pdf":
         html = pdf_to_html(file_obj)
-    elif file_type == 'html':
-        html = file_obj.read().decode('utf-8', errors='replace')
-    elif file_type == 'doc':
+    elif file_type == "html":
+        html = file_obj.read().decode("utf-8", errors="replace")
+    elif file_type == "doc":
         raise ValueError(
-            'Legacy .doc files are not supported. '
-            'Please save as .docx in Microsoft Word and re-upload.'
+            "Legacy .doc files are not supported. "
+            "Please save as .docx in Microsoft Word and re-upload."
         )
     else:
         raise ValueError(
-            f'Unsupported file type: {filename}. '
-            'Please upload a .docx, .pdf, or .html file.'
+            f"Unsupported file type: {filename}. "
+            "Please upload a .docx, .pdf, or .html file."
         )
 
     return html, file_type

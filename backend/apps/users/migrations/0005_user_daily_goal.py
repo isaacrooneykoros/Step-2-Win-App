@@ -6,13 +6,16 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('users', '0004_devicesession'),
+        ("users", "0004_devicesession"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='user',
-            name='daily_goal',
-            field=models.IntegerField(default=10000, help_text='User personal daily step goal. Separate from challenge milestone. Used for home screen progress bar.'),
+            model_name="user",
+            name="daily_goal",
+            field=models.IntegerField(
+                default=10000,
+                help_text="User personal daily step goal. Separate from challenge milestone. Used for home screen progress bar.",
+            ),
         ),
     ]

@@ -36,7 +36,8 @@ export function ModerationPage() {
   };
 
   useEffect(() => {
-    load();
+    // Defer loading to avoid synchronous setState in effect bodies
+    queueMicrotask(() => { void load(); });
   }, []);
 
   const bannedUsers = useMemo(() => users.filter((u) => !u.is_active), [users]);

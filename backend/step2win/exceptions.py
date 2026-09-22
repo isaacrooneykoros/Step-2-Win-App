@@ -11,9 +11,9 @@ def custom_exception_handler(exc, context):
     # Add custom error formatting
     if response is not None:
         custom_response_data = {
-            'error': True,
-            'message': str(exc),
-            'details': response.data
+            "error": True,
+            "message": str(exc),
+            "details": response.data,
         }
         response.data = custom_response_data
 

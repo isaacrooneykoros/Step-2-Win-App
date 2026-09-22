@@ -1,10 +1,12 @@
-from celery import shared_task
 import logging
-from django.utils import timezone
 from datetime import timedelta
-from django.conf import settings
 
-from .reconciliation import ReconciliationThresholds, run_financial_reconciliation
+from celery import shared_task
+from django.conf import settings
+from django.utils import timezone
+
+from .reconciliation import (ReconciliationThresholds,
+                             run_financial_reconciliation)
 
 logger = logging.getLogger(__name__)
 
@@ -22,23 +24,26 @@ def process_unprocessed_callbacks():
     # Find unprocessed callbacks older than 1 minute
     cutoff = timezone.now() - timedelta(minutes=1)
     unprocessed = CallbackLog.objects.filter(
-        processed=False,
-        created_at__lt=cutoff
-    ).order_by('created_at')[:100]  # Process max 100 per task
+        processed=False, created_at__lt=cutoff
+    ).order_by("created_at")[
+        :100
+    ]  # Process max 100 per task
 
     for log in unprocessed:
         try:
-            logger.info(f'Reprocessing callback {log.id}: {log.type} order={log.order_id}')
-            if log.type == 'deposit':
+            logger.info(
+                f"Reprocessing callback {log.id}: {log.type} order={log.order_id}"
+            )
+            if log.type == "deposit":
                 process_deposit_callback(log.raw_payload)
-            elif log.type == 'payout':
+            elif log.type == "payout":
                 process_payout_callback(log.raw_payload)
             else:
-                logger.warning(f'Unknown callback type: {log.type}')
+                logger.warning(f"Unknown callback type: {log.type}")
                 log.processed = True
-                log.save(update_fields=['processed'])
+                log.save(update_fields=["processed"])
         except Exception as e:
-            logger.error(f'Callback reprocessing failed {log.id}: {e}')
+            logger.error(f"Callback reprocessing failed {log.id}: {e}")
             # Don't mark as processed - will retry
             continue
 
@@ -50,37 +55,41 @@ def reconcile_pending_payments():
     Queries IntaSend for any 'pending' transactions older than 15 minutes.
     This is the fallback in case we missed a webhook callback.
     """
-    from .models import PaymentTransaction
-    from . import intasend
-    from django.utils import timezone
     from datetime import timedelta
+
+    from django.utils import timezone
+
+    from . import intasend
+    from .models import PaymentTransaction
 
     cutoff = timezone.now() - timedelta(minutes=15)
     pending = PaymentTransaction.objects.filter(
-        status='pending',
+        status="pending",
         created_at__lt=cutoff,
     )
 
     for txn in pending:
         try:
-            if txn.type == 'deposit' and txn.collection_id:
+            if txn.type == "deposit" and txn.collection_id:
                 # Use IntaSend's invoice_id (stored as collection_id) to query status
                 result = intasend.query_collection(txn.collection_id)
                 _reconcile_deposit(txn, result)
 
-            elif txn.type == 'payout' and txn.tracking_reference:
+            elif txn.type == "payout" and txn.tracking_reference:
                 result = intasend.get_disbursement_status(txn.tracking_reference)
                 _reconcile_payout(txn, result)
 
         except Exception as e:
-            logger.error(f'Reconciliation failed for txn {txn.id}: {e}')
+            logger.error(f"Reconciliation failed for txn {txn.id}: {e}")
 
-    from .models import WithdrawalRequest
     from django.db import transaction as db_transaction
+
     from apps.users.models import User
 
+    from .models import WithdrawalRequest
+
     pending_withdrawals = WithdrawalRequest.objects.filter(
-        status='processing',
+        status="processing",
         updated_at__lt=timezone.now() - timedelta(minutes=15),
     )
 
@@ -89,36 +98,44 @@ def reconcile_pending_payments():
             continue
         try:
             result = intasend.get_disbursement_status(withdrawal.tracking_reference)
-            status = result.get('status', '')
-            transactions = result.get('transactions', [])
+            status = result.get("status", "")
+            transactions = result.get("transactions", [])
             first_txn = transactions[0] if transactions else {}
 
-            if status == 'COMPLETE':
+            if status == "COMPLETE":
                 with db_transaction.atomic():
-                    withdrawal.status = 'completed'
-                    withdrawal.mpesa_reference = first_txn.get('mpesa_reference', '')
+                    withdrawal.status = "completed"
+                    withdrawal.mpesa_reference = first_txn.get("mpesa_reference", "")
                     withdrawal.callback_received_at = timezone.now()
-                    withdrawal.save(update_fields=[
-                        'status', 'mpesa_reference', 'callback_received_at', 'updated_at'
-                    ])
-                logger.info(f'Reconciled withdrawal {withdrawal.id} as completed')
+                    withdrawal.save(
+                        update_fields=[
+                            "status",
+                            "mpesa_reference",
+                            "callback_received_at",
+                            "updated_at",
+                        ]
+                    )
+                logger.info(f"Reconciled withdrawal {withdrawal.id} as completed")
 
-            elif status == 'FAILED':
+            elif status == "FAILED":
                 with db_transaction.atomic():
                     user = User.objects.select_for_update().get(id=withdrawal.user_id)
                     user.wallet_balance = user.wallet_balance + withdrawal.amount_kes
-                    user.save(update_fields=['wallet_balance', 'updated_at'])
+                    user.save(update_fields=["wallet_balance", "updated_at"])
 
-                    withdrawal.status = 'failed'
-                    withdrawal.fail_reason = (
-                        first_txn.get('failed_reason', '')
-                        or result.get('failed_reason', 'Failed')
+                    withdrawal.status = "failed"
+                    withdrawal.fail_reason = first_txn.get(
+                        "failed_reason", ""
+                    ) or result.get("failed_reason", "Failed")
+                    withdrawal.save(
+                        update_fields=["status", "fail_reason", "updated_at"]
                     )
-                    withdrawal.save(update_fields=['status', 'fail_reason', 'updated_at'])
-                logger.warning(f'Reconciled withdrawal {withdrawal.id} as failed — refunded')
+                logger.warning(
+                    f"Reconciled withdrawal {withdrawal.id} as failed — refunded"
+                )
 
         except Exception as e:
-            logger.error(f'Withdrawal reconciliation error | id={withdrawal.id}: {e}')
+            logger.error(f"Withdrawal reconciliation error | id={withdrawal.id}: {e}")
 
 
 def _reconcile_deposit(txn, invoice):
@@ -132,30 +149,39 @@ def _reconcile_deposit(txn, invoice):
     """
     from django.db import transaction as db_transaction
     from django.utils import timezone
+
     from apps.users.models import User
 
     if not invoice:
         return
 
-    state = invoice.get('state', '')
-    if state == 'COMPLETE':
+    state = invoice.get("state", "")
+    if state == "COMPLETE":
         with db_transaction.atomic():
             user = User.objects.select_for_update().get(id=txn.user_id)
             # Only credit if not already credited (idempotency)
-            if txn.status != 'completed':
+            if txn.status != "completed":
                 user.wallet_balance = user.wallet_balance + txn.amount_kes
-                user.save(update_fields=['wallet_balance', 'updated_at'])
-                txn.status               = 'completed'
-                txn.mpesa_reference      = invoice.get('mpesa_reference', '')
+                user.save(update_fields=["wallet_balance", "updated_at"])
+                txn.status = "completed"
+                txn.mpesa_reference = invoice.get("mpesa_reference", "")
                 txn.callback_received_at = timezone.now()
-                txn.save(update_fields=['status', 'mpesa_reference',
-                                        'callback_received_at', 'updated_at'])
-                logger.info(f'Reconciled deposit {txn.order_id} as completed')
+                txn.save(
+                    update_fields=[
+                        "status",
+                        "mpesa_reference",
+                        "callback_received_at",
+                        "updated_at",
+                    ]
+                )
+                logger.info(f"Reconciled deposit {txn.order_id} as completed")
 
-    elif state == 'FAILED':
-        txn.status = 'failed'
-        txn.fail_reason = invoice.get('failed_reason', '') or invoice.get('failed_code', '')
-        txn.save(update_fields=['status', 'fail_reason', 'updated_at'])
+    elif state == "FAILED":
+        txn.status = "failed"
+        txn.fail_reason = invoice.get("failed_reason", "") or invoice.get(
+            "failed_code", ""
+        )
+        txn.save(update_fields=["status", "fail_reason", "updated_at"])
 
 
 def _reconcile_payout(txn, result):
@@ -169,27 +195,34 @@ def _reconcile_payout(txn, result):
                  'transactions': [...]}
     """
     from django.utils import timezone
+
     from .services import refund_failed_payout
 
-    status = result.get('status', '')
-    transactions = result.get('transactions', [])
+    status = result.get("status", "")
+    transactions = result.get("transactions", [])
     first_txn = transactions[0] if transactions else {}
 
-    if status == 'COMPLETE':
-        txn.status               = 'completed'
-        txn.mpesa_reference      = first_txn.get('mpesa_reference', '')
+    if status == "COMPLETE":
+        txn.status = "completed"
+        txn.mpesa_reference = first_txn.get("mpesa_reference", "")
         txn.callback_received_at = timezone.now()
-        txn.save(update_fields=['status', 'mpesa_reference', 'callback_received_at', 'updated_at'])
-        logger.info(f'Reconciled payout {txn.tracking_reference} as completed')
-
-    elif status == 'FAILED':
-        txn.status = 'failed'
-        txn.fail_reason = (
-            first_txn.get('failed_reason', '')
-            or result.get('failed_reason', '')
+        txn.save(
+            update_fields=[
+                "status",
+                "mpesa_reference",
+                "callback_received_at",
+                "updated_at",
+            ]
         )
-        txn.save(update_fields=['status', 'fail_reason', 'updated_at'])
-        refund_failed_payout(txn, txn.fail_reason or 'Payout failed')
+        logger.info(f"Reconciled payout {txn.tracking_reference} as completed")
+
+    elif status == "FAILED":
+        txn.status = "failed"
+        txn.fail_reason = first_txn.get("failed_reason", "") or result.get(
+            "failed_reason", ""
+        )
+        txn.save(update_fields=["status", "fail_reason", "updated_at"])
+        refund_failed_payout(txn, txn.fail_reason or "Payout failed")
 
 
 @shared_task
@@ -198,9 +231,15 @@ def reconcile_financial_integrity_task():
     Runs periodic financial integrity checks and emits alerts when thresholds are breached.
     """
     thresholds = ReconciliationThresholds(
-        max_stuck_processing=int(getattr(settings, 'RECON_MAX_STUCK_PROCESSING', 10)),
-        max_unprocessed_callbacks=int(getattr(settings, 'RECON_MAX_UNPROCESSED_CALLBACKS', 5)),
-        max_negative_balance_users=int(getattr(settings, 'RECON_MAX_NEGATIVE_BALANCE_USERS', 0)),
-        max_callback_failure_rate_pct=float(getattr(settings, 'RECON_MAX_CALLBACK_FAILURE_RATE_PCT', 5.0)),
+        max_stuck_processing=int(getattr(settings, "RECON_MAX_STUCK_PROCESSING", 10)),
+        max_unprocessed_callbacks=int(
+            getattr(settings, "RECON_MAX_UNPROCESSED_CALLBACKS", 5)
+        ),
+        max_negative_balance_users=int(
+            getattr(settings, "RECON_MAX_NEGATIVE_BALANCE_USERS", 0)
+        ),
+        max_callback_failure_rate_pct=float(
+            getattr(settings, "RECON_MAX_CALLBACK_FAILURE_RATE_PCT", 5.0)
+        ),
     )
     return run_financial_reconciliation(thresholds=thresholds, send_alerts=True)

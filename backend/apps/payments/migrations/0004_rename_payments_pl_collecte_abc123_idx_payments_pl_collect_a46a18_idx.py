@@ -6,13 +6,13 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('payments', '0003_paymenttransaction_wallet_transaction_platformrevenue'),
+        ("payments", "0003_paymenttransaction_wallet_transaction_platformrevenue"),
     ]
 
     operations = [
         migrations.RenameIndex(
-            model_name='platformrevenue',
-            new_name='payments_pl_collect_a46a18_idx',
-            old_name='payments_pl_collecte_abc123_idx',
+            model_name="platformrevenue",
+            new_name="payments_pl_collect_a46a18_idx",
+            old_name="payments_pl_collecte_abc123_idx",
         ),
     ]

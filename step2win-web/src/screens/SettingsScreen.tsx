@@ -444,6 +444,7 @@ export default function SettingsScreen() {
   const onLogout = async () => {
     await logout();
     navigate('/login');
+    navigate('/login');
   };
 
   const stopWizardPolling = () => {

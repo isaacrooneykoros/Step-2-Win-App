@@ -20,13 +20,8 @@ export function AdminFraudPage() {
   const [pendingFlagId, setPendingFlagId] = useState<number | null>(null);
   const [pendingUsername, setPendingUsername] = useState<string>('');
 
-  useEffect(() => {
-    loadFraudData();
-    const interval = setInterval(loadFraudData, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadFraudData = async () => {
+  // Load fraud data helper (hoisted function to allow useEffect to call it)
+  async function loadFraudData() {
     try {
       setLoadError('');
       const data = await adminApi.getFraudOverview();
@@ -38,7 +33,15 @@ export function AdminFraudPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    // initial load + polling; loadFraudData is hoisted above
+    loadFraudData();
+    const interval = setInterval(loadFraudData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
 
   const handleAction = async (
     flagId: number,
@@ -95,9 +98,11 @@ export function AdminFraudPage() {
 
   useEffect(() => {
     if (selectedFlag) {
-      setActionNote('');
+      queueMicrotask(() => {
+        setActionNote('');
+      });
     }
-  }, [selectedFlag?.id]);
+  }, [selectedFlag]);
 
   // Filter flags based on search and severity
   const filteredFlags = overview?.recent_flags.filter((flag) => {

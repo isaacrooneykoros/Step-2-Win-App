@@ -30,7 +30,9 @@ def get_duplicate_rejection_count(scope: str, *, day: date | None = None) -> int
     return int(cache.get(_metric_key(scope, day), 0) or 0)
 
 
-def acquire_idempotency_slot(*, scope: str, user_id: int, idempotency_key: str | None, ttl_seconds: int = 180) -> bool:
+def acquire_idempotency_slot(
+    *, scope: str, user_id: int, idempotency_key: str | None, ttl_seconds: int = 180
+) -> bool:
     """
     Returns True when the key is fresh and acquires a short-lived slot.
     Returns False for duplicates.
@@ -43,7 +45,7 @@ def acquire_idempotency_slot(*, scope: str, user_id: int, idempotency_key: str |
         return True
 
     key = _cache_key(scope, user_id, normalized)
-    acquired = cache.add(key, '1', timeout=max(1, int(ttl_seconds)))
+    acquired = cache.add(key, "1", timeout=max(1, int(ttl_seconds)))
     if not acquired:
         _increment_duplicate_metric(scope)
     return acquired

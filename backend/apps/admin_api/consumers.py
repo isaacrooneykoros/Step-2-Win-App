@@ -19,7 +19,7 @@ class SupportChatConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)
             return
 
-        self.ticket_id = self.scope['url_route']['kwargs']['ticket_id']
+        self.ticket_id = self.scope["url_route"]["kwargs"]["ticket_id"]
         self.ticket = await self._get_ticket(self.ticket_id)
         if not self.ticket:
             await self.close(code=4404)
@@ -34,13 +34,17 @@ class SupportChatConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
 
-        await self.send(text_data=json.dumps({
-            'type': 'support.connected',
-            'ticket_id': self.ticket_id,
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "support.connected",
+                    "ticket_id": self.ticket_id,
+                }
+            )
+        )
 
     async def disconnect(self, _close_code):
-        if hasattr(self, 'group_name'):
+        if hasattr(self, "group_name"):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive(self, text_data=None, _bytes_data=None):
@@ -49,28 +53,37 @@ class SupportChatConsumer(AsyncWebsocketConsumer):
         return
 
     async def support_message(self, event):
-        await self.send(text_data=json.dumps({
-            'type': 'support.message',
-            'message': event['message'],
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "support.message",
+                    "message": event["message"],
+                }
+            )
+        )
 
     async def support_ticket(self, event):
-        await self.send(text_data=json.dumps({
-            'type': 'support.ticket',
-            'ticket': event['ticket'],
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "support.ticket",
+                    "ticket": event["ticket"],
+                }
+            )
+        )
 
     async def _authenticate_user(self):
-        query_string = self.scope.get('query_string', b'').decode('utf-8')
-        token = parse_qs(query_string).get('token', [None])[0]
+        query_string = self.scope.get("query_string", b"").decode("utf-8")
+        token = parse_qs(query_string).get("token", [None])[0]
         if not token:
             return None
 
+
 class AdminStepsLiveConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        query_string = self.scope.get('query_string', b'').decode()
+        query_string = self.scope.get("query_string", b"").decode()
         params = parse_qs(query_string)
-        token = (params.get('token') or [None])[0]
+        token = (params.get("token") or [None])[0]
 
         if not token:
             await self.close(code=4401)
@@ -81,28 +94,32 @@ class AdminStepsLiveConsumer(AsyncWebsocketConsumer):
             await self.close(code=4403)
             return
 
-        self.group_name = 'admin_steps_live'
+        self.group_name = "admin_steps_live"
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
-        await self.send(text_data=json.dumps({'type': 'admin.steps.connected'}))
+        await self.send(text_data=json.dumps({"type": "admin.steps.connected"}))
 
     async def disconnect(self, _close_code):
-        if hasattr(self, 'group_name'):
+        if hasattr(self, "group_name"):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive(self, text_data=None, _bytes_data=None):
         return
 
     async def admin_steps_update(self, event):
-        await self.send(text_data=json.dumps({
-            'type': 'admin.steps.update',
-            'payload': event.get('payload', {}),
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "admin.steps.update",
+                    "payload": event.get("payload", {}),
+                }
+            )
+        )
 
     async def _get_user_from_token(self, token):
         try:
             access = AccessToken(token)
-            user_id = access.get('user_id')
+            user_id = access.get("user_id")
             if not user_id:
                 return None
             return await User.objects.filter(id=user_id).afirst()
@@ -110,7 +127,7 @@ class AdminStepsLiveConsumer(AsyncWebsocketConsumer):
             return None
         try:
             access = AccessToken(token)
-            user_id = access.get('user_id')
+            user_id = access.get("user_id")
             if not user_id:
                 return None
         except TokenError:

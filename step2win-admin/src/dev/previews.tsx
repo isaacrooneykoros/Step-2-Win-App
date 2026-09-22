@@ -1,0 +1,15 @@
+import {ComponentPreview, Previews} from "@react-buddy/ide-toolbox";
+import {PaletteTree} from "./palette";
+import {AdminLayout} from "../components/AdminLayout.tsx";
+
+const ComponentPreviews = () => {
+    return (
+        <Previews palette={<PaletteTree/>}>
+            <ComponentPreview path="/AdminLayout">
+                <AdminLayout/>
+            </ComponentPreview>
+        </Previews>
+    );
+};
+
+export default ComponentPreviews;

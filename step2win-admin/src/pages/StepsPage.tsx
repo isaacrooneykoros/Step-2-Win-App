@@ -127,7 +127,8 @@ export function StepsPage() {
   }, [])
 
   useEffect(() => {
-    void loadLogs()
+    // Defer logs load to microtask to avoid synchronous setState-in-effect
+    queueMicrotask(() => { void loadLogs(); });
   }, [loadLogs])
 
   useEffect(() => {

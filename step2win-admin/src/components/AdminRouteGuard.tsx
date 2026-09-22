@@ -11,8 +11,9 @@ export function AdminRouteGuard() {
     let isMounted = true;
 
     if (!localStorage.getItem('admin_jwt')) {
-      setIsAuthorized(false);
-      setIsChecking(false);
+      // Defer state updates to avoid synchronous setState inside effect (React hook lint rule)
+      Promise.resolve().then(() => setIsAuthorized(false));
+      Promise.resolve().then(() => setIsChecking(false));
       return () => {
         isMounted = false;
       };
