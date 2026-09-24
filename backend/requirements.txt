@@ -13,6 +13,10 @@ sqlalchemy==2.0.40
 dj-database-url==2.2.0
 channels==4.1.0
 channels-redis==4.2.1
+# Pin the Redis client: unpinned, pip resolves redis-py 8.x, which opens connections
+# with the RESP3 handshake (Render Redis closes them -> 500s on every throttled
+# request) and is outside kombu's supported range (<6.5).
+redis==5.2.1
 daphne==4.1.2
 sentry-sdk==1.45.1
 python-dotenv==1.0.0
