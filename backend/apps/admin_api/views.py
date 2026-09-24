@@ -452,6 +452,19 @@ class AdminUserViewSet(viewsets.ModelViewSet):
             request=request,
         )
 
+    @staticmethod
+    def _deleted_guard(user):
+        """Accounts deleted by their owner are anonymised and can't be restored or edited."""
+        if getattr(user, "deleted_at", None):
+            return Response(
+                {
+                    "error": "This account was deleted by its owner. It can't be restored or edited.",
+                    "code": "account_deleted",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        return None
+
     def _superuser_only(self, request):
         if not request.user.is_superuser:
             return Response(
@@ -486,6 +499,8 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     def unban_user(self, request, pk=None):
         """Unban a specific user"""
         user = self.get_object()
+        if denied := self._deleted_guard(user):
+            return denied
         user.is_active = True
         user.save()
         self._audit(request, user, "unban", f"Unbanned {user.username}", {"is_active": {"old": False, "new": True}})
@@ -524,6 +539,8 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     def reset_password(self, request, pk=None):
         """Reset user password"""
         user = self.get_object()
+        if denied := self._deleted_guard(user):
+            return denied
         new_password = request.data.get("new_password", "")
 
         if not new_password:
@@ -547,6 +564,8 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     def update_user(self, request, pk=None):
         """Update user details - phone_number, email, and username are required fields"""
         user = self.get_object()
+        if denied := self._deleted_guard(user):
+            return denied
         before = {
             "username": user.username,
             "email": user.email,
@@ -736,7 +755,7 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         """Get overall user statistics"""
         total_users = User.objects.count()
         active_users = User.objects.filter(is_active=True).count()
-        banned_users = User.objects.filter(is_active=False).count()
+        banned_users = User.objects.filter(is_active=False, deleted_at__isnull=True).count()
         staff_users = User.objects.filter(is_staff=True).count()
 
         new_users_24h = User.objects.filter(

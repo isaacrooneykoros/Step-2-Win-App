@@ -21,6 +21,7 @@ export const AUDIT_ACTIONS: Record<string, { label: string; tone: BadgeTone; ico
   promote: { label: 'Granted staff', tone: 'warning', icon: ShieldCheck },
   demote: { label: 'Removed staff', tone: 'warning', icon: ShieldOff },
   reset_password: { label: 'Password reset', tone: 'warning', icon: KeyRound },
+  account_deleted: { label: 'Account deleted', tone: 'neutral', icon: Trash2 },
   settings_change: { label: 'Settings changed', tone: 'warning', icon: Settings },
   warn: { label: 'Warned', tone: 'warning', icon: AlertTriangle },
   restrict: { label: 'Restricted', tone: 'danger', icon: ShieldAlert },

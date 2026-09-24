@@ -149,4 +149,34 @@ export const authService = {
     });
     return response.data;
   },
+
+  /**
+   * Can this account be deleted right now? Lists blockers (balance, live challenge, pending withdrawal).
+   */
+  getAccountDeletionEligibility: async (): Promise<AccountDeletionEligibility> => {
+    const response = await api.get<AccountDeletionEligibility>('/api/auth/account/delete/eligibility/');
+    return response.data;
+  },
+
+  /**
+   * Permanently delete (anonymise) the account. Password accounts send `password`;
+   * Google / Apple sign-ups send `confirm: "DELETE"`.
+   */
+  deleteAccount: async (body: { password?: string; confirm?: string }): Promise<{ deleted: boolean; message: string }> => {
+    const response = await api.post<{ deleted: boolean; message: string }>('/api/auth/account/delete/', body);
+    return response.data;
+  },
+};
+
+export type AccountDeletionBlocker = {
+  code: 'wallet_balance' | 'active_challenge' | 'withdrawal_pending' | 'payment_pending' | 'staff_account' | 'already_deleted' | string;
+  message: string;
+};
+
+export type AccountDeletionEligibility = {
+  eligible: boolean;
+  blockers: AccountDeletionBlocker[];
+  requires_password: boolean;
+  confirm_word: string;
+  social_providers: string[];
 };

@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { LogOut } from 'lucide-react';
+import { LogOut, Trash2 } from 'lucide-react';
 import { authService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { useHealthSync } from '../hooks/useHealthSync';
@@ -11,6 +11,9 @@ import { syncReminderNotifications } from '../services/notifications';
 import { listOutboxItems } from '../services/offlineSyncOutbox';
 import { ScreenHeader } from '../components/ui/ScreenHeader';
 import Button from '../components/ui/Button';
+import { ListGroup, ListRow } from '../components/ui/ListRow';
+import { IconTile } from '../components/ui/Pill';
+import { toast } from '../components/ui/Toast';
 import { usePreferences } from '../components/settings/preferences';
 import { useDevicePermissions } from '../components/settings/useDevicePermissions';
 import {
@@ -32,11 +35,13 @@ import { StrideWizardSheet } from '../components/settings/StrideWizardSheet';
 import { StepTrackingSheet } from '../components/settings/StepTrackingSheet';
 import { PermissionsSheet } from '../components/settings/PermissionsSheet';
 import { LogoutSheet } from '../components/settings/LogoutSheet';
+import { DeleteAccountSheet } from '../components/settings/DeleteAccountSheet';
+import { clearLocalUserData } from '../lib/accountCleanup';
 import { useCellularConnection } from '../hooks/useCellularConnection';
 
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || '1.0.0';
 
-type SheetId = 'photo' | 'contact' | 'goal' | 'password' | 'body' | 'wizard' | 'steps' | 'permissions' | 'logout';
+type SheetId = 'photo' | 'contact' | 'goal' | 'password' | 'body' | 'wizard' | 'steps' | 'permissions' | 'logout' | 'delete';
 
 export default function SettingsScreen() {
   const navigate = useNavigate();
@@ -79,6 +84,18 @@ export default function SettingsScreen() {
     await logout();
     navigate('/login');
   };
+
+  // Account deleted on the server: wipe this device's copy of the account, then sign out
+  // (logout also turns the biometric lock off).
+  const queryClient = useQueryClient();
+  const deletedUserId = userId ?? profile?.id;
+  const onAccountDeleted = useCallback(async () => {
+    await clearLocalUserData(deletedUserId);
+    await logout();
+    queryClient.clear();
+    toast({ message: 'Your account has been deleted.', type: 'success' });
+    navigate('/login', { replace: true });
+  }, [deletedUserId, logout, navigate, queryClient]);
 
   // Only count permissions this platform has (iOS: no background location / exact alarms).
   const permissionStates = [permissions.camera, permissions.location, permissions.backgroundLocation, permissions.exactAlarm].filter(
@@ -126,6 +143,16 @@ export default function SettingsScreen() {
           <Button variant="danger-soft" size="lg" fullWidth leftIcon={<LogOut size={18} aria-hidden />} onClick={() => setSheet('logout')}>
             Log out
           </Button>
+          <ListGroup title="Danger zone" className="mt-6">
+            <ListRow
+              leading={<IconTile icon={Trash2} tone="danger" size="sm" />}
+              title="Delete account"
+              subtitle="Remove your account and personal data"
+              destructive
+              chevron
+              onClick={() => setSheet('delete')}
+            />
+          </ListGroup>
           <p className="mt-4 text-center text-caption text-text-muted">
             Step2Win <span className="num">{APP_VERSION}</span>
             {profile ? <> · Signed in as <span className="font-semibold text-text-secondary">{profile.username}</span></> : null}
@@ -148,6 +175,7 @@ export default function SettingsScreen() {
       />
       <PermissionsSheet open={sheet === 'permissions'} onClose={close} permissions={permissions} />
       <LogoutSheet open={sheet === 'logout'} onClose={close} onConfirm={onLogout} username={profile?.username} />
+      <DeleteAccountSheet open={sheet === 'delete'} onClose={close} onDeleted={onAccountDeleted} />
     </div>
   );
 }

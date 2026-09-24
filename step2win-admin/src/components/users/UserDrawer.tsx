@@ -82,13 +82,13 @@ export function UserDrawer({ userId, onClose }: Props) {
       headerAside={
         u && (
           <span className="flex flex-wrap items-center gap-1.5">
-            <StatusBadge size="sm" status={u.is_active ? 'active' : 'banned'} />
+            <StatusBadge size="sm" status={u.is_deleted ? 'deleted' : u.is_active ? 'active' : 'banned'} />
             {u.is_staff && <StatusBadge size="sm" status="staff" />}
           </span>
         )
       }
       footer={
-        u && (
+        u && !u.is_deleted && (
           <>
             <Button size="sm" variant="secondary" leftIcon={<Pencil size={13} />} onClick={() => setAction({ kind: 'edit' })}>Edit details</Button>
             <Button size="sm" variant="secondary" leftIcon={<KeyRound size={13} />} onClick={() => setAction({ kind: 'reset-password' })}>Reset password</Button>

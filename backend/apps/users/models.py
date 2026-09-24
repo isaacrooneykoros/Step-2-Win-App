@@ -114,6 +114,12 @@ class User(AbstractUser):
         help_text="Timestamp when profile picture was last updated",
     )
     privacy_policy_accepted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Set when the account holder deleted their account (PII anonymised; "
+        "money records kept). See apps.users.account_deletion.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -126,6 +132,10 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.username
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
 
     @property
     def available_balance(self):

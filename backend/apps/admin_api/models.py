@@ -196,6 +196,7 @@ class AuditLog(models.Model):
         ("demote", "Demote"),
         ("reset_password", "Reset Password"),
         ("settings_change", "Settings Change"),
+        ("account_deleted", "Account Deleted"),
     ]
 
     RESOURCE_CHOICES = [

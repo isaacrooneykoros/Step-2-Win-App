@@ -277,6 +277,8 @@ REST_FRAMEWORK = {
         "admin_login": "3/minute",
         "register": "3/minute",
         "social_auth": "10/minute",
+        "account_delete": "10/hour",
+        "account_delete_web": "10/hour",
         "password_reset": "3/hour",
         # Financial endpoints
         "deposit": "5/minute",
@@ -340,8 +342,11 @@ _CORS_DEFAULT_DEV = [
     "http://127.0.0.1:5174",
 ]
 _CORS_REQUIRED_WEB = [
-    "https://step-2-win-app.vercel.app",
+    "https://step-2-win-app.vercel.app",  # admin console
+    "https://step-2-win-app.pages.dev",  # customer web app (Cloudflare Pages)
 ]
+# Cloudflare Pages preview deployments of the customer app: <hash>.step-2-win-app.pages.dev
+CORS_ALLOWED_ORIGIN_REGEXES = [r"^https://[a-z0-9-]+\.step-2-win-app\.pages\.dev$"]
 _cors_explicit = [
     o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
@@ -486,8 +491,9 @@ CSRF_TRUSTED_ORIGINS = [
     if origin.strip()
 ]
 
-if "https://step-2-win-app.vercel.app" not in CSRF_TRUSTED_ORIGINS:
-    CSRF_TRUSTED_ORIGINS.append("https://step-2-win-app.vercel.app")
+for _required_origin in ("https://step-2-win-app.vercel.app", "https://step-2-win-app.pages.dev"):
+    if _required_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_required_origin)
 
 # ── Django admin URL — obscured to resist automated scanning ─────────────────
 ADMIN_URL = os.getenv("DJANGO_ADMIN_URL", "").strip()

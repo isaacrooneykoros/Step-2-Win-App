@@ -19,11 +19,12 @@ import { Timestamp, TrustMeter, UserCell } from '../components/users/shared'
 import { useDebounced } from '../components/users/utils'
 import { UserDrawer } from '../components/users/UserDrawer'
 
-type StatusFilter = 'all' | 'active' | 'banned' | 'staff'
+type StatusFilter = 'all' | 'active' | 'banned' | 'deleted' | 'staff'
 const STATUS_ITEMS = [
   { value: 'all' as const, label: 'All' },
   { value: 'active' as const, label: 'Active' },
   { value: 'banned' as const, label: 'Banned' },
+  { value: 'deleted' as const, label: 'Deleted' },
   { value: 'staff' as const, label: 'Staff' },
 ]
 const TRUST_OPTIONS = [
@@ -93,7 +94,7 @@ export function UsersPage() {
       key: 'status', label: 'Status',
       render: (u) => (
         <span className="flex flex-wrap items-center gap-1">
-          <StatusBadge size="sm" status={u.is_active ? 'active' : 'banned'} />
+          <StatusBadge size="sm" status={u.is_deleted ? 'deleted' : u.is_active ? 'active' : 'banned'} />
           {u.is_staff && <StatusBadge size="sm" status="staff" />}
         </span>
       ),

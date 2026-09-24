@@ -102,7 +102,26 @@ Declare the following:
   - Device or other IDs: `ANDROID_ID`-based device ID, used for fraud prevention and session binding.
 - **Purposes:** app functionality, fraud prevention/security, and account management.
 - **Sharing:** none for ads. Payment data goes to the payment processor (IntaSend/M-Pesa) as a service provider, which isn't counted as "sharing" if it's only for processing.
-- **Security:** data is encrypted in transit. Users can request deletion. Check that the account-deletion URL and in-app flow exist, because Play requires both.
+- **Security:** data is encrypted in transit. Users can delete their account in the app and on the web.
+- **Data deletion:**
+  - Answer "Yes, users can request that their data is deleted".
+  - **Delete account URL:** `https://step-2-win-app.onrender.com/account/delete/`. This public page is served by the backend and needs no JavaScript. Users sign in with their username or email and password, then confirm. It follows the same rules as the app. If you move the API to another domain, update this URL.
+  - The in-app path is Settings › Danger zone › **Delete account**.
+  - Tick "some data is kept" and give the reason: "Wallet transactions, M-Pesa payments, withdrawals and challenge results are kept in anonymised form for financial record-keeping and tax obligations. Fraud-prevention and support records are kept without contact details."
+  - Personal info, profile photo, step/health data, precise location and device IDs are deleted straight away.
+
+### Account deletion: what happens
+
+The policy is "anonymise, keep money records". The code is in `backend/apps/users/account_deletion.py`.
+- **Blocked** while the wallet balance is above zero (withdraw first), while a challenge is still pending or active or there's a locked balance, while a withdrawal is pending review, approved or processing, or while an M-Pesa deposit from the last 24 hours is still unconfirmed. Staff accounts are also blocked. The app and the web page show the specific reason and what to do.
+- **Deleted:**
+  - The username, email and phone are replaced with `deleted_<id>` placeholders. The name is cleared.
+  - The profile photo file is removed.
+  - Google and Apple links, health and hourly steps, GPS waypoints, sync events, verification rows and device registrations are deleted. Step sessions are deleted unless they are under an anti-cheat review.
+  - Every session and refresh token is revoked, and sign-in is disabled.
+- **Kept, linked to the anonymised user:** the wallet ledger, M-Pesa payment transactions, withdrawal requests, challenge participation and results, fraud flags and trust scores, legal acknowledgements, and support tickets. On the customer's own ticket messages, the sender name is replaced.
+- **Admin:** an `account_deleted` audit entry is written. It records the reason "self-service" and the channel `app` or `web`, and contains no PII. The admin console shows the user as **Deleted**, and a deleted account can't be unbanned, edited or given a new password.
+- If the user signs up again later, they get a new, empty account.
 
 ## 4. iOS: steps for later, on a Mac or cloud Mac
 
@@ -148,7 +167,8 @@ What's already done in this repo (the `ios/` folder, which Windows generated):
    - Explain that steps come from Motion & Fitness.
    - Explain the KSh entry fees and payouts. Guideline 5.3 covers contests; skill-based fitness contests must follow local law, and the official rules must be in the app.
    - The app offers Continue with Google and Sign in with Apple (guideline 4.8). Apple is shown first on iOS and has the same size as Google. Setup is in `AUTH_SETUP.md`.
-   - **Blocker:** guideline 5.1.1(v) requires in-app account deletion, and Apple token revocation when the account used Sign in with Apple. Neither exists yet. See `AUTH_SETUP.md` › Account deletion.
+   - Account deletion (guideline 5.1.1(v)) is in the app under Settings › Danger zone › **Delete account**. The user re-enters their password, or types DELETE if they signed up with Google or Apple. If the biometric lock is on, they also pass the biometric check. A web page is also available at `https://step-2-win-app.onrender.com/account/delete/`. Tell the reviewer that the demo account must have a zero balance and no live challenge to show the full flow. Otherwise the sheet lists what's blocking deletion.
+   - **Still to do before submitting with Sign in with Apple enabled:** Apple token revocation on deletion is a no-op hook for now (`revoke_apple_tokens` in `backend/apps/users/account_deletion.py`). See `AUTH_SETUP.md` › Account deletion.
 10. **Backend.** CORS already allows `capacitor://localhost`, which is the iOS WebView origin (see `backend/step2win/settings.py`).
 
 ### How iOS step counting works (and what to verify on a real iPhone)

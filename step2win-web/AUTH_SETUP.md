@@ -154,17 +154,26 @@ This runs 31 tests with locally signed tokens and a mocked JWKS. They cover: a v
 - **Setting a password on a Google/Apple-only account.** These accounts get an unusable password, so "Change password" can't be used for them. A "set password" flow would let them sign in with email as well.
 - **M-Pesa phone number.** Google and Apple accounts are created without one, just like the old Google flow. This hasn't been checked yet: confirm that deposits and withdrawals ask for a number before launch.
 
-## Account deletion (App Store 5.1.1(v), and Sign in with Apple token revocation)
+## Account deletion (App Store 5.1.1(v)) and Apple token revocation
 
-The app has **no in-app account deletion**. Only admins can delete accounts. Apple requires in-app deletion for any app that lets people create an account, and Google Play requires an in-app path plus a web URL. If Sign in with Apple is used, deleting the account must also revoke the user's Apple tokens (`POST https://appleid.apple.com/auth/revoke`, which needs the .p8 key).
+Account deletion is built. The policy is "anonymise, keep money records".
+- **In the app:** Settings › Danger zone › **Delete account** (`src/components/settings/DeleteAccountSheet.tsx`).
+- **API:** `GET /api/auth/account/delete/eligibility/` and `POST /api/auth/account/delete/`.
+- **Web (for Google Play):** `https://<backend>/account/delete/`.
+- **Rules:** see `MOBILE_RELEASE.md` › "Account deletion: what happens", and `backend/apps/users/account_deletion.py`.
 
-This wasn't built on purpose: wallet balances, challenge entries, payouts and M-Pesa records make it a product and legal decision. Suggested approach:
+How each kind of account confirms:
+- **Password accounts** re-enter their password.
+- **Google/Apple-only accounts** have no usable password, so they type `DELETE`. The request already carries a valid access token for that user.
+- **Biometric lock:** if it's on, the app also asks for the biometric check first.
+- **On the web page**, Google/Apple-only accounts are told to delete from the app, or to email the support address from System settings.
 
-1. Add Settings › Account › **Delete account**. Explain what happens, and require re-authentication: password, or a fresh Google/Apple sign-in.
-2. Block deletion while there is money in play: a non-zero `wallet_balance` or `locked_balance`, an active challenge, or a pending withdrawal. Offer "withdraw first" instead.
-3. On confirmation (`POST /api/auth/delete-account/`):
-   - Deactivate the user and anonymise personal data: username, email, phone, name, photo, device ids, routes.
-   - Keep the financial ledger and transactions as the law requires, linked to the anonymised id.
-   - Blacklist all refresh tokens and delete the `SocialAccount` rows.
-   - For Apple links, revoke the token. This needs a stored Apple refresh token (from exchanging the authorization code at sign-in with the .p8 key), or an authorization code the app fetches again at deletion time.
-4. Publish a web deletion-request page for the Play Data safety form, and describe the retention period in the privacy policy.
+### Still to do: revoke Apple tokens (needed once Sign in with Apple is live)
+
+When someone deletes an account that used Sign in with Apple, Apple requires us to revoke their tokens (`POST https://appleid.apple.com/auth/revoke`). The hook exists but does nothing yet: `revoke_apple_tokens()` in `backend/apps/users/account_deletion.py` (marked `TODO(apple-signin)`). It only logs that revocation was skipped, and it never blocks deletion.
+
+To finish it:
+1. Create the Sign in with Apple key (.p8). Put `APPLE_TEAM_ID`, `APPLE_KEY_ID` and `APPLE_PRIVATE_KEY` in the backend secret store.
+2. At sign-in, have the app send the Apple `authorizationCode`. Exchange it at `https://appleid.apple.com/auth/token` using a client-secret JWT signed with the .p8 key, and store the returned refresh token encrypted against the `SocialAccount`.
+3. Implement `revoke_apple_tokens`. It needs to call `https://appleid.apple.com/auth/revoke` with `client_id`, `client_secret`, `token=<refresh token>` and `token_type_hint=refresh_token`.
+   - The `SocialAccount` rows are deleted inside the deletion transaction. Collect the stored tokens there, then pass them to the hook, which runs after commit.

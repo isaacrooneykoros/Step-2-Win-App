@@ -43,6 +43,9 @@ class SecurityHeadersMiddleware:
         response["X-Frame-Options"] = "DENY"
         response["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response["Permissions-Policy"] = "geolocation=(self), camera=()"
+        if "Content-Security-Policy" in response:
+            # A view set its own (e.g. the /account/delete/ page's nonce-based policy).
+            return response
         response["Content-Security-Policy"] = os.getenv(
             "CONTENT_SECURITY_POLICY",
             "default-src 'self'; "

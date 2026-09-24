@@ -81,7 +81,9 @@ def filter_users(qs, params):
     if status == "active":
         qs = qs.filter(is_active=True)
     elif status == "banned":
-        qs = qs.filter(is_active=False)
+        qs = qs.filter(is_active=False, deleted_at__isnull=True)
+    elif status == "deleted":
+        qs = qs.filter(deleted_at__isnull=False)
     elif status == "staff":
         qs = qs.filter(is_staff=True)
 

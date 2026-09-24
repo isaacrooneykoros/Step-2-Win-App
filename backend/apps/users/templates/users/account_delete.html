@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Delete your Step2Win account</title>
+<link rel="icon" href="data:,">
+<style nonce="{{ nonce }}">
+  :root {
+    --brand: #14855D; --brand-hover: #0F6E4C; --brand-soft: #E7F4EE;
+    --ink: #17201C; --ink-2: #4A5751; --muted: #5F6B66;
+    --page: #F6F5F1; --card: #FFFFFF; --line: #E3E1DA;
+    --danger: #B42318; --danger-soft: #FDECEA; --warn-soft: #FFF6E0; --warn-ink: #7A4B00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #EEF2EF; --ink-2: #C4CCC8; --muted: #A3AEA9;
+      --page: #0F1412; --card: #171D1A; --line: #2A322E; --brand-soft: #173026;
+      --danger: #F97066; --danger-soft: #3A1714; --warn-soft: #33270C; --warn-ink: #F5C76B;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink);
+    font: 16px/1.55 "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 20px 48px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--ink); }
+  .mark { width: 32px; height: 32px; border-radius: 10px; background: var(--brand); color: #fff;
+          display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 28px 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 17px; margin: 0 0 8px; }
+  p { margin: 0 0 12px; color: var(--ink-2); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 20px; margin-top: 20px; }
+  ul { margin: 0; padding-left: 20px; color: var(--ink-2); }
+  li { margin: 4px 0; }
+  .grid { display: grid; gap: 16px; }
+  @media (min-width: 600px) { .grid { grid-template-columns: 1fr 1fr; } }
+  label { display: block; font-weight: 600; font-size: 14px; margin: 16px 0 6px; color: var(--ink); }
+  input[type=text], input[type=password] {
+    width: 100%; min-height: 48px; padding: 12px 14px; font: inherit; color: var(--ink);
+    background: var(--page); border: 1px solid var(--line); border-radius: 14px;
+  }
+  input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+  .check { display: flex; gap: 10px; align-items: flex-start; margin-top: 18px; font-weight: 400; color: var(--ink-2); }
+  .check input { width: 22px; height: 22px; margin: 1px 0 0; accent-color: var(--danger); flex: none; }
+  button {
+    margin-top: 20px; width: 100%; min-height: 50px; border: 0; border-radius: 14px; cursor: pointer;
+    font: inherit; font-weight: 700; color: #fff; background: var(--danger);
+  }
+  button:hover { filter: brightness(0.95); }
+  .alert { border-radius: 14px; padding: 12px 14px; margin-top: 16px; font-size: 15px; }
+  .alert-error { background: var(--danger-soft); color: var(--danger); }
+  .alert-warn { background: var(--warn-soft); color: var(--warn-ink); }
+  .alert-ok { background: var(--brand-soft); color: var(--ink); }
+  .alert ul { color: inherit; }
+  a { color: var(--brand); font-weight: 600; }
+  .muted { color: var(--muted); font-size: 14px; }
+  footer { margin-top: 28px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><svg width="32" height="32" viewBox="0 0 40 40" aria-hidden="true" focusable="false"><rect width="40" height="40" rx="11" fill="#14855D"/><path d="M11 29h6.5v-6.5H24V16h6.5V9.5" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="30.5" cy="9.5" r="2.6" fill="#F5A30A"/></svg> Step2Win</div>
+
+  {% if state == "deleted" %}
+    <h1>Your account has been deleted</h1>
+    <div class="card" role="status">
+      <p>Your Step2Win account is closed and your personal details have been removed. You've been signed out of every device.</p>
+      <p>We keep an anonymised record of your past payments, withdrawals and challenge results to meet our financial record-keeping and tax obligations.</p>
+      <p class="muted">You can uninstall the app. If you sign up again later it will be a brand-new account.</p>
+    </div>
+  {% else %}
+    <h1>Delete your Step2Win account</h1>
+    <p>You can permanently delete your account here or in the app (Settings &rarr; Delete account). This can't be undone.</p>
+
+    <div class="grid">
+      <section class="card" aria-labelledby="deleted-h">
+        <h2 id="deleted-h">What we delete</h2>
+        <ul>
+          <li>Your username, email, phone number and name</li>
+          <li>Your profile photo</li>
+          <li>Step, health and location (GPS) data</li>
+          <li>Device registrations and all signed-in sessions</li>
+          <li>Links to Google or Apple sign-in</li>
+        </ul>
+      </section>
+      <section class="card" aria-labelledby="kept-h">
+        <h2 id="kept-h">What we keep (anonymised)</h2>
+        <ul>
+          <li>Wallet transactions, M-Pesa payments and withdrawals</li>
+          <li>Challenge entries and results</li>
+          <li>Fraud-prevention and audit records</li>
+          <li>Support tickets</li>
+        </ul>
+        <p class="muted">These no longer show your name or contact details. We keep them to meet financial record-keeping and tax obligations.</p>
+      </section>
+    </div>
+
+    <section class="card" aria-labelledby="before-h">
+      <h2 id="before-h">Before you start</h2>
+      <ul>
+        <li>Withdraw any wallet balance to M-Pesa &mdash; we can't delete an account that still holds money.</li>
+        <li>Wait for any challenge you've joined to finish, and for pending withdrawals to be paid out.</li>
+      </ul>
+    </section>
+
+    <section class="card" aria-labelledby="form-h">
+      <h2 id="form-h">Sign in to confirm</h2>
+
+      {% if state == "blocked" %}
+        <div class="alert alert-warn" role="alert">
+          <strong>Your account can't be deleted yet.</strong>
+          <ul>{% for b in blockers %}<li>{{ b.message }}</li>{% endfor %}</ul>
+          <p class="muted">Open the Step2Win app to sort this out, then come back.</p>
+        </div>
+      {% endif %}
+      {% if error %}
+        <div class="alert alert-error" role="alert" id="form-error">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="" novalidate>
+        {% csrf_token %}
+        <label for="identifier">Username, email or phone</label>
+        <input type="text" id="identifier" name="identifier" value="{{ identifier }}" autocomplete="username"
+               autocapitalize="none" spellcheck="false" required{% if error %} aria-describedby="form-error"{% endif %}>
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+        <label class="check" for="understand">
+          <input type="checkbox" id="understand" name="understand" value="yes">
+          <span>I understand my account will be deleted permanently and can't be recovered.</span>
+        </label>
+        <button type="submit">Delete my account</button>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="social-h">
+      <h2 id="social-h">Signed up with Google or Apple?</h2>
+      <p>Your account doesn't have a Step2Win password. Open the app, go to <strong>Settings &rarr; Delete account</strong> and type {{ confirm_word }} to confirm.</p>
+      <p>Can't use the app? Email <a href="mailto:{{ support_email }}?subject=Delete%20my%20Step2Win%20account">{{ support_email }}</a> from the address on your account and we'll delete it for you.</p>
+    </section>
+  {% endif %}
+
+  <footer><p class="muted">Questions? Contact <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p></footer>
+</main>
+</body>
+</html>

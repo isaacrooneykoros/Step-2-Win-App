@@ -129,6 +129,7 @@ MAINTENANCE_ALLOWED_PREFIXES = (
     "/api/legal/admin/",  # admin content editor
     "/api/auth/refresh/",  # staff token refresh
     "/api/auth/logout/",
+    "/api/auth/account/",  # account deletion must work even during maintenance
     "/api/health/",
     "/api/app/config/",  # lets the customer app learn when maintenance ends
     "/api/payments/mpesa/",  # IntaSend deposit / payout / withdrawal callbacks

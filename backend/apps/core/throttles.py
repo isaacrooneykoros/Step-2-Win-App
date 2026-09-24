@@ -77,3 +77,15 @@ class SocialAuthRateThrottle(AnonRateThrottle):
     """Sign in with Google / Apple — per IP."""
 
     scope = "social_auth"
+
+
+class AccountDeletionRateThrottle(UserRateThrottle):
+    """Self-service account deletion (password re-check) — per user."""
+
+    scope = "account_delete"
+
+
+class AccountDeletionWebRateThrottle(AnonRateThrottle):
+    """Public /account/delete/ page sign-in + delete — per IP."""
+
+    scope = "account_delete_web"

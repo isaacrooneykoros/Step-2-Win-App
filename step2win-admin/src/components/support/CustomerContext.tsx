@@ -46,7 +46,7 @@ export function CustomerContext({ ticketId, userId, onOpenTicket }: CustomerCont
 function CustomerBody({ data, ticketId, onOpenTicket }: { data: Awaited<ReturnType<typeof consoleApi.userOverview>>; ticketId: number; onOpenTicket: (id: number) => void }) {
   const u = data.user
   const otherTickets = data.tickets.filter((t) => t.id !== ticketId).slice(0, 5)
-  const accountStatus = u.is_banned ? 'banned' : u.is_active ? 'active' : 'inactive'
+  const accountStatus = u.is_deleted ? 'deleted' : u.is_banned ? 'banned' : u.is_active ? 'active' : 'inactive'
   return (
     <>
       <SectionTitle aside={<Link to={`/users?user=${u.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline">Open profile <ExternalLink size={11} aria-hidden /></Link>}>

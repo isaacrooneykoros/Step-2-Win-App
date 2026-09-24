@@ -1,7 +1,7 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from . import auth_views, views
+from . import account_views, auth_views, views
 
 app_name = "users"
 
@@ -29,6 +29,17 @@ urlpatterns = [
         "sessions/revoke-all/",
         auth_views.RevokeAllSessionsView.as_view(),
         name="revoke_all_sessions",
+    ),
+    # Self-service account deletion (App Store 5.1.1(v) / Google Play)
+    path(
+        "account/delete/eligibility/",
+        account_views.AccountDeletionEligibilityView.as_view(),
+        name="account_delete_eligibility",
+    ),
+    path(
+        "account/delete/",
+        account_views.AccountDeletionView.as_view(),
+        name="account_delete",
     ),
     # User profile and settings
     path("profile/", views.ProfileView.as_view(), name="profile"),

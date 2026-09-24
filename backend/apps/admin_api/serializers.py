@@ -127,6 +127,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
     xp_profile = serializers.SerializerMethodField()
     badges_count = serializers.SerializerMethodField()
     is_banned = serializers.SerializerMethodField()
+    is_deleted = serializers.SerializerMethodField()
     total_deposited = serializers.SerializerMethodField()
     available_balance = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
@@ -158,6 +159,8 @@ class AdminUserSerializer(serializers.ModelSerializer):
             "is_active",
             "is_staff",
             "is_banned",
+            "is_deleted",
+            "deleted_at",
             "device_platform",
             "date_joined",
             "last_login",
@@ -177,6 +180,8 @@ class AdminUserSerializer(serializers.ModelSerializer):
             "total_earned",
             "current_streak",
             "is_banned",
+            "is_deleted",
+            "deleted_at",
             "date_joined",
             "last_login",
             "total_deposited",
@@ -185,7 +190,10 @@ class AdminUserSerializer(serializers.ModelSerializer):
         ]
 
     def get_is_banned(self, obj) -> bool:
-        return not obj.is_active
+        return not obj.is_active and obj.deleted_at is None
+
+    def get_is_deleted(self, obj) -> bool:
+        return obj.deleted_at is not None
 
     def get_trust_score(self, obj) -> int:
         from apps.admin_api.console import trust_fields

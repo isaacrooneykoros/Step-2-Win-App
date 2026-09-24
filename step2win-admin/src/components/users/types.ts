@@ -27,6 +27,9 @@ export interface ConsoleUser {
   is_active: boolean
   is_staff: boolean
   is_banned: boolean
+  /** Deleted by the account holder (self-service): PII anonymised, money records kept. */
+  is_deleted?: boolean
+  deleted_at?: string | null
   device_platform: string | null
   date_joined: string
   last_login: string | null
