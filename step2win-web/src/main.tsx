@@ -7,6 +7,7 @@ import { initNativeShell } from './lib/nativeShell';
 import { initBiometricLock } from './lib/biometricLock';
 import { applyThemeMode, loadThemeMode } from './config/theme';
 import { preloadBootSplash, shouldShowBootSplash } from './components/splash/BootSplash';
+import { startServerWarmup } from './services/serverWarmup';
 
 // Apply the in-app "reduce motion" preference before first paint (Settings keeps it in sync afterwards).
 try {
@@ -22,6 +23,9 @@ try {
 } catch {
   // Storage unavailable: App applies the default theme.
 }
+
+// Wake the hosted API now, so it's ready by the time the splash and onboarding finish.
+startServerWarmup();
 
 // Start fetching the splash animation chunks while React renders the static first frame.
 if (shouldShowBootSplash()) preloadBootSplash();

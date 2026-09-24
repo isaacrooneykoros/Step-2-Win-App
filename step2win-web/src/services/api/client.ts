@@ -2,6 +2,7 @@ import axios, { AxiosError } from 'axios';
 import { Preferences } from '@capacitor/preferences';
 import { resolveApiBaseUrl } from '../../config/network';
 import { notifyFeatureDisabled, showMaintenance } from './platformNotices';
+import { noteServerActivity } from '../serverWarmup';
 
 const api = axios.create({
   baseURL: resolveApiBaseUrl(),
@@ -76,7 +77,10 @@ const processQueue = (error: any, token: string | null = null) => {
 };
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    noteServerActivity();
+    return response;
+  },
   async (error: AxiosError) => {
     const originalRequest = error.config;
 

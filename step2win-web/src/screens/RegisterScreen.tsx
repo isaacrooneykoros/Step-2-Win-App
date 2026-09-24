@@ -9,6 +9,7 @@ import { AuthLayout, FormError, PasswordField, PasswordStrengthMeter } from '../
 import { SocialSignIn } from '../components/auth/SocialSignIn';
 import { LegalSheet, type LegalSlug } from '../components/auth/LegalSheet';
 import { useToast } from '../components/ui/Toast';
+import { ServerWakeNote } from '../components/auth/ServerWakeNote';
 
 export default function RegisterScreen() {
   const navigate = useNavigate();
@@ -184,6 +185,7 @@ export default function RegisterScreen() {
         <Button type="submit" size="lg" fullWidth isLoading={isLoading} disabled={socialBusy} loadingText="Creating account">
           Create account
         </Button>
+        <ServerWakeNote active={isLoading} />
       </form>
 
       <SocialSignIn

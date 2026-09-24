@@ -9,6 +9,7 @@ import { Button } from '../components/ui/Button';
 import { AuthLayout, FormError, PasswordField } from '../components/auth/AuthParts';
 import { SocialSignIn } from '../components/auth/SocialSignIn';
 import { useToast } from '../components/ui/Toast';
+import { ServerWakeNote } from '../components/auth/ServerWakeNote';
 
 export default function LoginScreen() {
   const navigate = useNavigate();
@@ -112,6 +113,7 @@ export default function LoginScreen() {
         <Button type="submit" size="lg" fullWidth isLoading={isLoading} disabled={socialBusy} loadingText="Signing in" className="mt-2">
           Sign in
         </Button>
+        <ServerWakeNote active={isLoading} />
       </form>
 
       <SocialSignIn mode="login" disabled={isLoading} onBusyChange={setSocialBusy} onError={setError} />

@@ -1,0 +1,37 @@
+name: Keep API warm
+
+# The Render free plan puts the API to sleep after ~15 minutes without traffic and a
+# cold start takes ~30 s. Ping it every 10 minutes from 05:00 to 23:59 Kenya time
+# (02:00-20:59 UTC) so users rarely meet a sleeping server. Overnight the app wakes it
+# itself during the splash. About 590 instance hours a month, inside the 750 free hours.
+# Note: GitHub pauses scheduled workflows after 60 days without repository activity.
+
+on:
+  schedule:
+    - cron: "*/10 2-20 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: keep-warm
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping health (database and cache included)
+        run: |
+          for attempt in 1 2 3 4; do
+            code=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 60 \
+              "https://step-2-win-app.onrender.com/api/health/?deep=1" || true)
+            if [ "$code" = "200" ]; then
+              echo "API is up: $(cat /tmp/health.json)"
+              exit 0
+            fi
+            echo "Attempt $attempt got HTTP $code, retrying"
+            sleep 10
+          done
+          echo "::warning::API did not answer after 4 attempts"

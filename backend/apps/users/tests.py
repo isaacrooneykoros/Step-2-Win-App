@@ -13,6 +13,13 @@ class AuthAndHealthTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data.get("status"), "ok")
+        self.assertNotIn("checks", response.data)
+
+    def test_deep_health_warms_database_and_cache(self):
+        response = self.client.get("/api/health/?deep=1")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["checks"], {"database": "ok", "cache": "ok"})
 
     def test_register_login_and_profile_flow(self):
         username = f"testuser_{random.randint(100000, 999999)}"
