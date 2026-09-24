@@ -71,8 +71,8 @@ jobs:
           distribution: 'temurin'
           java-version: '21'  # AGP 8.13 / Capacitor 8 build with JDK 21
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # GitHub's ubuntu-latest image ships the Android SDK (ANDROID_HOME) with licenses
+      # accepted; Gradle fetches the missing API 36 platform itself.
 
       - name: Install web dependencies
         run: npm ci

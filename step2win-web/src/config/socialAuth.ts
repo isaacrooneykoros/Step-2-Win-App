@@ -14,8 +14,15 @@ const GOOGLE_ID_SUFFIX = '.apps.googleusercontent.com';
 
 const clean = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 
+/**
+ * Step2Win's Google OAuth "Web application" client id (public). Default so every build
+ * (web, Android, CI) offers Google sign-in; VITE_GOOGLE_CLIENT_ID overrides it. The backend's
+ * GOOGLE_OAUTH_CLIENT_IDS must include the same id.
+ */
+const DEFAULT_GOOGLE_WEB_CLIENT_ID = '613879611722-ja8q4q1j8tdemag36mo8jk2srmhh7npj.apps.googleusercontent.com';
+
 /** OAuth "Web application" client id. Used by the web popup and by Android as serverClientId. */
-export const GOOGLE_WEB_CLIENT_ID = clean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
+export const GOOGLE_WEB_CLIENT_ID = clean(import.meta.env.VITE_GOOGLE_CLIENT_ID) || DEFAULT_GOOGLE_WEB_CLIENT_ID;
 /** OAuth "iOS" client id (bundle id com.step2win.app). */
 export const GOOGLE_IOS_CLIENT_ID = clean(import.meta.env.VITE_GOOGLE_IOS_CLIENT_ID);
 /** Apple Services ID for Sign in with Apple JS on the website (e.g. com.step2win.web). */
