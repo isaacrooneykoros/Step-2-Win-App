@@ -83,3 +83,22 @@ class WalletIntegrationTests(APITestCase):
         self.assertEqual(withdrawal.amount_kes, Decimal("20.00"))
         self.assertEqual(withdrawal.status, "pending_review")
         self.assertEqual(withdrawal.method, "mpesa")
+
+    def test_transaction_list_date_filter_validation(self):
+        self.client.force_authenticate(user=self.user)
+
+        # Invalid start_date and end_date should not crash with HTTP 500
+        response = self.client.get(
+            '/api/wallet/transactions/',
+            {'start_date': 'invalid-date', 'end_date': 'not-a-datetime'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Valid ISO date strings should be accepted
+        response_valid = self.client.get(
+            '/api/wallet/transactions/',
+            {'start_date': '2025-01-01', 'end_date': '2025-12-31'},
+            format='json',
+        )
+        self.assertEqual(response_valid.status_code, status.HTTP_200_OK)
