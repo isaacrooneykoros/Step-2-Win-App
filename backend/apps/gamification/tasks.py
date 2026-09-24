@@ -41,6 +41,69 @@ def award_daily_login_xp():
     return f"Awarded daily login XP to {awarded_count} users"
 
 
+def award_daily_step_xp(user, day, steps):
+    """
+    Award step XP for one day's accepted steps, using the admin settings
+    xp_per_step and daily_goal_bonus_xp (apps.admin_api.platform.xp_rates).
+
+    Idempotent across re-syncs: the day's step XP is recorded per date, so a
+    re-sync only awards the difference between what the day's steps are now
+    worth and what was already awarded (never negative), and the goal bonus is
+    awarded at most once per day. Concurrent syncs are serialised on the
+    user's XP profile row.
+    """
+    import math
+    from decimal import Decimal
+
+    from django.db import transaction
+    from django.db.models import Sum
+
+    from apps.admin_api.platform import xp_rates
+
+    per_step, goal_bonus = xp_rates()
+    day_key = str(day)
+    steps = int(steps or 0)
+    awarded = 0
+    with transaction.atomic():
+        UserXP.objects.get_or_create(user=user)
+        UserXP.objects.select_for_update().get(user=user)
+
+        target = int(math.floor(Decimal(steps) * per_step))
+        already = (
+            XPEvent.objects.filter(
+                user=user, event_type="daily_steps", metadata__date=day_key
+            ).aggregate(total=Sum("amount"))["total"]
+            or 0
+        )
+        if target > already:
+            XPEvent.objects.create(
+                user=user,
+                event_type="daily_steps",
+                amount=target - already,
+                description=f"Steps on {day_key}",
+                metadata={"date": day_key, "steps": steps},
+            )
+            awarded += target - already
+
+        goal = int(getattr(user, "daily_goal", 0) or 10000)
+        if (
+            goal_bonus > 0
+            and steps >= goal
+            and not XPEvent.objects.filter(
+                user=user, event_type="daily_goal", metadata__date=day_key
+            ).exists()
+        ):
+            XPEvent.objects.create(
+                user=user,
+                event_type="daily_goal",
+                amount=goal_bonus,
+                description=f"Daily goal reached on {day_key}",
+                metadata={"date": day_key, "goal": goal},
+            )
+            awarded += goal_bonus
+    return awarded
+
+
 @shared_task(name="gamification.award_challenge_xp")
 def award_challenge_xp(
     user_id, event_type="challenge_complete", amount=50, challenge_id=None

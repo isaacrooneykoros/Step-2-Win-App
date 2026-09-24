@@ -92,6 +92,7 @@ export function CreateChallengeSheet({
   const endLabel = formatDay(endDate.toISOString());
   const insufficient = availableBalance !== null && entry > availableBalance;
   const payoutRule = form.isPublic ? 'proportional' : form.winCondition;
+  const needsApproval = form.isPublic && config?.public_challenges_need_approval === true;
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -421,7 +422,9 @@ export function CreateChallengeSheet({
           <NextSteps
             steps={[
               `${formatKES(entry)} is held in the challenge pool and you join as the first participant.`,
-              "Share the invite code we'll show you so others can join.",
+              needsApproval
+                ? "Step2Win reviews new public challenges first. Once approved it appears in the lobby and others can join; if not, your entry is refunded."
+                : "Share the invite code we'll show you so others can join.",
               `It ends on ${endLabel}. Everyone who walks ${formatSteps(milestone)} steps qualifies, and the pool is paid out by the ${WIN_CONDITION_COPY[payoutRule].label.toLowerCase()} rule after the platform fee. If nobody qualifies, entries are refunded.`,
             ]}
           />

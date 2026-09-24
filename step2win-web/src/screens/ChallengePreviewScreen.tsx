@@ -161,7 +161,7 @@ export default function ChallengePreviewScreen() {
     );
   }
 
-  const canJoin = !challenge.user_is_joined && challenge.spots_remaining > 0 && ['pending', 'active'].includes(challenge.status);
+  const canJoin = !challenge.user_is_joined && challenge.spots_remaining > 0 && challenge.status === 'active';
   const entry = toNumber(challenge.entry_fee);
   const pool = toNumber(challenge.effective_pool_kes);
   const bonus = toNumber(challenge.platform_bonus_kes);

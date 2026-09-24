@@ -31,7 +31,7 @@ function daysLeft(c: ChallengeRow): string {
   const end = new Date(`${c.end_date}T23:59:59`).getTime()
   const start = new Date(`${c.start_date}T00:00:00`).getTime()
   const now = Date.now()
-  if (c.status === 'pending') return start > now ? `starts in ${Math.ceil((start - now) / 86_400_000)}d` : 'start date passed'
+  if (c.status === 'pending') return start > now ? `starts in ${Math.ceil((start - now) / 86_400_000)}d` : 'starts when approved'
   if (c.status !== 'active') return ''
   const d = Math.ceil((end - now) / 86_400_000)
   return d <= 0 ? 'ends today' : `${d}d left`

@@ -6,7 +6,8 @@ from django.utils import timezone
 
 def cancel_challenge(challenge, reason=""):
     """
-    Cancel an active challenge and release all locked balances.
+    Cancel an active (or awaiting-approval "pending") challenge and release all
+    locked balances.
     Creates refund transactions for all participants.
 
     Args:
@@ -14,7 +15,7 @@ def cancel_challenge(challenge, reason=""):
         reason: Optional reason for cancellation
 
     Returns:
-        bool: True if cancelled successfully, False if not in 'active' status
+        bool: True if cancelled successfully, False if not 'active' or 'pending'
     """
     import logging
 
@@ -26,7 +27,7 @@ def cancel_challenge(challenge, reason=""):
 
     with transaction.atomic():
         challenge = challenge.__class__.objects.select_for_update().get(id=challenge.id)
-        if challenge.status != "active":
+        if challenge.status not in ("active", "pending"):
             logger.warning(
                 f"Cannot cancel challenge {challenge.id}: status is {challenge.status}"
             )
@@ -278,5 +279,10 @@ def finalize_expired_challenges(today=None):
     for challenge in expired:
         if finalize_challenge(challenge):
             finalized += 1
+
+    # Challenges still awaiting approval when their end date passes can never
+    # run: close them through the normal cancel path so entries are refunded.
+    for challenge in Challenge.objects.filter(status="pending", end_date__lt=target_date):
+        cancel_challenge(challenge, reason="Not approved before its end date")
 
     return finalized

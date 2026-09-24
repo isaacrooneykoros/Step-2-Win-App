@@ -57,6 +57,12 @@ def _alert_new_non_topup_accounts(suspicious_users, window_start, window_end):
         logger.warning("No recipient emails configured for non-topup funding alert")
         return
 
+    from apps.admin_api.platform import notifications_email_enabled
+
+    if not notifications_email_enabled():
+        logger.info("Notification emails are switched off; funding alert logged only")
+        return
+
     try:
         send_mail(
             subject=f"[Step2Win] Non-topup funding alert ({len(suspicious_users)} users)",

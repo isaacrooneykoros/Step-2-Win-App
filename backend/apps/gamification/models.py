@@ -103,6 +103,8 @@ class XPEvent(models.Model):
         ("challenge_complete", "Challenge Complete"),
         ("challenge_win", "Challenge Win"),
         ("step_milestone", "Step Milestone"),
+        ("daily_steps", "Daily Steps"),
+        ("daily_goal", "Daily Goal Reached"),
         ("streak_milestone", "Streak Milestone"),
         ("level_up", "Level Up"),
         ("manual_award", "Manual Award"),

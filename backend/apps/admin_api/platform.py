@@ -47,11 +47,23 @@ FEATURES = {
         "withdrawals_enabled",
         "Withdrawals are paused for a short while. Your balance is safe; please try again later.",
     ),
-    "referrals": (
-        "referral_program_enabled",
-        "The referral programme is not available right now.",
-    ),
+    # referral_program_enabled is deliberately NOT a feature here: there is no
+    # referral programme yet, so the switch is hidden from the admin console and
+    # the app. The DB column is kept (dropping it would need a destructive
+    # migration); wire it back in here when a referral feature ships.
 }
+
+# Challenge entry fee range (whole shillings). Used when the stored settings are
+# missing or unusable; the server cap mirrors Challenge.entry_fee's validator.
+ENTRY_FEE_DEFAULT_MIN = 50
+ENTRY_FEE_DEFAULT_MAX = 10000
+ENTRY_FEE_SERVER_CAP = 10000
+ENTRY_FEE_SUGGESTIONS = [100, 250, 500, 1000, 2000]
+_NICE_FEES = [10, 20, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000]
+
+# Challenge size bounds; the upper one mirrors Challenge.max_participants' validator.
+PARTICIPANTS_FLOOR = 2
+PARTICIPANTS_SERVER_CAP = 1000
 
 DEFAULT_MAINTENANCE_MESSAGE = (
     "Step2Win is getting a quick upgrade. We'll be right back."
@@ -89,6 +101,80 @@ def minimum_withdrawal_kes() -> Decimal:
     return max(stored, floor)
 
 
+def entry_fee_range() -> tuple[int, int]:
+    """(min, max) whole-shilling entry fee for new challenges."""
+    import math
+
+    s = current_settings()
+    try:
+        lo = math.ceil(Decimal(str(s.min_challenge_entry_fee)))
+        hi = math.floor(Decimal(str(s.max_challenge_entry_fee)))
+    except Exception:
+        return ENTRY_FEE_DEFAULT_MIN, ENTRY_FEE_DEFAULT_MAX
+    lo = max(1, lo)
+    hi = min(ENTRY_FEE_SERVER_CAP, hi)
+    if lo >= hi:
+        return ENTRY_FEE_DEFAULT_MIN, ENTRY_FEE_DEFAULT_MAX
+    return lo, hi
+
+
+def entry_fee_suggestions(lo: int, hi: int) -> list[int]:
+    """Quick-pick amounts inside [lo, hi]: the usual ladder, or a spread of round numbers."""
+    picks = [v for v in ENTRY_FEE_SUGGESTIONS if lo <= v <= hi]
+    if len(picks) >= 3:
+        return picks
+    pool = sorted({lo, hi, *(v for v in _NICE_FEES if lo < v < hi)})
+    if len(pool) <= 5:
+        return pool
+    return [pool[i] for i in sorted({round(i * (len(pool) - 1) / 4) for i in range(5)})]
+
+
+def max_challenge_participants() -> int:
+    stored = int(current_settings().max_challenge_participants or PARTICIPANTS_SERVER_CAP)
+    return min(PARTICIPANTS_SERVER_CAP, max(PARTICIPANTS_FLOOR, stored))
+
+
+def challenge_needs_approval(is_public: bool) -> bool:
+    """New public challenges wait in the admin approval queue when the switch is on.
+
+    Private (invite-only) challenges never need approval: they are not listed in
+    the public lobby, only people with the code can join.
+    """
+    return bool(is_public) and bool(current_settings().challenge_approval_required)
+
+
+def xp_rates() -> tuple[Decimal, int]:
+    """(XP per accepted step, bonus XP for reaching the daily step goal)."""
+    s = current_settings()
+    per_step = max(Decimal("0"), Decimal(str(s.xp_per_step or 0)))
+    return per_step, max(0, int(s.daily_goal_bonus_xp or 0))
+
+
+def withdrawal_processing_hours() -> int:
+    return max(1, int(current_settings().withdrawal_processing_time or 24))
+
+
+def withdrawal_review_phrase() -> str:
+    """'within 24 hours' / 'within 2 days' for customer-facing copy."""
+    hours = withdrawal_processing_hours()
+    if hours % 24 == 0 and hours >= 48:
+        return f"within {hours // 24} days"
+    return f"within {hours} hour{'s' if hours != 1 else ''}"
+
+
+def notifications_email_enabled() -> bool:
+    """Master switch for operational notification emails (admin alerts etc.).
+
+    Every notification send should check this. Emails a customer explicitly asks
+    for (e.g. a password reset link) are not notifications and must not be gated.
+    """
+    try:
+        return bool(current_settings().email_notifications_enabled)
+    except Exception:  # settings table unavailable: keep alerts flowing
+        logger.exception("Could not read email_notifications_enabled")
+        return True
+
+
 def maintenance_message(s: SystemSettings | None = None) -> str:
     s = s or current_settings()
     return (s.maintenance_message or "").strip() or DEFAULT_MAINTENANCE_MESSAGE
@@ -111,7 +197,7 @@ def app_config(request):
             "withdrawals": {
                 "minimum_kes": str(minimum_withdrawal_kes()),
                 "maximum_kes": str(getattr(django_settings, "MAX_WITHDRAWAL_KES", "")),
-                "processing_hours": s.withdrawal_processing_time,
+                "processing_hours": withdrawal_processing_hours(),
             },
             "support_email": s.support_email,
             # Lets the app hide a sign-in button the server can't verify yet.

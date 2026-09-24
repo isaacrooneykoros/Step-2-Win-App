@@ -129,7 +129,10 @@ export default function ChallengesScreen() {
       setShowCreateModal(false);
       setCreatedChallenge(data);
       setShowCreated(true);
-      showToast({ message: 'Challenge created successfully!', type: 'success' });
+      showToast({
+        message: data.status === 'pending' ? 'Challenge sent for approval' : 'Challenge created successfully!',
+        type: 'success',
+      });
     },
     onError: (error: any) => {
       setCreateError(describeCreateError(error));
@@ -567,8 +570,14 @@ export default function ChallengesScreen() {
       <Sheet
         open={showCreated}
         onClose={() => setShowCreated(false)}
-        title="Challenge created"
-        description={createdChallenge ? `${createdChallenge.name} is live. Share the code so others can join.` : undefined}
+        title={createdChallenge?.status === 'pending' ? 'Sent for approval' : 'Challenge created'}
+        description={
+          createdChallenge
+            ? createdChallenge.status === 'pending'
+              ? `${createdChallenge.name} goes live once Step2Win approves it. Friends can join with this code after that.`
+              : `${createdChallenge.name} is live. Share the code so others can join.`
+            : undefined
+        }
         footer={
           <div className="flex gap-3 pb-3">
             <Button variant="outline" size="lg" onClick={() => void downloadQRCode()} leftIcon={<Download size={18} aria-hidden />}>

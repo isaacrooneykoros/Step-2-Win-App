@@ -4,7 +4,10 @@ Each sensitive endpoint gets its own named rate limit.
 Rates are registered in settings.py REST_FRAMEWORK.DEFAULT_THROTTLE_RATES.
 """
 
-from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+import hashlib
+
+from rest_framework.throttling import (AnonRateThrottle, SimpleRateThrottle,
+                                       UserRateThrottle)
 
 
 class LoginRateThrottle(AnonRateThrottle):
@@ -32,9 +35,38 @@ class WithdrawalRateThrottle(UserRateThrottle):
 
 
 class PasswordResetRateThrottle(AnonRateThrottle):
-    """3 password reset requests per hour per IP — prevents email flooding."""
+    """Password reset code requests per IP — prevents email flooding."""
 
     scope = "password_reset"
+
+
+class PasswordResetIdentifierRateThrottle(SimpleRateThrottle):
+    """
+    Password reset code requests per *identifier* (email / username / phone), whoever asks.
+    Keyed by a hash of the normalised identifier so no address ends up in the cache keys.
+    Applies equally to unknown identifiers, so a 429 reveals nothing about accounts.
+    """
+
+    scope = "password_reset_identifier"
+
+    def get_cache_key(self, request, view):
+        identifier = str(request.data.get("identifier") or "").strip().lower()
+        if not identifier:
+            return None
+        digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:32]
+        return self.cache_format % {"scope": self.scope, "ident": digest}
+
+
+class PasswordResetVerifyRateThrottle(AnonRateThrottle):
+    """Code verification attempts per IP (each code also locks after 5 wrong tries)."""
+
+    scope = "password_reset_verify"
+
+
+class PasswordResetConfirmRateThrottle(AnonRateThrottle):
+    """New-password submissions per IP."""
+
+    scope = "password_reset_confirm"
 
 
 class StepSyncRateThrottle(UserRateThrottle):

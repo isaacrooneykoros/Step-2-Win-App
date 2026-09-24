@@ -279,7 +279,11 @@ REST_FRAMEWORK = {
         "social_auth": "10/minute",
         "account_delete": "10/hour",
         "account_delete_web": "10/hour",
-        "password_reset": "3/hour",
+        # Password reset: per IP generous (mobile carriers use CGNAT), per identifier strict.
+        "password_reset": "20/hour",
+        "password_reset_identifier": "5/hour",
+        "password_reset_verify": "30/hour",
+        "password_reset_confirm": "20/hour",
         # Financial endpoints
         "deposit": "5/minute",
         "withdrawal": "3/minute",
@@ -665,6 +669,30 @@ if os.getenv("SENTRY_DSN"):
         traces_sample_rate=0.1,
         environment="production" if not DEBUG else "development",
     )
+
+# ── Email (password reset codes, account notices) ──────────────────────────────
+# Any SMTP transactional provider works (Brevo, Resend, SendGrid, Mailgun). See EMAIL_SETUP.md.
+# EMAIL_HOST unset: console backend in development/test (messages printed to the log);
+# in production a no-op backend, and apps.core.emails logs "email not configured" instead of crashing.
+EMAIL_HOST = os.getenv("EMAIL_HOST", "").strip()
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587") or 587)
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "").strip()
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "").strip()
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").strip().lower() == "true"
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False").strip().lower() == "true" and not EMAIL_USE_TLS
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "10") or 10)
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "Step2Win <no-reply@step2win.app>").strip()
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
+EMAIL_CONFIGURED = bool(EMAIL_HOST)
+if EMAIL_CONFIGURED:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+elif ENVIRONMENT == "production":
+    EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+# Send transactional mail on a background thread so SMTP latency can't reveal whether an
+# account exists (password reset) or slow the request down. Tests set this to False.
+EMAIL_SEND_ASYNC = os.getenv("EMAIL_SEND_ASYNC", "True").strip().lower() == "true"
 
 # ── Structured logging ─────────────────────────────────────────────────────────
 os.makedirs(os.path.join(BASE_DIR, "logs"), exist_ok=True)

@@ -5,7 +5,7 @@ import { useAuthStore } from '../store/authStore';
 import { resolveApiBaseUrl } from '../config/network';
 import Input from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
-import { AuthLayout, FormError, PasswordField } from '../components/auth/AuthParts';
+import { AuthLayout, FormError, PasswordField, PasswordStrengthMeter } from '../components/auth/AuthParts';
 import { SocialSignIn } from '../components/auth/SocialSignIn';
 import { LegalSheet, type LegalSlug } from '../components/auth/LegalSheet';
 import { useToast } from '../components/ui/Toast';
@@ -33,15 +33,6 @@ export default function RegisterScreen() {
     }
     return typeof value === 'string' ? value : '';
   };
-
-  const getPasswordStrength = (password: string) => {
-    if (password.length === 0) return { level: 0, label: '', color: 'bg-bg-input' };
-    if (password.length < 6) return { level: 1, label: 'Weak', color: 'bg-danger' };
-    if (password.length < 10) return { level: 2, label: 'Fair', color: 'bg-warning' };
-    return { level: 3, label: 'Strong', color: 'bg-success' };
-  };
-
-  const passwordStrength = getPasswordStrength(formData.password);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -164,23 +155,7 @@ export default function RegisterScreen() {
           autoComplete="new-password"
           enterKeyHint="next"
         />
-        {formData.password && (
-          <div className="-mt-2 mb-4" aria-live="polite">
-            <div className="flex gap-1" aria-hidden>
-              {[1, 2, 3].map((level) => (
-                <span
-                  key={level}
-                  className={`h-1 flex-1 rounded-full transition-colors duration-normal ${
-                    passwordStrength.level >= level ? passwordStrength.color : 'bg-bg-input'
-                  }`}
-                />
-              ))}
-            </div>
-            <p className="mt-1.5 text-caption text-text-muted">
-              Strength: <span className="font-semibold text-text-secondary">{passwordStrength.label}</span>
-            </p>
-          </div>
-        )}
+        <PasswordStrengthMeter password={formData.password} />
 
         <PasswordField
           label="Confirm password"

@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   CalendarRange,
   CheckCircle2,
+  Clock,
   Globe,
   Lock,
   LogOut,
@@ -214,6 +215,8 @@ export default function ChallengeDetailScreen() {
   const statusMeta = challengeStatusMeta(status);
   const isCompleted = status === 'completed';
   const isOpen = status === 'active' || status === 'pending';
+  // "pending" = waiting for admin approval: not listed and not joinable yet.
+  const awaitingApproval = status === 'pending';
   const milestone = challenge.milestone;
   const day = challengeDayProgress(challenge.start_date, challenge.end_date);
   const totalParticipants = leaderboard.length || challenge.current_participants;
@@ -240,9 +243,9 @@ export default function ChallengeDetailScreen() {
   const rule = winConditionRule(challenge.win_condition, milestone);
 
   const canLeave = !!userParticipant && (status === 'pending' || (status === 'active' && localToday() <= challenge.start_date));
-  const canInvite = !!challenge.invite_code && isOpen && !challenge.is_full;
+  const canInvite = !!challenge.invite_code && status === 'active' && !challenge.is_full;
   const canRematch = isCompleted && challenge.is_private && !!userParticipant;
-  const showJoin = !userParticipant && isOpen && !challenge.is_full;
+  const showJoin = !userParticipant && status === 'active' && !challenge.is_full;
 
   return (
     <div className="pb-nav">
@@ -302,6 +305,19 @@ export default function ChallengeDetailScreen() {
               <span>{formatCalendarDay(challenge.end_date)}</span>
             </div>
           </div>
+
+          {awaitingApproval && (
+            <div className="mt-5 flex items-start gap-3 rounded-card bg-warning-soft p-4" role="status">
+              <Clock size={18} className="mt-0.5 shrink-0 text-warning" aria-hidden />
+              <div className="min-w-0">
+                <p className="text-callout font-semibold text-text-primary">Waiting for approval</p>
+                <p className="mt-0.5 text-caption text-text-secondary">
+                  Step2Win reviews new public challenges before they appear in the lobby. Once approved it goes live and others can join. If
+                  it isn’t approved, your entry is refunded to your wallet.
+                </p>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* ── Your performance ─────────────────────────────────── */}

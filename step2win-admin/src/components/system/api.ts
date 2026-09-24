@@ -16,7 +16,6 @@ export interface SystemSettings {
   registrations_enabled: boolean
   challenges_enabled: boolean
   withdrawals_enabled: boolean
-  referral_program_enabled: boolean
   xp_per_step: string
   daily_goal_bonus_xp: number
   admin_email: string

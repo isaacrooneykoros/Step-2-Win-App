@@ -850,6 +850,16 @@ def sync_health(request):
         logger.warning("Duplicate step sync rejected for user=%s date=%s", user.id, date)
         return Response({"error": "Duplicate sync request."}, status=409)
 
+    # XP for the day's accepted steps (admin: xp_per_step / daily_goal_bonus_xp).
+    # Flagged or blocked syncs earn nothing; re-syncs only add the difference.
+    if not is_suspicious and not result.should_block:
+        try:
+            from apps.gamification.tasks import award_daily_step_xp
+
+            award_daily_step_xp(user, date, record.steps)
+        except Exception:
+            logger.exception("Step XP award failed for user=%s date=%s", user.id, date)
+
     from apps.challenges.models import Challenge, Participant
     from apps.challenges.services import finalize_expired_challenges
 

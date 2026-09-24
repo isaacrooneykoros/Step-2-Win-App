@@ -72,6 +72,36 @@ export const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(fu
   );
 });
 
+function getPasswordStrength(password: string) {
+  if (password.length === 0) return { level: 0, label: '', color: 'bg-bg-input' };
+  if (password.length < 6) return { level: 1, label: 'Weak', color: 'bg-danger' };
+  if (password.length < 10) return { level: 2, label: 'Fair', color: 'bg-warning' };
+  return { level: 3, label: 'Strong', color: 'bg-success' };
+}
+
+/** Three-bar strength meter shown under a new-password field (Register, Forgot password). */
+export function PasswordStrengthMeter({ password }: { password: string }) {
+  if (!password) return null;
+  const strength = getPasswordStrength(password);
+  return (
+    <div className="-mt-2 mb-4" aria-live="polite">
+      <div className="flex gap-1" aria-hidden>
+        {[1, 2, 3].map((level) => (
+          <span
+            key={level}
+            className={`h-1 flex-1 rounded-full transition-colors duration-normal ${
+              strength.level >= level ? strength.color : 'bg-bg-input'
+            }`}
+          />
+        ))}
+      </div>
+      <p className="mt-1.5 text-caption text-text-muted">
+        Strength: <span className="font-semibold text-text-secondary">{strength.label}</span>
+      </p>
+    </div>
+  );
+}
+
 /** "or" separator between the form and third-party sign-in. */
 export function OrDivider() {
   return (

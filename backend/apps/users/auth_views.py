@@ -7,6 +7,8 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.cache import cache
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, inline_serializer
@@ -445,9 +447,11 @@ class CustomChangePasswordView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if len(new_password) < 8:
+        try:
+            validate_password(new_password, request.user)
+        except DjangoValidationError as exc:
             return Response(
-                {"error": "Password must be at least 8 characters"},
+                {"error": " ".join(exc.messages)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -455,19 +459,11 @@ class CustomChangePasswordView(APIView):
         request.user.set_password(new_password)
         request.user.save(update_fields=["password"])
 
-        # Revoke ALL sessions (user must log in again on all devices)
-        all_sessions = DeviceSession.objects.filter(user=request.user, is_active=True)
-        for session in all_sessions:
-            try:
-                outstanding = OutstandingToken.objects.filter(
-                    jti=session.refresh_jti
-                ).first()
-                if outstanding:
-                    BlacklistedToken.objects.get_or_create(token=outstanding)
-            except Exception:
-                pass
+        # Revoke ALL sessions (user must log in again on all devices): every outstanding
+        # refresh token is blacklisted, including ones without a DeviceSession row.
+        from apps.users.account_deletion import _revoke_all_tokens
 
-        all_sessions.update(is_active=False)
+        _revoke_all_tokens(request.user)
 
         logger.info(
             f"Password changed: user={request.user.username} | " f"all sessions revoked"

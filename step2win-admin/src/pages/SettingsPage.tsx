@@ -37,7 +37,14 @@ function consequence(f: FieldDef, after: FormValue, ctx?: SettingsContext): stri
     case 'max_challenge_milestone':
       return 'New challenges can only use the resulting milestone options. Existing challenges keep their target.'
     case 'max_challenge_participants':
-      return 'Shown to creators in the app as the size limit.'
+      return 'New challenges and rematches can be at most this size. Existing challenges keep theirs.'
+    case 'min_challenge_entry_fee':
+    case 'max_challenge_entry_fee':
+      return 'New challenges must use an entry inside the new range. Existing challenges keep their entry.'
+    case 'challenge_approval_required':
+      return after
+        ? 'New public challenges wait for approval and stay hidden from the lobby. Challenges already live are not affected.'
+        : 'New public challenges go live straight away. Challenges already waiting stay in the approval queue.'
     case 'minimum_withdrawal_amount':
       return 'Withdrawal requests below this amount are refused from now on. Requests already made are not affected.'
     case 'withdrawals_enabled':
@@ -264,7 +271,7 @@ export function SettingsPage() {
             >
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-semibold text-ink-primary">Advanced</span>
-                <span className="block text-xs text-ink-muted">XP, contact emails and referrals, server limits, anti-cheat thresholds and staff accounts. Rarely changed.</span>
+                <span className="block text-xs text-ink-muted">XP, contact emails, server limits, anti-cheat thresholds and staff accounts. Rarely changed.</span>
               </span>
               {advancedChanges > 0 && <StatusBadge size="sm" tone="warning" label={`${advancedChanges} unsaved`} />}
               <ChevronDown size={16} aria-hidden className={cn('shrink-0 text-ink-muted transition-transform', advancedOpen && 'rotate-180')} />

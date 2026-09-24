@@ -35,8 +35,8 @@ export const SECTIONS: SectionDef[] = [
   { id: 'challenges', title: 'Challenges and fees', description: 'The platform fee and the rules for new challenges.' },
   { id: 'withdrawals', title: 'Withdrawals', description: 'The smallest amount customers can cash out and the review time they are told.' },
   { id: 'support', title: 'Support desk', description: 'Response targets, who gets new tickets, and what happens when a ticket waits too long.' },
-  { id: 'gamification', title: 'XP and rewards', description: 'How experience points are earned.', advanced: true },
-  { id: 'notifications', title: 'Contacts, email and referrals', description: 'Where operational email goes.', advanced: true },
+  { id: 'gamification', title: 'XP and rewards', description: 'How experience points are earned from synced steps.', advanced: true },
+  { id: 'notifications', title: 'Contacts and email', description: 'Where operational email goes, and whether it is sent.', advanced: true },
 ]
 
 export const TICKET_CATEGORIES: Array<{ value: string; label: string }> = [
@@ -66,14 +66,19 @@ export const FIELDS: FieldDef[] = [
     hint: 'Step targets a creator can pick. Each must sit between the lowest and highest milestone.' },
   { key: 'min_challenge_milestone', label: 'Lowest milestone', kind: 'int', section: 'challenges', unit: 'steps', min: 1000, max: 1_000_000, risky: true },
   { key: 'max_challenge_milestone', label: 'Highest milestone', kind: 'int', section: 'challenges', unit: 'steps', min: 1000, max: 1_000_000, risky: true },
-  { key: 'max_challenge_participants', label: 'Max participants', kind: 'int', section: 'challenges', unit: 'people', min: 2, max: 1000, risky: true },
-  { key: 'min_challenge_entry_fee', label: 'Lowest entry fee', kind: 'money', section: 'challenges', unit: 'KSh', min: 0, max: 100_000, risky: true },
-  { key: 'max_challenge_entry_fee', label: 'Highest entry fee', kind: 'money', section: 'challenges', unit: 'KSh', min: 0, max: 100_000, risky: true },
-  { key: 'challenge_approval_required', label: 'New challenges need admin approval', kind: 'bool', section: 'challenges' },
+  { key: 'max_challenge_participants', label: 'Max participants', kind: 'int', section: 'challenges', unit: 'people', min: 2, max: 1000, risky: true,
+    hint: 'Largest size a creator can pick for a new challenge. Existing challenges keep their size.' },
+  { key: 'min_challenge_entry_fee', label: 'Lowest entry fee', kind: 'money', section: 'challenges', unit: 'KSh', min: 1, max: 10_000, risky: true,
+    hint: 'Whole shillings. Applies to new public and private challenges.' },
+  { key: 'max_challenge_entry_fee', label: 'Highest entry fee', kind: 'money', section: 'challenges', unit: 'KSh', min: 1, max: 10_000, risky: true,
+    hint: 'Whole shillings, at most KSh 10,000. The app’s quick-pick amounts stay inside this range.' },
+  { key: 'challenge_approval_required', label: 'New public challenges need approval', kind: 'bool', section: 'challenges',
+    hint: 'On: new public challenges and rematches wait under Challenges > Awaiting approval, hidden from the lobby. Rejecting refunds the entries. Private challenges never wait.' },
 
   { key: 'minimum_withdrawal_amount', label: 'Minimum withdrawal', kind: 'money', section: 'withdrawals', unit: 'KSh', min: 0, max: 70_000, risky: true,
     hint: 'Requests below this are refused. Never lower than the server floor shown under Advanced > Server limits.' },
-  { key: 'withdrawal_processing_time', label: 'Review time customers are told', kind: 'int', section: 'withdrawals', unit: 'hours', min: 1, max: 720 },
+  { key: 'withdrawal_processing_time', label: 'Review time customers are told', kind: 'int', section: 'withdrawals', unit: 'hours', min: 1, max: 720,
+    hint: 'Shown on the withdraw form and in the message after a request is sent.' },
 
   { key: 'support_sla_urgent_hours', label: 'Reply target: urgent', kind: 'int', section: 'support', unit: 'hours', min: 1, max: 720 },
   { key: 'support_sla_high_hours', label: 'Reply target: high', kind: 'int', section: 'support', unit: 'hours', min: 1, max: 720 },
@@ -95,13 +100,15 @@ export const FIELDS: FieldDef[] = [
   { key: 'support_escalation_raise_priority', label: 'Raise priority on escalation', kind: 'bool', section: 'support',
     hint: 'Moves an escalated ticket up one priority level (low → medium → high → urgent), once per wait.' },
 
-  { key: 'xp_per_step', label: 'XP per step', kind: 'decimal', section: 'gamification', unit: 'XP', min: 0, max: 100 },
-  { key: 'daily_goal_bonus_xp', label: 'Daily goal bonus', kind: 'int', section: 'gamification', unit: 'XP', min: 0, max: 100_000 },
+  { key: 'xp_per_step', label: 'XP per step', kind: 'decimal', section: 'gamification', unit: 'XP', min: 0, max: 100,
+    hint: 'Earned for each accepted step as steps sync (rounded down per day). Flagged days earn nothing.' },
+  { key: 'daily_goal_bonus_xp', label: 'Daily goal bonus', kind: 'int', section: 'gamification', unit: 'XP', min: 0, max: 100_000,
+    hint: 'Once per day, when the customer’s steps first reach their daily goal. 0 turns it off.' },
 
   { key: 'admin_email', label: 'Admin email', kind: 'email', section: 'notifications' },
   { key: 'support_email', label: 'Support email', kind: 'email', section: 'notifications' },
-  { key: 'email_notifications_enabled', label: 'Send email notifications', kind: 'bool', section: 'notifications' },
-  { key: 'referral_program_enabled', label: 'Referral programme', kind: 'bool', section: 'notifications' },
+  { key: 'email_notifications_enabled', label: 'Send email notifications', kind: 'bool', section: 'notifications',
+    hint: 'Off stops notification emails (today: the M-Pesa funding alert to the admin and support addresses). Emails a customer asks for, like a password reset, always send.' },
 ]
 
 export const FIELD_BY_KEY = Object.fromEntries(FIELDS.map((f) => [f.key, f])) as Record<SettingKey, FieldDef>
@@ -184,8 +191,11 @@ export function validate(form: FormState): Partial<Record<SettingKey, string>> {
     const out = ms.filter((m) => m < minM || m > maxM)
     if (out.length) errors.challenge_milestones = `${out.map((m) => m.toLocaleString('en-KE')).join(', ')} ${out.length === 1 ? 'is' : 'are'} outside ${minM.toLocaleString('en-KE')}–${maxM.toLocaleString('en-KE')}.`
   }
-  if (!errors.min_challenge_entry_fee && !errors.max_challenge_entry_fee && Number(form.min_challenge_entry_fee) > Number(form.max_challenge_entry_fee)) {
-    errors.max_challenge_entry_fee = 'Must be at least the lowest entry fee.'
+  for (const k of ['min_challenge_entry_fee', 'max_challenge_entry_fee'] as const) {
+    if (!errors[k] && !Number.isInteger(Number(form[k]))) errors[k] = 'Use whole shillings.'
+  }
+  if (!errors.min_challenge_entry_fee && !errors.max_challenge_entry_fee && Number(form.min_challenge_entry_fee) >= Number(form.max_challenge_entry_fee)) {
+    errors.max_challenge_entry_fee = 'Must be more than the lowest entry fee.'
   }
   if (form.maintenance_mode === true && !String(form.maintenance_message).trim()) {
     errors.maintenance_message = 'Tell customers why the app is unavailable.'

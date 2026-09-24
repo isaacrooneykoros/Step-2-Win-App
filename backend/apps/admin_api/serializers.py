@@ -426,9 +426,9 @@ class SystemSettingsSerializer(serializers.Serializer):
     minimum_withdrawal_amount = serializers.DecimalField(
         max_digits=10, decimal_places=2
     )
-    withdrawal_processing_time = serializers.IntegerField()
+    withdrawal_processing_time = serializers.IntegerField(min_value=1, max_value=720)
 
-    # Challenge Settings
+    # Challenge Settings (entry fees are whole shillings; see validate_*_entry_fee)
     min_challenge_entry_fee = serializers.DecimalField(max_digits=10, decimal_places=2)
     max_challenge_entry_fee = serializers.DecimalField(max_digits=10, decimal_places=2)
     min_challenge_milestone = serializers.IntegerField()
@@ -437,18 +437,21 @@ class SystemSettingsSerializer(serializers.Serializer):
         child=serializers.IntegerField(min_value=1),
         allow_empty=False,
     )
-    max_challenge_participants = serializers.IntegerField()
+    max_challenge_participants = serializers.IntegerField(min_value=2, max_value=1000)
     challenge_approval_required = serializers.BooleanField()
 
     # Feature Toggles
     registrations_enabled = serializers.BooleanField()
     challenges_enabled = serializers.BooleanField()
     withdrawals_enabled = serializers.BooleanField()
-    referral_program_enabled = serializers.BooleanField()
+    # referral_program_enabled is intentionally not exposed: no referral feature yet
+    # (the column stays on SystemSettings; see apps/admin_api/platform.py).
 
     # Gamification Settings
-    xp_per_step = serializers.DecimalField(max_digits=5, decimal_places=2)
-    daily_goal_bonus_xp = serializers.IntegerField()
+    xp_per_step = serializers.DecimalField(
+        max_digits=5, decimal_places=2, min_value=Decimal("0"), max_value=Decimal("100")
+    )
+    daily_goal_bonus_xp = serializers.IntegerField(min_value=0, max_value=100000)
 
     # Notifications
     admin_email = serializers.EmailField()
@@ -498,6 +501,25 @@ class SystemSettingsSerializer(serializers.Serializer):
             raise serializers.ValidationError("At least one milestone is required")
 
         return sorted(unique_values)
+
+    def _entry_fee(self, value):
+        from apps.admin_api.platform import ENTRY_FEE_SERVER_CAP
+
+        if value != value.to_integral_value():
+            raise serializers.ValidationError("Use a whole number of shillings")
+        if value < 1:
+            raise serializers.ValidationError("Must be at least KES 1")
+        if value > ENTRY_FEE_SERVER_CAP:
+            raise serializers.ValidationError(
+                f"Must not exceed KES {ENTRY_FEE_SERVER_CAP:,} (server limit)"
+            )
+        return value
+
+    def validate_min_challenge_entry_fee(self, value):
+        return self._entry_fee(value)
+
+    def validate_max_challenge_entry_fee(self, value):
+        return self._entry_fee(value)
 
     def validate_minimum_withdrawal_amount(self, value):
         from django.conf import settings as django_settings

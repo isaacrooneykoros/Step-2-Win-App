@@ -2,7 +2,7 @@
 Join accounting regression tests.
 
 - A challenge entry must reduce the user's available balance exactly once.
-- Pending (not yet started) challenges listed in the lobby can be joined.
+- Pending challenges are awaiting admin approval and cannot be joined yet.
 - Ended challenges cannot be joined.
 """
 from datetime import timedelta
@@ -74,11 +74,14 @@ class JoinAccountingTests(TestCase):
         self.assertEqual(self.walker.available_balance, Decimal("500.00"))
         self.assertEqual(self.walker.locked_balance, Decimal("500.00"))
 
-    def test_can_join_pending_challenge(self):
-        challenge = self._challenge(status="pending", start_offset=2, end_offset=9)
+    def test_cannot_join_challenge_awaiting_approval(self):
+        challenge = self._challenge(status="pending")
         response = self._join(challenge)
-        self.assertEqual(response.status_code, 200, response.content)
-        self.assertTrue(Participant.objects.filter(challenge=challenge, user=self.walker).exists())
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("waiting for approval", str(response.content))
+        self.assertFalse(Participant.objects.filter(challenge=challenge, user=self.walker).exists())
+        self.walker.refresh_from_db()
+        self.assertEqual(self.walker.wallet_balance, Decimal("1000.00"))
 
     def test_cannot_join_ended_challenge(self):
         challenge = self._challenge(status="active", start_offset=-8, end_offset=-1)

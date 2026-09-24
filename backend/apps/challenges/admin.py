@@ -85,8 +85,14 @@ class ChallengeAdmin(admin.ModelAdmin):
     complete_challenges.short_description = "Complete selected challenges"
 
     def cancel_challenges(self, request, queryset):
-        # Only cancel pending challenges
-        updated = queryset.filter(status="pending").update(status="cancelled")
+        # Only cancel pending (awaiting approval) challenges, refunding entries
+        from apps.challenges.services import cancel_challenge
+
+        updated = sum(
+            1
+            for challenge in queryset.filter(status="pending")
+            if cancel_challenge(challenge, reason="Not approved")
+        )
         self.message_user(request, f"{updated} challenge(s) cancelled")
 
     cancel_challenges.short_description = "Cancel selected pending challenges"

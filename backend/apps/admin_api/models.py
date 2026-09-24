@@ -48,14 +48,14 @@ class SystemSettings(models.Model):
     min_challenge_entry_fee = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        default=1.00,
-        help_text="Minimum entry fee for challenges",
+        default=50.00,
+        help_text="Minimum entry fee for new challenges (whole KES)",
     )
     max_challenge_entry_fee = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        default=1000.00,
-        help_text="Maximum entry fee for challenges",
+        default=10000.00,
+        help_text="Maximum entry fee for new challenges (whole KES)",
     )
     min_challenge_milestone = models.IntegerField(
         default=10000, help_text="Minimum steps milestone for challenges"
@@ -72,7 +72,8 @@ class SystemSettings(models.Model):
         default=100, help_text="Maximum participants per challenge"
     )
     challenge_approval_required = models.BooleanField(
-        default=True, help_text="Whether challenges require admin approval"
+        default=False,
+        help_text="New public challenges wait for admin approval before going live",
     )
 
     # Feature Toggles
@@ -85,6 +86,8 @@ class SystemSettings(models.Model):
     withdrawals_enabled = models.BooleanField(
         default=True, help_text="Allow withdrawal requests"
     )
+    # Not used: there is no referral programme yet. Hidden from the admin console
+    # and the app config; kept to avoid a destructive migration.
     referral_program_enabled = models.BooleanField(
         default=True, help_text="Enable referral program"
     )

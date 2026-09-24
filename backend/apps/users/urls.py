@@ -1,7 +1,7 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from . import account_views, auth_views, views
+from . import account_views, auth_views, password_reset_views, views
 
 app_name = "users"
 
@@ -17,6 +17,22 @@ urlpatterns = [
         "change-password/",
         auth_views.CustomChangePasswordView.as_view(),
         name="change_password",
+    ),
+    # Forgot password (6-digit email code) — see password_reset.py
+    path(
+        "password-reset/request/",
+        password_reset_views.PasswordResetRequestView.as_view(),
+        name="password_reset_request",
+    ),
+    path(
+        "password-reset/verify/",
+        password_reset_views.PasswordResetVerifyView.as_view(),
+        name="password_reset_verify",
+    ),
+    path(
+        "password-reset/confirm/",
+        password_reset_views.PasswordResetConfirmView.as_view(),
+        name="password_reset_confirm",
     ),
     # Device session management
     path("sessions/", auth_views.ActiveSessionsView.as_view(), name="active_sessions"),

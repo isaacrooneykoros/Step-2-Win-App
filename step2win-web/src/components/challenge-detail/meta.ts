@@ -33,7 +33,8 @@ export function challengeStatusMeta(status: string): StatusMeta {
     case 'active':
       return { label: 'Live', tone: 'success', live: true };
     case 'pending':
-      return { label: 'Upcoming', tone: 'info', icon: Clock };
+      // Waiting in the admin approval queue (not listed, not joinable yet).
+      return { label: 'Awaiting approval', tone: 'warning', icon: Clock };
     case 'completed':
       return { label: 'Completed', tone: 'neutral', icon: CheckCircle2 };
     case 'cancelled':
@@ -44,9 +45,9 @@ export function challengeStatusMeta(status: string): StatusMeta {
 }
 
 /** "4 days left" / "Ends today" / "Starts Sun, 20 Sep" / "Ended Wed, 17 Sep" */
-export function timeLeftLabel(status: string, daysRemaining: number | null | undefined, startDate: string, endDate: string): string {
+export function timeLeftLabel(status: string, daysRemaining: number | null | undefined, _startDate: string, endDate: string): string {
   if (status === 'completed' || status === 'cancelled') return `Ended ${formatCalendarDay(endDate)}`;
-  if (status === 'pending') return `Starts ${formatCalendarDay(startDate)}`;
+  if (status === 'pending') return 'Starts once approved';
   const days = Math.max(0, Number(daysRemaining ?? 0));
   if (days === 0) return 'Ends today';
   if (days === 1) return '1 day left';

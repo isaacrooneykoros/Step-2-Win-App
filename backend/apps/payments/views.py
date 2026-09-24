@@ -459,9 +459,11 @@ def request_withdrawal(request):
         f"amount=KES {withdrawal.amount_kes} | method={withdrawal.method} | id={withdrawal.id}"
     )
 
+    from apps.admin_api.platform import withdrawal_review_phrase
+
     return Response(
         {
-            "message": "Withdrawal request submitted. Under review — usually processed within 24 hours.",
+            "message": f"Withdrawal request submitted. Under review — usually processed {withdrawal_review_phrase()}.",
             "withdrawal_id": str(withdrawal.id),
             "amount_kes": str(withdrawal.amount_kes),
             "method": withdrawal.method,

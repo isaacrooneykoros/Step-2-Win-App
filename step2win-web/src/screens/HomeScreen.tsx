@@ -201,7 +201,7 @@ export default function HomeScreen() {
         {/* Active challenge */}
         <section>
           <SectionHeader
-            title={featured?.status === 'pending' ? 'Next challenge' : 'Your challenge'}
+            title={featured?.status === 'pending' ? 'Awaiting approval' : 'Your challenge'}
             action={moreCount > 0 ? { label: `${moreCount} more`, to: '/challenges' } : featured ? { label: 'All', to: '/challenges' } : undefined}
           />
           {challenges.isLoading ? (

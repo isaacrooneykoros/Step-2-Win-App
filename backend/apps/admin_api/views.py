@@ -865,6 +865,12 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         challenge.status = "active"
+        # The clock starts at approval: keep the original length, starting today.
+        today = timezone.localdate()
+        if challenge.start_date and challenge.start_date < today:
+            length = challenge.end_date - challenge.start_date
+            challenge.start_date = today
+            challenge.end_date = today + length
         challenge.save()
         self._audit(request, challenge, "approve", f"Approved challenge {challenge.name}", {"status": {"old": "pending", "new": "active"}})
         return Response({"status": "Challenge approved"})
@@ -879,8 +885,15 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         reason = str(request.data.get("reason") or "").strip()[:500] or "No reason provided"
-        challenge.status = "cancelled"
-        challenge.save()
+        # Existing cancel path: marks it cancelled and refunds every entry.
+        from apps.challenges.services import cancel_challenge as cancel_and_refund
+
+        if not cancel_and_refund(challenge, reason=f"Not approved: {reason}"):
+            return Response(
+                {"error": "Only pending challenges can be rejected"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        challenge.refresh_from_db()
         self._audit(request, challenge, "reject", f"Rejected challenge {challenge.name}", {"status": {"old": "pending", "new": "cancelled"}, "reason": reason})
         return Response({"status": f"Challenge rejected (cancelled). Reason: {reason}"})
 
@@ -894,9 +907,17 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         old_status = challenge.status
-        challenge.status = "cancelled"
-        challenge.save()
         reason = str(request.data.get("reason") or "").strip()[:500]
+        # Cancel through the shared service so every entry is refunded to the
+        # participant's wallet (with a ledger row) and locked balances are released.
+        from apps.challenges.services import cancel_challenge as cancel_and_refund
+
+        if not cancel_and_refund(challenge, reason=f"Cancelled by admin: {reason}" if reason else "Cancelled by admin"):
+            return Response(
+                {"error": "Can only cancel pending or active challenges"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        challenge.refresh_from_db()
         self._audit(
             request,
             challenge,
@@ -991,7 +1012,10 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
         challenges = Challenge.objects.filter(
             id__in=challenge_ids, status__in=["pending", "active"]
         )
-        count = challenges.update(status="cancelled")
+        # One by one through the shared service so each challenge's entries are refunded.
+        from apps.challenges.services import cancel_challenge as cancel_and_refund
+
+        count = sum(1 for challenge in challenges if cancel_and_refund(challenge, reason="Bulk cancelled by admin"))
 
         return Response({"status": f"{count} challenge(s) cancelled"})
 
@@ -1672,11 +1696,21 @@ def update_system_settings(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     merged_settings = {
+        "min_challenge_entry_fee": settings.min_challenge_entry_fee,
+        "max_challenge_entry_fee": settings.max_challenge_entry_fee,
         "min_challenge_milestone": settings.min_challenge_milestone,
         "max_challenge_milestone": settings.max_challenge_milestone,
         "challenge_milestones": list(settings.challenge_milestones or []),
     }
     merged_settings.update(serializer.validated_data)
+
+    if Decimal(str(merged_settings["min_challenge_entry_fee"])) >= Decimal(
+        str(merged_settings["max_challenge_entry_fee"])
+    ):
+        return Response(
+            {"max_challenge_entry_fee": "Must be more than the lowest entry fee"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     min_milestone = int(merged_settings["min_challenge_milestone"])
     max_milestone = int(merged_settings["max_challenge_milestone"])

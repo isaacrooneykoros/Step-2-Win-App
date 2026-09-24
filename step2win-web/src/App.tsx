@@ -14,6 +14,7 @@ import { BiometricLockGate } from './components/security/BiometricLockGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
+import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import LaunchSplashScreen from './screens/LaunchSplashScreen';
 import type { ReactNode } from 'react';
 import { OnboardingScreen } from './components/screens/OnboardingScreen';
@@ -72,7 +73,7 @@ function AuthLoadRedirect({
   }
 
   // Not authenticated paths that are allowed
-  const publicPaths = ['/launch', '/login', '/register'];
+  const publicPaths = ['/launch', '/login', '/register', '/forgot-password'];
   const isPublicPath = publicPaths.includes(location.pathname);
 
   // First visit - show launch screen
@@ -86,7 +87,7 @@ function AuthLoadRedirect({
   }
 
   // If authenticated and trying to access auth screens, redirect to home
-  if (isAuthenticated && ['/launch', '/login', '/register'].includes(location.pathname)) {
+  if (isAuthenticated && ['/launch', '/login', '/register', '/forgot-password'].includes(location.pathname)) {
     return <Navigate to="/" replace />;
   }
 
@@ -232,6 +233,7 @@ export default function App() {
             <Route path="/launch" element={<LaunchSplashScreen />} />
             <Route path="/login" element={<LoginScreen />} />
             <Route path="/register" element={<RegisterScreen />} />
+            <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
 
             {/* Protected routes */}
             <Route

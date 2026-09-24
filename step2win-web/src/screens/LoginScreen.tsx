@@ -97,7 +97,17 @@ export default function LoginScreen() {
           required
           autoComplete="current-password"
           enterKeyHint="go"
+          containerClassName="!mb-0"
         />
+        <div className="mb-3 flex justify-end">
+          <Link
+            to="/forgot-password"
+            state={{ identifier: username.trim() }}
+            className="inline-flex min-h-touch items-center text-callout font-semibold text-brand hover:underline"
+          >
+            Forgot password?
+          </Link>
+        </div>
 
         <Button type="submit" size="lg" fullWidth isLoading={isLoading} disabled={socialBusy} loadingText="Signing in" className="mt-2">
           Sign in

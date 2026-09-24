@@ -5,15 +5,19 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.admin_api.models import SystemSettings
+from apps.admin_api.platform import (ENTRY_FEE_DEFAULT_MAX, ENTRY_FEE_DEFAULT_MIN,
+                                     challenge_needs_approval,
+                                     entry_fee_range, max_challenge_participants)
 from apps.core.sanitizers import sanitize_text
 
 from .models import Challenge, ChallengeMessage, Participant, format_milestone_label, get_configured_milestones
 
-# Challenge entry contribution (KES). Users type any whole amount in this range;
-# the suggestions are only quick picks shown by the app (served via /api/challenges/config/).
-ENTRY_FEE_MIN = 50
-ENTRY_FEE_MAX = 10000
-ENTRY_FEE_SUGGESTIONS = [100, 250, 500, 1000, 2000]
+# Challenge entry contribution (KES). Users type any whole amount in the range the
+# admin sets (SystemSettings min/max_challenge_entry_fee, read via
+# apps.admin_api.platform.entry_fee_range); these names are the defaults used when
+# the stored range is unusable. The app gets the live range from /api/challenges/config/.
+ENTRY_FEE_MIN = ENTRY_FEE_DEFAULT_MIN
+ENTRY_FEE_MAX = ENTRY_FEE_DEFAULT_MAX
 
 
 class ParticipantSerializer(serializers.ModelSerializer):
@@ -234,10 +238,13 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
         return value
 
     def validate_max_participants(self, value):
+        cap = max_challenge_participants()
         if value < 2:
             raise serializers.ValidationError("Minimum 2 participants required")
-        if value > 1000:
-            raise serializers.ValidationError("Maximum 1000 participants allowed")
+        if value > cap:
+            if "max_participants" not in getattr(self, "initial_data", {}):
+                return cap  # the implicit default (20) is above the admin's limit
+            raise serializers.ValidationError(f"Maximum {cap:,} participants allowed")
         return value
 
     def validate_duration_days(self, value):
@@ -255,16 +262,17 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
         win_condition = data.get("win_condition", "proportional")
 
         # Entry is a typed amount (whole shillings) within one shared range for public and
-        # private challenges; the app shows ENTRY_FEE_SUGGESTIONS as quick picks.
+        # private challenges, set by the admin; the app shows suggestions as quick picks.
         if entry_fee is not None:
+            fee_min, fee_max = entry_fee_range()
             if entry_fee != entry_fee.to_integral_value():
                 raise serializers.ValidationError(
                     {"entry_fee": "Entry must be a whole number of shillings"}
                 )
-            if entry_fee < ENTRY_FEE_MIN or entry_fee > ENTRY_FEE_MAX:
+            if entry_fee < fee_min or entry_fee > fee_max:
                 raise serializers.ValidationError(
                     {
-                        "entry_fee": f"Entry must be between KES {ENTRY_FEE_MIN:,} and KES {ENTRY_FEE_MAX:,}"
+                        "entry_fee": f"Entry must be between KES {fee_min:,} and KES {fee_max:,}"
                     }
                 )
 
@@ -294,7 +302,9 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
         # Set dates: start today, end based on duration
         validated_data["start_date"] = date.today()
         validated_data["end_date"] = date.today() + timedelta(days=duration_days)
-        validated_data["status"] = "active"
+        # With approval switched on, public challenges wait in the admin queue
+        # ("pending"): hidden from the lobby and not joinable until approved.
+        validated_data["status"] = "pending" if challenge_needs_approval(is_public) else "active"
 
         return super().create(validated_data)
 
@@ -309,8 +319,12 @@ class JoinChallengeSerializer(serializers.Serializer):
     def validate_invite_code(self, value):
         try:
             challenge = Challenge.objects.get(invite_code=value.upper())
-            # Pending challenges are open to join before they start (the lobby lists them).
-            if challenge.status not in ("pending", "active"):
+            # "pending" = waiting for admin approval: not joinable until approved.
+            if challenge.status == "pending":
+                raise serializers.ValidationError(
+                    "This challenge is waiting for approval and can't be joined yet"
+                )
+            if challenge.status != "active":
                 raise serializers.ValidationError("Challenge is no longer open to join")
             if challenge.end_date and challenge.end_date < timezone.localdate():
                 raise serializers.ValidationError("Challenge has already ended")

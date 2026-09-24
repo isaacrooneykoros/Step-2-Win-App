@@ -73,6 +73,25 @@ export const authService = {
   },
 
   /**
+   * Forgot password (6-digit email code). The request step always answers the same way,
+   * whether or not an account matches.
+   */
+  requestPasswordReset: async (identifier: string): Promise<{ message: string; resend_after: number; expires_in: number }> => {
+    const response = await api.post('/api/auth/password-reset/request/', { identifier });
+    return response.data;
+  },
+
+  verifyPasswordResetCode: async (identifier: string, code: string): Promise<{ reset_token: string; expires_in: number }> => {
+    const response = await api.post('/api/auth/password-reset/verify/', { identifier, code });
+    return response.data;
+  },
+
+  confirmPasswordReset: async (data: { reset_token: string; new_password: string; confirm_password: string }): Promise<{ message: string }> => {
+    const response = await api.post('/api/auth/password-reset/confirm/', data);
+    return response.data;
+  },
+
+  /**
    * Bind device for step tracking
    */
   bindDevice: async (data: DeviceBinding): Promise<{ status: string }> => {

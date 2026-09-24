@@ -57,6 +57,8 @@ export interface ChallengeConfig {
   entry_fee_min?: number;
   entry_fee_max?: number;
   entry_fee_suggestions?: number[];
+  /** When true, new public challenges wait for admin approval before going live. */
+  public_challenges_need_approval?: boolean;
 }
 
 export interface Challenge {

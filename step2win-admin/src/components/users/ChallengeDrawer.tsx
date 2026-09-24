@@ -203,7 +203,7 @@ function ChallengeActions({ challenge: c, action, onClose, onDone }: {
     mutationFn: async (): Promise<[string, boolean?]> => {
       switch (action) {
         case 'approve': await consoleApi.approveChallenge(c.id); return [`${c.name} is live.`]
-        case 'reject': await consoleApi.rejectChallenge(c.id, reason.trim()); return [`${c.name} was rejected.`]
+        case 'reject': await consoleApi.rejectChallenge(c.id, reason.trim()); return [paidEntries ? `${c.name} was rejected and entries refunded.` : `${c.name} was rejected.`]
         case 'cancel': await consoleApi.cancelChallenge(c.id, reason.trim()); return [`${c.name} was cancelled.`]
         case 'feature': await consoleApi.setFeatured(c.id, true); return [`${c.name} is featured in discovery.`]
         case 'unfeature': await consoleApi.setFeatured(c.id, false); return [`${c.name} is no longer featured.`]
@@ -232,8 +232,8 @@ function ChallengeActions({ challenge: c, action, onClose, onDone }: {
   ]
   const refundWarning = paidEntries ? (
     <p className="rounded-md border border-warning-line bg-warning-soft px-3 py-2 text-xs text-warning">
-      Entries are not refunded by this action. {formatKES(c.total_pool)} stays locked across {c.current_entries} participant
-      {c.current_entries === 1 ? '' : 's'} and must be refunded separately.
+      Every entry is refunded: {formatKES(c.total_pool)} goes back to {c.current_entries} participant
+      {c.current_entries === 1 ? "'s wallet" : "s' wallets"}, each with a refund entry in their transaction history.
     </p>
   ) : null
 
@@ -250,8 +250,8 @@ function ChallengeActions({ challenge: c, action, onClose, onDone }: {
       return (
         <ConfirmModal open onClose={onClose} onConfirm={run} loading={loading} variant="danger" title="Reject challenge" confirmLabel="Reject challenge"
           confirmDisabled={!reason.trim()} confirmText={paidEntries ? 'REJECT' : undefined}
-          message="The challenge is closed as cancelled and never goes live." details={details}>
-          {refundWarning}
+          message="The challenge is closed as cancelled and never goes live." details={details}
+          consequence={paidEntries ? `Every entry (${formatKES(c.total_pool)} in total) is refunded to the participants' wallets.` : undefined}>
           <Textarea label="Reason (kept in the audit log)" value={reason} onChange={(e) => setReason(e.target.value)} rows={2} maxLength={500} required />
           {errorLine}
         </ConfirmModal>

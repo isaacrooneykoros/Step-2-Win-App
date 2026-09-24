@@ -31,11 +31,12 @@ from .services import finalize_expired_challenges
 @permission_classes([AllowAny])
 def challenge_config(request):
     """Public challenge configuration for the customer app."""
-    from apps.admin_api.models import SystemSettings
+    from apps.admin_api.platform import (challenge_needs_approval, current_settings,
+                                         entry_fee_range, entry_fee_suggestions,
+                                         max_challenge_participants)
 
-    from .serializers import ENTRY_FEE_MAX, ENTRY_FEE_MIN, ENTRY_FEE_SUGGESTIONS
-
-    settings = SystemSettings.load()
+    settings = current_settings()
+    fee_min, fee_max = entry_fee_range()
     milestones = [
         {"value": milestone, "label": format_milestone_label(milestone)}
         for milestone in get_configured_milestones()
@@ -45,11 +46,13 @@ def challenge_config(request):
             "platform_fee_percentage": str(settings.platform_fee_percentage),
             "min_challenge_milestone": settings.min_challenge_milestone,
             "max_challenge_milestone": settings.max_challenge_milestone,
-            "max_challenge_participants": settings.max_challenge_participants,
+            "max_challenge_participants": max_challenge_participants(),
             "challenge_milestones": milestones,
-            "entry_fee_min": ENTRY_FEE_MIN,
-            "entry_fee_max": ENTRY_FEE_MAX,
-            "entry_fee_suggestions": ENTRY_FEE_SUGGESTIONS,
+            "entry_fee_min": fee_min,
+            "entry_fee_max": fee_max,
+            "entry_fee_suggestions": entry_fee_suggestions(fee_min, fee_max),
+            # Public challenges wait for admin approval before going live.
+            "public_challenges_need_approval": challenge_needs_approval(True),
         }
     )
 
@@ -98,6 +101,10 @@ class ChallengeListView(generics.ListAPIView):
         # Exclude private challenges unless user is a participant
         queryset = queryset.exclude(
             Q(is_private=True) & ~Q(participants__user=self.request.user)
+        )
+        # Challenges awaiting admin approval are only visible to their participants.
+        queryset = queryset.exclude(
+            Q(status="pending") & ~Q(participants__user=self.request.user)
         )
 
         return queryset.order_by("-created_at")
@@ -263,7 +270,7 @@ def join_challenge(request):
     try:
         with transaction.atomic():
             challenge = Challenge.objects.select_for_update().get(
-                invite_code=invite_code, status__in=("pending", "active")
+                invite_code=invite_code, status="active"
             )
             user = request.user.__class__.objects.select_for_update().get(
                 id=request.user.id
@@ -624,7 +631,7 @@ def rematch_challenge(request, pk):
     """
     Create a rematch from an existing completed challenge.
     """
-    from apps.admin_api.platform import feature_block
+    from apps.admin_api.platform import challenge_needs_approval, feature_block
 
     blocked = feature_block("challenges")
     if blocked:
@@ -670,7 +677,7 @@ def rematch_challenge(request, pk):
             milestone=source.milestone,
             entry_fee=source.entry_fee,
             max_participants=source.max_participants,
-            status="active",
+            status="pending" if challenge_needs_approval(source.is_public) else "active",
             start_date=date.today(),
             end_date=date.today() + timedelta(days=duration_days),
             is_public=source.is_public,
@@ -1020,15 +1027,16 @@ def public_lobby(request):
 
     from django.utils import timezone
 
+    # "pending" challenges are waiting for admin approval and are not listed.
     qs = Challenge.objects.filter(
         is_public=True,
         is_private=False,
-        status__in=["pending", "active"],
+        status="active",
     ).prefetch_related("participants")
 
     filter_param = request.query_params.get("filter", "all")
     if filter_param == "joinable":
-        qs = qs.filter(status__in=["pending", "active"])
+        qs = qs.filter(status="active")
     elif filter_param == "active":
         qs = qs.filter(status="active")
     elif filter_param == "ending_soon":
@@ -1075,7 +1083,7 @@ def public_lobby(request):
     )
 
     base_qs = Challenge.objects.filter(
-        is_public=True, is_private=False, status__in=["pending", "active"]
+        is_public=True, is_private=False, status="active"
     )
 
     return Response(
@@ -1116,6 +1124,8 @@ def challenge_lobby_card(request, pk):
         )
     except Challenge.DoesNotExist:
         return Response({"error": "Challenge not found"}, status=404)
+    if challenge.status == "pending" and not challenge.participants.filter(user=request.user).exists():
+        return Response({"error": "Challenge not found"}, status=404)  # awaiting approval
 
     Challenge.objects.filter(pk=pk).update(view_count=F("view_count") + 1)
 

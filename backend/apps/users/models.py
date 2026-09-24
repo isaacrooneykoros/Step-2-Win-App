@@ -371,3 +371,35 @@ class SocialAccount(models.Model):
 
 
 auditlog.register(SocialAccount, include_fields=["provider", "subject", "email", "user"])
+
+
+class PasswordResetCode(models.Model):
+    """
+    A 6-digit email code for the "Forgot password" flow (see apps/users/password_reset.py).
+
+    Only salted hashes are stored: ``code_hash`` (Django password hasher) and, once the
+    code is verified, ``reset_token_hash`` (SHA-256 of a random single-use token).
+    ``used_at`` is set when the reset completes OR when a newer code supersedes this one.
+    Expired rows are harmless; no periodic cleanup is required.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="password_reset_codes",
+    )
+    code_hash = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(db_index=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    reset_token_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    token_expires_at = models.DateTimeField(null=True, blank=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+    request_ip = models.GenericIPAddressField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["user", "created_at"])]
+
+    def __str__(self):
+        return f"PasswordResetCode(user={self.user_id}, created={self.created_at:%Y-%m-%d %H:%M})"
