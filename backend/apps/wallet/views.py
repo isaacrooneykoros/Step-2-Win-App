@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.db.models import Sum
+from django.utils.dateparse import parse_date, parse_datetime
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import generics, serializers, status
 from rest_framework.decorators import (api_view, permission_classes,
@@ -98,13 +99,17 @@ class TransactionListView(generics.ListAPIView):
         if trans_type:
             queryset = queryset.filter(type=trans_type)
 
-        # Filter by date range
-        start_date = self.request.query_params.get("start_date")  # type: ignore[attr-defined]
-        end_date = self.request.query_params.get("end_date")  # type: ignore[attr-defined]
-        if start_date:
-            queryset = queryset.filter(created_at__gte=start_date)
-        if end_date:
-            queryset = queryset.filter(created_at__lte=end_date)
+        # Filter by date range (safely parse input to prevent 500 errors on invalid dates)
+        start_date_raw = self.request.query_params.get("start_date")  # type: ignore[attr-defined]
+        end_date_raw = self.request.query_params.get("end_date")  # type: ignore[attr-defined]
+        if start_date_raw:
+            parsed_start = parse_datetime(start_date_raw) or parse_date(start_date_raw)
+            if parsed_start:
+                queryset = queryset.filter(created_at__gte=parsed_start)
+        if end_date_raw:
+            parsed_end = parse_datetime(end_date_raw) or parse_date(end_date_raw)
+            if parsed_end:
+                queryset = queryset.filter(created_at__lte=parsed_end)
 
         return queryset
 
