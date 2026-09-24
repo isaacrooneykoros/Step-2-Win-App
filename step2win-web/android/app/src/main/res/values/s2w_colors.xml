@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Matches the bg-page token in src/index.css so the system navigation bar blends with the app. -->
-    <color name="s2w_page">#F6F5F2</color>
+    <!-- Matches the bg-page token in src/index.css (hsl 45 14% 96.5%) so the system bars and the
+         launch splash blend with the app. -->
+    <color name="s2w_page">#F7F7F5</color>
     <bool name="s2w_light_bars">true</bool>
+    <!-- Launch splash mark: tokens brand, brand-fg and reward (light). -->
+    <color name="s2w_splash_brand">#138159</color>
+    <color name="s2w_splash_fg">#FFFFFF</color>
+    <color name="s2w_splash_reward">#F59F0A</color>
 </resources>

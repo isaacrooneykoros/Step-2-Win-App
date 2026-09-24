@@ -3,7 +3,7 @@ import { Check, Flame, Footprints, ShieldCheck, Trophy, Wallet } from 'lucide-re
 /**
  * Small, code-built illustrations for the onboarding pages. Each one explains a single
  * idea and animates only when its page becomes active (a state change, not decoration).
- * Colours come from tokens so they follow light/dark mode; reduced motion collapses
+ * Colors come from tokens so they follow light/dark mode; reduced motion collapses
  * every transition globally via index.css.
  */
 

@@ -29,6 +29,9 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    // The lazily loaded 3D chunk (three.js, onboarding + launch splash only) is ~550 kB; nothing
+    // else comes close. Keep the warning for everything else.
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks: {

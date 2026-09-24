@@ -24,7 +24,8 @@ export function AuthLayout({
     <main className="min-h-[100dvh] bg-bg-page">
       <div className="mx-auto flex min-h-[100dvh] w-full max-w-[420px] flex-col px-5 pt-safe pb-safe">
         <header className="pt-8 sm:pt-16">
-          <BrandMark size={44} title="Step2Win" />
+          {/* splash-anchor: the launch splash hands its logo off to this mark. */}
+          <BrandMark size={44} title="Step2Win" className="splash-anchor" />
           <h1 className="mt-6 text-title-lg text-text-primary">{title}</h1>
           <p className="mt-1.5 text-body text-text-secondary">{subtitle}</p>
         </header>

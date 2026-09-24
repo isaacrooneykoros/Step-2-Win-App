@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="s2w_page">#0F1112</color>
+    <!-- bg-page (dark): hsl 200 14% 6.5%. -->
+    <color name="s2w_page">#0E1113</color>
     <bool name="s2w_light_bars">false</bool>
+    <!-- Launch splash mark: tokens brand, brand-fg and reward (dark). -->
+    <color name="s2w_splash_brand">#35BB85</color>
+    <color name="s2w_splash_fg">#0D1316</color>
+    <color name="s2w_splash_reward">#F4B434</color>
 </resources>

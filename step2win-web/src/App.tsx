@@ -5,6 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useAuthStore } from './store/authStore';
 import { applyThemeMode, loadThemeMode, ThemeMode } from './config/theme';
+import { loadPreferences } from './components/settings/preferences';
 import MainLayout from './components/layout/MainLayout';
 import { PageLoader } from './components/ui/LoadingSpinner';
 import { Toaster, toast } from './components/ui/Toast';
@@ -15,9 +16,12 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
 import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
-import LaunchSplashScreen from './screens/LaunchSplashScreen';
+import { BootSplash, shouldShowBootSplash } from './components/splash/BootSplash';
+import { setOnboardingOpen } from './lib/launchState';
 import type { ReactNode } from 'react';
-import { OnboardingScreen } from './components/screens/OnboardingScreen';
+
+// The onboarding (and its 3D scene) is only needed once per install: keep it out of the entry chunk.
+const OnboardingScreen = lazy(() => import('./components/screens/OnboardingScreen'));
 
 const HomeScreen = lazy(() => import('./screens/HomeScreen'));
 const ChallengesScreen = lazy(() => import('./screens/ChallengesScreen'));
@@ -65,21 +69,16 @@ function AuthLoadRedirect({
   isAuthenticated: boolean;
 }) {
   const location = useLocation();
-  const launchSeen = sessionStorage.getItem('launch_seen_v1') === 'true';
 
   // Still loading auth state - don't redirect yet
   if (loading) {
     return null;
   }
 
-  // Not authenticated paths that are allowed
+  // Not authenticated paths that are allowed. (The launch splash is an overlay now — BootSplash —
+  // so there is no separate /launch step; the route only redirects for old links.)
   const publicPaths = ['/launch', '/login', '/register', '/forgot-password'];
   const isPublicPath = publicPaths.includes(location.pathname);
-
-  // First visit - show launch screen
-  if (!launchSeen && location.pathname !== '/launch' && !isPublicPath) {
-    return <Navigate to="/launch" replace />;
-  }
 
   // If not authenticated and trying to access protected route, redirect to login
   if (!isAuthenticated && !isPublicPath) {
@@ -170,6 +169,7 @@ function NativeBackButtonGuard() {
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [bootSplash, setBootSplash] = useState(shouldShowBootSplash);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
   const init = useAuthStore((state) => state.init);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -220,9 +220,34 @@ export default function App() {
     setShowOnboarding(false);
   };
 
-  if (loading) return <PageLoader />;
+  useEffect(() => {
+    setOnboardingOpen(showOnboarding);
+  }, [showOnboarding]);
+
+  // Onboarding not seen yet on this install: fetch its chunk while the user is on the login
+  // screen, so it opens instantly after sign-in. Skipped with Data saver.
+  useEffect(() => {
+    if (loading || bootSplash || localStorage.getItem('onboarding_completed_v1') === 'true') return;
+    if (loadPreferences().dataSaver) return;
+    const timer = window.setTimeout(() => {
+      void import('./components/screens/OnboardingScreen').catch(() => null);
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [loading, bootSplash]);
+
+  const splash = bootSplash ? <BootSplash key="boot-splash" ready={!loading} onDone={() => setBootSplash(false)} /> : null;
+
+  if (loading) {
+    return (
+      <>
+        <PageLoader />
+        {splash}
+      </>
+    );
+  }
 
   return (
+    <>
     <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
         <BrowserRouter>
@@ -230,7 +255,7 @@ export default function App() {
           <AuthLoadRedirect loading={loading} isAuthenticated={isAuthenticated} />
           <Routes>
             {/* Public routes */}
-            <Route path="/launch" element={<LaunchSplashScreen />} />
+            <Route path="/launch" element={<Navigate to={isAuthenticated ? '/' : '/login'} replace />} />
             <Route path="/login" element={<LoginScreen />} />
             <Route path="/register" element={<RegisterScreen />} />
             <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
@@ -266,11 +291,17 @@ export default function App() {
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-          {showOnboarding && <OnboardingScreen onComplete={handleOnboardingComplete} />}
+          {showOnboarding && (
+            <Suspense fallback={<div className="fixed inset-0 z-50 bg-bg-page" aria-busy="true" />}>
+              <OnboardingScreen onComplete={handleOnboardingComplete} />
+            </Suspense>
+          )}
           <BiometricLockGate />
           <Toaster />
         </BrowserRouter>
     </QueryClientProvider>
     </ErrorBoundary>
+    {splash}
+    </>
   );
 }

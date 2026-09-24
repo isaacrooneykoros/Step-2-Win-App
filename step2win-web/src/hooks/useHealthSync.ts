@@ -414,6 +414,13 @@ export function useHealthSync() {
         return;
       }
 
+      // Background syncs never raise the system permission dialog (it would land on top of
+      // onboarding or whatever the user is doing); asking is left to the permission sheet.
+      if (isSilent) {
+        const current = await DeviceStepCounter.checkPermissions();
+        if (current.activityRecognition !== 'granted') return;
+      }
+
       const profile = queryClient.getQueryData<User>(['profile']);
       const activeSession = await ensureActiveStepSession();
       const data = await readNativeSensorSteps(profile, activeSession);

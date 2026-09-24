@@ -387,6 +387,12 @@
 .stagger > *:nth-child(n+6) { animation-delay: 200ms; }
 .live-dot { animation: pulseDot 2s ease-in-out infinite; }
 
+/* Launch splash: when the in-app theme differs from the OS, the splash starts in the OS palette
+   (matching the native splash) and eases into the app palette. */
+.boot-splash-sync, .boot-splash-sync * {
+  transition: background-color 360ms var(--ease-standard), fill 360ms var(--ease-standard), stroke 360ms var(--ease-standard), color 360ms var(--ease-standard);
+}
+
 /* Reduced motion: honour the OS setting and the in-app toggle (html.reduce-motion). */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

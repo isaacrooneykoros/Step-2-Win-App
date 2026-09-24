@@ -14,6 +14,7 @@ import { Sheet } from '../ui/Sheet';
 import Button from '../ui/Button';
 import { IconTile, Pill } from '../ui/Pill';
 import { ConnectionBanner } from '../ui/ConnectionBanner';
+import { useBootSplashActive, useOnboardingOpen } from '../../lib/launchState';
 import { isIOSApp, permissionCopy } from '../../utils/platform';
 import {
   checkNotificationPermission,
@@ -67,6 +68,9 @@ export default function MainLayout() {
   const [permissionsVersion, setPermissionsVersion] = useState(0);
   const { permissionStatus: globalPermissionStatus } = usePermissionStatus();
   const [showPermissionModal, setShowPermissionModal] = useState(false);
+  // Ask for permissions only once the launch splash and the first-run onboarding are out of the way.
+  const onboardingOpen = useOnboardingOpen();
+  const bootSplashActive = useBootSplashActive();
   const [notificationPermission, setNotificationPermission] = useState<'prompt' | 'prompt-with-rationale' | 'granted' | 'denied' | 'unavailable'>('prompt');
   const [cameraPermission, setCameraPermission] = useState<CameraPermissionState>('prompt');
   const [locationPermission, setLocationPermission] = useState<LocationPermissionState>('prompt');
@@ -185,9 +189,10 @@ export default function MainLayout() {
       return;
     }
 
+    if (onboardingOpen || bootSplashActive) return;
     const timer = window.setTimeout(() => setShowPermissionModal(true), 700);
     return () => window.clearTimeout(timer);
-  }, [canRequestCameraPermission, canRequestDevicePermission, canRequestLocationPermission, canRequestNotificationPermission]);
+  }, [canRequestCameraPermission, canRequestDevicePermission, canRequestLocationPermission, canRequestNotificationPermission, onboardingOpen, bootSplashActive]);
 
   const handleEnablePermission = async () => {
     const ok = await connectDevice();

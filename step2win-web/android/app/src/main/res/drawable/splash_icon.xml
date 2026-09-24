@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launch splash icon (Android 12+ SplashScreen API / core-splashscreen compat): the BrandMark
+     (40x40 viewBox) drawn at 96dp on the 288dp "icon without background" canvas. The in-app
+     boot splash (src/components/splash/BootSplash.tsx) draws the same mark, same size, same
+     centre, so the hand-off from native to web is invisible. Colours follow day/night. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="40"
+    android:viewportHeight="40">
+    <group
+        android:pivotX="20"
+        android:pivotY="20"
+        android:scaleX="0.33333"
+        android:scaleY="0.33333">
+        <path
+            android:fillColor="@color/s2w_splash_brand"
+            android:pathData="M11,0H29A11,11 0,0 1,40 11V29A11,11 0,0 1,29 40H11A11,11 0,0 1,0 29V11A11,11 0,0 1,11 0Z" />
+        <path
+            android:pathData="M11,29h6.5v-6.5H24V16h6.5V9.5"
+            android:strokeColor="@color/s2w_splash_fg"
+            android:strokeWidth="3.4"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:fillColor="@color/s2w_splash_reward"
+            android:pathData="M30.5,9.5m-2.6,0a2.6,2.6 0,1 1,5.2 0a2.6,2.6 0,1 1,-5.2 0" />
+    </group>
+</vector>

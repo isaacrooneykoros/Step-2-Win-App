@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { loadPreferences, usePreference } from '../components/settings/preferences';
 
 /**
  * Motion tokens. Mirrors the CSS custom properties in index.css so JS-driven
@@ -23,10 +24,18 @@ export const easing = {
 /** Ease-out cubic, used for numeric interpolation. */
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
 
-function readReducedMotion(): boolean {
+export function readReducedMotion(): boolean {
   if (typeof window === 'undefined') return false;
   if (document.documentElement.classList.contains('reduce-motion')) return true;
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+}
+
+/**
+ * Rich motion (3D scenes, choreographed sequences) runs only when neither reduced motion
+ * (OS or in-app) nor Data saver is on. Otherwise screens show static / minimal-fade versions.
+ */
+export function readRichMotion(): boolean {
+  return !readReducedMotion() && !loadPreferences().dataSaver;
 }
 
 /** True when the OS or the in-app setting asks for reduced motion. */
@@ -46,6 +55,13 @@ export function usePrefersReducedMotion(): boolean {
   }, []);
 
   return reduced;
+}
+
+/** Live version of `readRichMotion` for components. */
+export function useRichMotion(): boolean {
+  const reduced = usePrefersReducedMotion();
+  const dataSaver = usePreference('dataSaver');
+  return !reduced && !dataSaver;
 }
 
 /**

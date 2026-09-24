@@ -1,8 +1,12 @@
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ArrowRight } from 'lucide-react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { animate, cubicBezier, stagger, utils, type JSAnimation } from 'animejs';
 import { Button } from '../ui/Button';
 import { BrandMark, Wordmark } from '../brand/BrandMark';
-import { usePrefersReducedMotion } from '../../lib/motion';
+import { readRichMotion } from '../../lib/motion';
+import { useBootSplashActive } from '../../lib/launchState';
+import { pushBackHandler } from '../../lib/backButton';
+import type { OnboardingWorld } from '../../lib/three/onboardingWorld';
 import {
   ChallengeIllustration,
   ConsistencyIllustration,
@@ -18,6 +22,7 @@ interface Page {
   eyebrow: string;
   title: string;
   body: string;
+  /** Static illustration: reduced motion, Data saver, or no WebGL. */
   Illustration: React.ComponentType<{ active: boolean }>;
 }
 
@@ -48,48 +53,276 @@ const PAGES: Page[] = [
   },
 ];
 
+const LAST = PAGES.length - 1;
 /** Horizontal distance (px) or fraction of width that commits a swipe. */
 const SWIPE_MIN_PX = 48;
+/** If the 3D chunk has not produced a scene by then, show the static illustrations. */
+const SCENE_DEADLINE_MS = 2500;
 
+const ease = {
+  standard: cubicBezier(0.2, 0, 0, 1),
+  enter: cubicBezier(0.05, 0.7, 0.1, 1),
+  exit: cubicBezier(0.3, 0, 0.8, 0.15),
+};
+
+const clampIndex = (i: number) => Math.max(0, Math.min(LAST, i));
+
+/**
+ * First-run introduction. One persistent Three.js canvas (lazy chunk) flies between four
+ * landings joined by steps while the copy — real DOM text — is choreographed with anime.js.
+ * Swipes scrub the camera and the progress bar with the finger. Reduced motion, Data saver or
+ * missing WebGL fall back to the static illustrations with plain fades.
+ */
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
-  const reduced = usePrefersReducedMotion();
+  const [rich] = useState(readRichMotion);
+  const splashActive = useBootSplashActive();
   const [index, setIndex] = useState(0);
-  const [dragX, setDragX] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const viewportRef = useRef<HTMLDivElement>(null);
-  const pointer = useRef<{ id: number; x: number; y: number; axis: 'x' | 'y' | null } | null>(null);
+  const [heroMode, setHeroMode] = useState<'loading' | '3d' | 'fallback'>(rich ? 'loading' : 'fallback');
   const headingId = useId();
 
-  const last = PAGES.length - 1;
-  const isLast = index === last;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const heroRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
+  const fillRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const worldRef = useRef<OnboardingWorld | null>(null);
+  const heroModeRef = useRef(heroMode);
+  heroModeRef.current = heroMode;
 
-  const goTo = useCallback((next: number) => {
-    setIndex(Math.max(0, Math.min(PAGES.length - 1, next)));
+  /** Continuous position (0…3) driving the camera and the progress bar. */
+  const progress = useRef({ f: 0 });
+  const progressAnim = useRef<JSAnimation | null>(null);
+  /** Latest requested page (state `index` follows once the old copy has left). */
+  const target = useRef(0);
+  const direction = useRef(1);
+  const textLeaving = useRef<JSAnimation | null>(null);
+  const introStarted = useRef(false);
+  const firstStationPlayed = useRef(false);
+  const pointer = useRef<{ id: number; x: number; y: number; axis: 'x' | 'y' | null; dx: number } | null>(null);
+
+  const applyProgress = useCallback(() => {
+    const f = progress.current.f;
+    worldRef.current?.setProgress(f);
+    if (!rich) return;
+    fillRefs.current.forEach((el, i) => {
+      if (el) el.style.transform = `scaleX(${Math.max(0, Math.min(1, f - i + 1))})`;
+    });
+  }, [rich]);
+
+  const playFirstStation = useCallback(() => {
+    if (firstStationPlayed.current || !introStarted.current || !worldRef.current) return;
+    firstStationPlayed.current = true;
+    worldRef.current.enterStation(target.current, 220);
   }, []);
 
+  const goTo = useCallback(
+    (next: number) => {
+      const to = clampIndex(next);
+      if (to === target.current && !pointer.current) {
+        // Snap back after an uncommitted drag.
+        if (rich) {
+          progressAnim.current?.pause();
+          progressAnim.current = animate(progress.current, { f: to, duration: 420, ease: ease.standard, onUpdate: applyProgress });
+          if (textRef.current && !textLeaving.current) {
+            animate(textRef.current, { translateX: 0, opacity: 1, duration: 320, ease: ease.standard });
+          }
+        }
+        return;
+      }
+      direction.current = to > target.current ? 1 : -1;
+      target.current = to;
+
+      if (!rich) {
+        progress.current.f = to;
+        applyProgress();
+        if (textRef.current) textRef.current.style.transform = '';
+        setIndex(to);
+        return;
+      }
+
+      // Camera and progress bar glide from wherever they are (mid-drag or mid-flight).
+      progressAnim.current?.pause();
+      progressAnim.current = animate(progress.current, {
+        f: to,
+        duration: 820,
+        ease: ease.standard,
+        onUpdate: applyProgress,
+      });
+      worldRef.current?.enterStation(to, 360);
+      firstStationPlayed.current = true;
+
+      // The current copy leaves in the travel direction; the next arrives from the other side.
+      if (!textLeaving.current && textRef.current) {
+        textLeaving.current = animate(textRef.current, {
+          translateX: -direction.current * 28,
+          opacity: 0,
+          duration: 150,
+          ease: ease.exit,
+          onComplete: () => {
+            textLeaving.current = null;
+            setIndex(target.current);
+          },
+        });
+      }
+    },
+    [applyProgress, rich],
+  );
+
+  // New page copy: eyebrow, title and body arrive in sequence.
+  const mountedIndex = useRef(index);
+  useLayoutEffect(() => {
+    if (mountedIndex.current === index) return;
+    mountedIndex.current = index;
+    const container = textRef.current;
+    if (!rich || !container) return;
+    utils.set(container, { translateX: 0, opacity: 1 });
+    animate(Array.from(container.children), {
+      opacity: [0, 1],
+      translateX: [direction.current * 24, 0],
+      duration: 460,
+      ease: ease.enter,
+      delay: stagger(55),
+    });
+  }, [index, rich]);
+
   const handleNext = useCallback(() => {
-    if (index >= PAGES.length - 1) onComplete();
-    else goTo(index + 1);
+    if (target.current < LAST) goTo(target.current + 1);
+    else if (index === LAST) onComplete();
   }, [goTo, index, onComplete]);
+
+  // Intro choreography once the screen is actually visible (not under the launch splash).
+  useEffect(() => {
+    if (splashActive || introStarted.current) return;
+    introStarted.current = true;
+    const root = rootRef.current;
+    if (!root) return;
+    applyProgress();
+    if (rich) {
+      animate(root.querySelectorAll('[data-intro]'), {
+        opacity: [0, 1],
+        translateY: [14, 0],
+        duration: 560,
+        ease: ease.enter,
+        delay: stagger(70),
+      });
+    }
+    playFirstStation();
+  }, [splashActive, rich, applyProgress, playFirstStation]);
+
+  // The 3D world: one canvas for the whole flow, created after the splash has gone.
+  useEffect(() => {
+    if (!rich || splashActive) return;
+    let cancelled = false;
+    let world: OnboardingWorld | null = null;
+    let canvas: HTMLCanvasElement | null = null;
+    let observer: ResizeObserver | null = null;
+
+    const teardown = () => {
+      observer?.disconnect();
+      observer = null;
+      world?.dispose();
+      world = null;
+      worldRef.current = null;
+      canvas?.remove();
+      canvas = null;
+    };
+
+    const deadline = window.setTimeout(() => {
+      if (!worldRef.current) setHeroMode('fallback');
+    }, SCENE_DEADLINE_MS);
+
+    import('../../lib/three/onboardingWorld')
+      .then((mod) => {
+        const hero = heroRef.current;
+        if (cancelled || !hero || heroModeRef.current === 'fallback') return;
+        // Created imperatively: a canvas whose WebGL context was released cannot be reused.
+        canvas = document.createElement('canvas');
+        canvas.setAttribute('aria-hidden', 'true');
+        // Soft bottom edge: mid-flight the landing can dip below the hero; it fades instead of being cut.
+        const mask = 'linear-gradient(to bottom, #000 86%, transparent 100%)';
+        canvas.style.cssText = `position:absolute;inset:0;width:100%;height:100%;opacity:0;display:block;-webkit-mask-image:${mask};mask-image:${mask};`;
+        hero.appendChild(canvas);
+        try {
+          world = mod.createOnboardingWorld(canvas, {
+            tokenScope: rootRef.current ?? document.documentElement,
+            onContextLost: () => {
+              teardown();
+              setHeroMode('fallback');
+            },
+            onFirstFrame: () => {
+              if (canvas) animate(canvas, { opacity: [0, 1], duration: 420, ease: ease.standard });
+            },
+          });
+        } catch {
+          teardown();
+          setHeroMode('fallback');
+          return;
+        }
+        worldRef.current = world;
+        const rect = hero.getBoundingClientRect();
+        world.resize(rect.width, rect.height);
+        world.setProgress(progress.current.f);
+        observer = new ResizeObserver((entries) => {
+          const box = entries[0]?.contentRect;
+          if (box) world?.resize(box.width, box.height);
+        });
+        observer.observe(hero);
+        setHeroMode('3d');
+        // A fresh world starts with every landing reset: play the current one (again, if remounted).
+        firstStationPlayed.current = false;
+        playFirstStation();
+      })
+      .catch(() => {
+        if (!cancelled) setHeroMode('fallback');
+      });
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(deadline);
+      teardown();
+    };
+  }, [rich, splashActive, playFirstStation]);
+
+  // Stop every running tween when the overlay closes.
+  useEffect(
+    () => () => {
+      progressAnim.current?.pause();
+      textLeaving.current?.pause();
+    },
+    [],
+  );
+
+  // Android hardware back: previous page; on the first page the app's normal handling applies.
+  useEffect(
+    () =>
+      pushBackHandler(() => {
+        if (target.current > 0) {
+          goTo(target.current - 1);
+          return true;
+        }
+        return false;
+      }),
+    [goTo],
+  );
 
   // Keyboard: arrows move between pages; Escape skips.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+      const el = event.target as HTMLElement | null;
+      if (el && ['INPUT', 'TEXTAREA'].includes(el.tagName)) return;
       if (event.key === 'ArrowRight') {
         event.preventDefault();
-        goTo(index + 1);
+        goTo(target.current + 1);
       } else if (event.key === 'ArrowLeft') {
         event.preventDefault();
-        goTo(index - 1);
+        goTo(target.current - 1);
       } else if (event.key === 'Escape') {
         onComplete();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [goTo, index, onComplete]);
+  }, [goTo, onComplete]);
 
   // Lock the page behind the overlay.
   useEffect(() => {
@@ -100,10 +333,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
     };
   }, []);
 
-  // Pointer-based swipe (touch, pen and mouse drag).
+  // Swipe (touch, pen, mouse): the camera, progress bar and copy follow the finger.
   const onPointerDown = (event: React.PointerEvent) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
-    pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY, axis: null };
+    pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY, axis: null, dx: 0 };
   };
 
   const onPointerMove = (event: React.PointerEvent) => {
@@ -115,35 +348,46 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
       if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
       p.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
       if (p.axis === 'x') {
-        setDragging(true);
         (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+        progressAnim.current?.pause();
       }
     }
     if (p.axis !== 'x') return;
+    const width = viewportRef.current?.clientWidth || 360;
     // Resist at the ends so the edges feel physical.
-    const atEdge = (index === 0 && dx > 0) || (index === last && dx < 0);
-    setDragX(atEdge ? dx * 0.3 : dx);
+    const atEdge = (target.current === 0 && dx > 0) || (target.current === LAST && dx < 0);
+    p.dx = atEdge ? dx * 0.3 : dx;
+    if (textLeaving.current || !textRef.current) return;
+    if (rich) {
+      progress.current.f = target.current - p.dx / width;
+      applyProgress();
+      utils.set(textRef.current, { translateX: p.dx * 0.35, opacity: 1 - Math.min(0.75, (Math.abs(p.dx) / width) * 1.6) });
+    } else {
+      textRef.current.style.transform = `translateX(${p.dx * 0.35}px)`;
+    }
   };
 
   const endDrag = (event: React.PointerEvent) => {
     const p = pointer.current;
     if (!p || p.id !== event.pointerId) return;
     pointer.current = null;
-    if (p.axis === 'x') {
-      const width = viewportRef.current?.clientWidth ?? 360;
-      const threshold = Math.min(SWIPE_MIN_PX, width * 0.2);
-      if (dragX <= -threshold) goTo(index + 1);
-      else if (dragX >= threshold) goTo(index - 1);
-    }
-    setDragging(false);
-    setDragX(0);
+    if (p.axis !== 'x') return;
+    const width = viewportRef.current?.clientWidth || 360;
+    const threshold = Math.min(SWIPE_MIN_PX, width * 0.2);
+    if (p.dx <= -threshold) goTo(target.current + 1);
+    else if (p.dx >= threshold) goTo(target.current - 1);
+    else goTo(target.current);
+    if (!rich && textRef.current) textRef.current.style.transform = '';
   };
 
-  const trackTransition = dragging || reduced ? 'none' : 'transform var(--dur-deliberate) var(--ease-standard)';
   const page = PAGES[index];
+  const isLast = index === LAST;
+  const introHidden = rich ? { opacity: 0 } : undefined;
+  const Illustration = page.Illustration;
 
   return (
     <div
+      ref={rootRef}
       className="fixed inset-0 z-50 flex flex-col bg-bg-page"
       role="dialog"
       aria-modal="true"
@@ -151,102 +395,124 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
     >
       <div className="mx-auto flex h-full w-full max-w-md flex-col pt-safe pb-safe">
         {/* Top bar */}
-        <div className="flex h-14 shrink-0 items-center justify-between pl-5 pr-2">
+        <div className="flex h-14 shrink-0 items-center justify-between pl-5 pr-2" data-intro style={introHidden}>
           <span className="inline-flex items-center gap-2">
             <BrandMark size={28} />
             <Wordmark className="text-headline" />
           </span>
-          {!isLast && (
-            <button
-              type="button"
-              onClick={onComplete}
-              className="min-h-touch rounded-full px-4 text-callout font-semibold text-text-secondary hover:bg-bg-input hover:text-text-primary"
-            >
-              Skip
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onComplete}
+            aria-label="Skip introduction"
+            aria-hidden={isLast || undefined}
+            tabIndex={isLast ? -1 : 0}
+            className={[
+              'min-h-touch rounded-full px-4 text-callout font-semibold text-text-secondary hover:bg-bg-input hover:text-text-primary',
+              'transition-opacity duration-normal ease-standard',
+              isLast ? 'pointer-events-none opacity-0' : 'opacity-100',
+            ].join(' ')}
+          >
+            Skip
+          </button>
         </div>
 
-        {/* Pages */}
+        {/* Progress: one segment per page; fills follow the camera, including mid-swipe. */}
+        <div className="flex shrink-0 gap-1.5 px-5" role="group" aria-label="Choose page" data-intro style={introHidden}>
+          {PAGES.map((p, i) => (
+            <button
+              key={p.eyebrow}
+              type="button"
+              onClick={() => goTo(i)}
+              aria-label={`Page ${i + 1} of ${PAGES.length}: ${p.eyebrow}`}
+              aria-current={i === index ? 'step' : undefined}
+              className="flex h-6 flex-1 items-center"
+            >
+              <span className="relative block h-1 w-full overflow-hidden rounded-full bg-bg-input">
+                <span
+                  ref={(el) => {
+                    fillRefs.current[i] = el;
+                  }}
+                  className="absolute inset-0 origin-left rounded-full bg-brand"
+                  style={
+                    rich
+                      ? undefined
+                      : {
+                          transform: `scaleX(${i <= index ? 1 : 0})`,
+                          transition: 'transform var(--dur-normal) var(--ease-standard)',
+                        }
+                  }
+                />
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Scene + copy: one swipeable surface. */}
         <div
           ref={viewportRef}
-          className="relative min-h-0 flex-1 touch-pan-y select-none overflow-hidden"
+          className="relative flex min-h-0 flex-1 touch-pan-y select-none flex-col"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
           aria-roledescription="carousel"
         >
+          <div ref={heroRef} className="relative min-h-[160px] flex-1" aria-hidden="true">
+            {heroMode === 'fallback' && (
+              <div key={index} className="fade-in absolute inset-0 flex items-center justify-center px-6 py-4">
+                <div className="h-full max-h-[260px] w-full">
+                  <Illustration active />
+                </div>
+              </div>
+            )}
+          </div>
+
           <div
-            className="flex h-full"
-            style={{
-              transform: `translate3d(calc(${-index * 100}% + ${dragX}px), 0, 0)`,
-              transition: trackTransition,
-            }}
+            ref={textRef}
+            className="min-h-[196px] shrink-0 px-6 pb-2 pt-3"
+            aria-roledescription="slide"
+            aria-label={`${index + 1} of ${PAGES.length}`}
+            data-intro
+            style={introHidden}
           >
-            {PAGES.map((p, i) => {
-              const active = i === index;
-              const Illustration = p.Illustration;
-              return (
-                <section
-                  key={p.eyebrow}
-                  className="flex h-full w-full shrink-0 flex-col justify-center px-6"
-                  aria-roledescription="slide"
-                  aria-label={`${i + 1} of ${PAGES.length}`}
-                  aria-hidden={!active}
-                >
-                  {/* Illustration + copy stay together as one centred composition on tall screens. */}
-                  <div className="flex min-h-[150px] shrink items-center justify-center py-4" style={{ height: 'min(280px, 40dvh)' }}>
-                    <div className="h-full w-full">
-                      <Illustration active={active} />
-                    </div>
-                  </div>
-                  {/* Min-height text block so headlines sit at the same place on every page. */}
-                  <div className="min-h-[176px] shrink-0 pb-4">
-                    <p className="eyebrow text-brand">{p.eyebrow}</p>
-                    <h2
-                      id={active ? headingId : undefined}
-                      className="mt-2 text-title-lg text-text-primary"
-                    >
-                      {p.title}
-                    </h2>
-                    <p className="mt-2 text-body text-text-secondary">{p.body}</p>
-                  </div>
-                </section>
-              );
-            })}
+            <p className="eyebrow text-brand">{page.eyebrow}</p>
+            <h2 id={headingId} className="mt-2 text-title-lg text-text-primary">
+              {page.title}
+            </h2>
+            <p className="mt-2 text-body text-text-secondary">{page.body}</p>
           </div>
         </div>
 
         {/* Controls */}
-        <div className="shrink-0 px-6 pb-4 pt-2">
-          <div className="mb-5 flex items-center justify-center gap-1" role="group" aria-label="Choose page">
-            {PAGES.map((p, i) => (
+        <div className="shrink-0 px-6 pb-4 pt-3" data-intro style={introHidden}>
+          <div className="flex items-center">
+            <div
+              className="shrink-0 overflow-hidden transition-[width,margin] duration-normal ease-standard"
+              style={{ width: index > 0 ? 52 : 0, marginRight: index > 0 ? 12 : 0 }}
+            >
               <button
-                key={p.eyebrow}
                 type="button"
-                onClick={() => goTo(i)}
-                aria-label={`Page ${i + 1} of ${PAGES.length}: ${p.eyebrow}`}
-                aria-current={i === index ? 'step' : undefined}
-                className="flex h-6 items-center justify-center px-1"
+                onClick={() => goTo(target.current - 1)}
+                aria-label="Previous page"
+                aria-hidden={index === 0 || undefined}
+                tabIndex={index === 0 ? -1 : 0}
+                className="flex h-[52px] w-[52px] items-center justify-center rounded-2xl border border-border bg-bg-card text-text-primary hover:bg-bg-input"
               >
-                <span
-                  className={[
-                    'block h-2 rounded-full transition-[width,background-color] duration-normal ease-standard',
-                    i === index ? 'w-6 bg-brand' : 'w-2 bg-border hover:bg-text-muted',
-                  ].join(' ')}
-                />
+                <ArrowLeft size={20} aria-hidden />
               </button>
-            ))}
+            </div>
+            <Button
+              size="lg"
+              className="min-w-0 flex-1"
+              onClick={handleNext}
+              aria-label={isLast ? 'Get started' : 'Next page'}
+              rightIcon={isLast ? undefined : <ArrowRight size={18} aria-hidden />}
+            >
+              <span key={isLast ? 'start' : 'next'} className="fade-in">
+                {isLast ? 'Get started' : 'Next'}
+              </span>
+            </Button>
           </div>
-          <Button
-            size="lg"
-            fullWidth
-            onClick={handleNext}
-            rightIcon={isLast ? undefined : <ArrowRight size={18} aria-hidden />}
-          >
-            {isLast ? 'Get started' : 'Next'}
-          </Button>
           <p className="sr-only" aria-live="polite">
             {`Page ${index + 1} of ${PAGES.length}: ${page.title}`}
           </p>
