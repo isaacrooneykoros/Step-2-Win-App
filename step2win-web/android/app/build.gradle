@@ -1,5 +1,32 @@
 apply plugin: 'com.android.application'
 
+// Release signing: the upload keystore lives OUTSIDE the repo. Lookup order:
+//   1. env STEP2WIN_KEYSTORE_PROPERTIES (path to a keystore.properties file)
+//   2. android/keystore.properties (git-ignored)
+//   3. C:/Users/Admin/Step2Win-keys/keystore.properties (maintainer machine, if present)
+// keystore.properties keys: storeFile, storePassword, keyAlias, keyPassword.
+// If none is found the release build is left unsigned so CI/other machines still configure.
+def resolveKeystorePropertiesFile = {
+    def envPath = System.getenv('STEP2WIN_KEYSTORE_PROPERTIES')
+    if (envPath?.trim()) {
+        def f = new File(envPath.trim())
+        if (f.isFile()) return f
+        logger.warn("STEP2WIN_KEYSTORE_PROPERTIES points to a missing file; ignoring it.")
+    }
+    def rootFile = rootProject.file('keystore.properties')
+    if (rootFile.isFile()) return rootFile
+    def localFile = new File('C:/Users/Admin/Step2Win-keys/keystore.properties')
+    if (localFile.isFile()) return localFile
+    return null
+}
+def keystorePropertiesFile = resolveKeystorePropertiesFile()
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile != null) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+def hasReleaseSigning = keystorePropertiesFile != null &&
+        ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].every { keystoreProperties.getProperty(it)?.trim() }
+
 android {
     namespace = "com.step2win.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -8,7 +35,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +43,26 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                // storeFile may be absolute or relative to the properties file's directory.
+                def storePath = keystoreProperties.getProperty('storeFile').trim()
+                def store = new File(storePath)
+                storeFile = store.isAbsolute() ? store : new File(keystorePropertiesFile.parentFile, storePath)
+                storePassword = keystoreProperties.getProperty('storePassword')
+                keyAlias = keystoreProperties.getProperty('keyAlias')
+                keyPassword = keystoreProperties.getProperty('keyPassword')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.release
+            } else {
+                logger.warn("No keystore.properties found: release build will be UNSIGNED.")
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

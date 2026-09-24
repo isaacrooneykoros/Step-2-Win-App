@@ -5,11 +5,39 @@ import { notifyFeatureDisabled, showMaintenance } from './platformNotices';
 
 const api = axios.create({
   baseURL: resolveApiBaseUrl(),
-  timeout: 15000,  // 15 seconds — prevents hanging requests
+  // The hosted server sleeps when idle and can take ~30s to wake up, so allow
+  // for that instead of failing the first request after a quiet period.
+  timeout: 45000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+// Cold-start retries. Reads are always safe to repeat; the only writes repeated
+// are ones where a duplicate can't cause harm (login returns fresh tokens).
+// Anything that moves money or creates records is never resent automatically.
+const MAX_WAKE_RETRIES = 2;
+const WAKE_RETRY_DELAYS_MS = [2000, 5000];
+const RETRY_SAFE_POSTS = ['/api/auth/login/', '/api/auth/refresh/'];
+const WAKING_STATUSES = new Set([502, 503, 504]);
+
+function isRetryableWakeFailure(error: AxiosError): boolean {
+  const config = error.config as (typeof error.config & { _wakeRetries?: number }) | undefined;
+  // A timeout already waited out the wake-up window; repeating it only doubles the wait.
+  if (!config || error.code === 'ERR_CANCELED' || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+    return false;
+  }
+  if ((config._wakeRetries ?? 0) >= MAX_WAKE_RETRIES) return false;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+
+  const status = error.response?.status;
+  const serverWaking = !error.response || (status !== undefined && WAKING_STATUSES.has(status));
+  if (!serverWaking) return false;
+
+  const method = (config.method ?? 'get').toLowerCase();
+  if (method === 'get' || method === 'head' || method === 'options') return true;
+  return method === 'post' && RETRY_SAFE_POSTS.some((path) => (config.url ?? '').endsWith(path));
+}
 
 // Request interceptor - add auth token
 api.interceptors.request.use(
@@ -61,6 +89,14 @@ api.interceptors.response.use(
     if (error.response?.status === 403 && payload?.code === 'feature_disabled') {
       notifyFeatureDisabled(payload.error);
       return Promise.reject(error);
+    }
+
+    if (isRetryableWakeFailure(error)) {
+      const config = originalRequest as typeof originalRequest & { _wakeRetries?: number };
+      const attempt = config._wakeRetries ?? 0;
+      config._wakeRetries = attempt + 1;
+      await new Promise((resolve) => setTimeout(resolve, WAKE_RETRY_DELAYS_MS[attempt] ?? 5000));
+      return api(config);
     }
 
     // If error is 401 and we haven't tried to refresh yet
