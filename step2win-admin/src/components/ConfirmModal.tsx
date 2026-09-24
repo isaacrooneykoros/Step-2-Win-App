@@ -1,4 +1,9 @@
-import { AlertTriangle, X, Loader2 } from 'lucide-react'
+import { useRef, useState, type ReactNode } from 'react'
+import { AlertTriangle, Info, ShieldAlert } from 'lucide-react'
+import { Modal } from './ui/Modal'
+import { Button } from './ui/Button'
+import { Input } from './ui/Input'
+import { cn } from '../lib/cn'
 
 interface ConfirmModalProps {
   open:       boolean
@@ -6,77 +11,111 @@ interface ConfirmModalProps {
   onConfirm:  () => void
   loading?:   boolean
   title:      string
-  message:    string
+  /** What will happen, in plain words. */
+  message:    ReactNode
   confirmLabel?:  string
   cancelLabel?:   string
+  /** `danger` = irreversible / money / access; `warning` = reversible but impactful; `info` = routine. */
   variant?:   'danger' | 'warning' | 'info'
+  /** Key facts about the target, shown as a compact list (e.g. User, Amount, Reference). */
+  details?:   Array<{ label: string; value: ReactNode }>
+  /** Extra consequence line, e.g. "This cannot be undone." Shown emphasised. */
+  consequence?: ReactNode
+  /** Require typing this exact text to enable the confirm button (for the most destructive actions). */
+  confirmText?: string
+  /** Extra content (e.g. a reason textarea). */
+  children?:  ReactNode
+  /** Disable confirm (e.g. until a required reason is entered). */
+  confirmDisabled?: boolean
 }
 
+const TONE = {
+  danger:  { icon: ShieldAlert,   box: 'bg-danger-soft text-danger',   button: 'danger' as const },
+  warning: { icon: AlertTriangle, box: 'bg-warning-soft text-warning', button: 'primary' as const },
+  info:    { icon: Info,          box: 'bg-info-soft text-info',       button: 'primary' as const },
+}
+
+/**
+ * Confirmation for consequential actions. States the consequence, lists the
+ * affected record, locks while the request runs, and can require typed
+ * confirmation. Cancel receives initial focus so Enter never confirms by accident.
+ */
 export function ConfirmModal({
   open, onClose, onConfirm, loading,
   title, message,
   confirmLabel = 'Confirm',
   cancelLabel  = 'Cancel',
   variant      = 'danger',
+  details, consequence, confirmText, children, confirmDisabled,
 }: ConfirmModalProps) {
-  if (!open) return null
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const [typed, setTyped] = useState('')
+  const tone = TONE[variant]
+  const Icon = tone.icon
+  const typedOk = !confirmText || typed.trim() === confirmText
 
-  const colors = {
-    danger:  { icon: '#F06060', bg: 'rgba(240,96,96,0.1)',   btn: '#DC2626', btnHover: '#B91C1C' },
-    warning: { icon: '#F5A623', bg: 'rgba(245,166,35,0.1)',  btn: '#D97706', btnHover: '#B45309' },
-    info:    { icon: '#4F9CF9', bg: 'rgba(79,156,249,0.1)',  btn: '#7C6FF7', btnHover: '#6D5FE8' },
+  const close = () => {
+    if (loading) return
+    setTyped('')
+    onClose()
   }
-  const c = colors[variant]
 
   return (
-    <div
-      className="fixed inset-0 z-100 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-      onClick={onClose}>
-      <div
-        className="w-full max-w-md rounded-2xl p-6 fade-in"
-        style={{ background: '#191C28', border: '1px solid #21263A',
-                 boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}
-        onClick={e => e.stopPropagation()}>
-
-        {/* Header */}
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-              style={{ background: c.bg }}>
-              <AlertTriangle size={18} style={{ color: c.icon }} />
-            </div>
-            <h3 className="text-ink-primary font-bold text-base">{title}</h3>
-          </div>
-          <button onClick={onClose}
-            className="w-7 h-7 rounded-lg flex items-center justify-center
-                       hover:bg-surface-elevated transition-colors">
-            <X size={14} color="#7B82A0" />
-          </button>
-        </div>
-
-        <p className="text-ink-secondary text-sm mb-6 leading-relaxed">{message}</p>
-
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl text-ink-secondary text-sm
-                       font-semibold transition-colors hover:bg-surface-elevated"
-            style={{ border: '1px solid #21263A' }}>
+    <Modal
+      open={open}
+      onClose={close}
+      dismissible={!loading}
+      role="alertdialog"
+      size="sm"
+      initialFocus={cancelRef}
+      title={title}
+      icon={
+        <span className={cn('flex h-8 w-8 items-center justify-center rounded-md', tone.box)}>
+          <Icon size={16} aria-hidden />
+        </span>
+      }
+      footer={
+        <>
+          <Button ref={cancelRef} variant="secondary" onClick={close} disabled={loading}>
             {cancelLabel}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant={tone.button}
             onClick={onConfirm}
-            disabled={loading}
-            className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold
-                       transition-colors flex items-center justify-center gap-2
-                       disabled:opacity-60"
-            style={{ background: c.btn }}>
-            {loading && <Loader2 size={14} className="animate-spin" />}
+            loading={loading}
+            disabled={!typedOk || confirmDisabled}
+          >
             {confirmLabel}
-          </button>
-        </div>
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-sm">
+        <div className="leading-relaxed text-ink-secondary">{message}</div>
+        {details && details.length > 0 && (
+          <dl className="divide-y divide-[var(--border)] rounded-md border border-surface-border">
+            {details.map((d) => (
+              <div key={d.label} className="flex items-baseline justify-between gap-4 px-3 py-2">
+                <dt className="text-xs text-ink-muted">{d.label}</dt>
+                <dd className="min-w-0 truncate text-right font-medium text-ink-primary">{d.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {consequence && (
+          <p className={cn('text-sm font-medium', variant === 'danger' ? 'text-danger' : 'text-ink-primary')}>{consequence}</p>
+        )}
+        {children}
+        {confirmText && (
+          <Input
+            label={<>Type <span className="mono font-semibold text-ink-primary">{confirmText}</span> to confirm</>}
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        )}
       </div>
-    </div>
+    </Modal>
   )
 }

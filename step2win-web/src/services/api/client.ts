@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import { Preferences } from '@capacitor/preferences';
 import { resolveApiBaseUrl } from '../../config/network';
+import { notifyFeatureDisabled, showMaintenance } from './platformNotices';
 
 const api = axios.create({
   baseURL: resolveApiBaseUrl(),
@@ -50,6 +51,17 @@ api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config;
+
+    // Admin-controlled platform states (Settings > Customer access).
+    const payload = error.response?.data as { code?: string; error?: string } | undefined;
+    if (error.response?.status === 503 && payload?.code === 'maintenance') {
+      showMaintenance(payload.error);
+      return Promise.reject(error);
+    }
+    if (error.response?.status === 403 && payload?.code === 'feature_disabled') {
+      notifyFeatureDisabled(payload.error);
+      return Promise.reject(error);
+    }
 
     // If error is 401 and we haven't tried to refresh yet
     if (error.response?.status === 401 && originalRequest && !(originalRequest as any)._retry) {

@@ -1,614 +1,337 @@
-import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Download, FileBarChart2, DollarSign, Users, Activity, TrendingUp, Calendar, RefreshCw, ArrowRight } from 'lucide-react';
-import { adminApi } from '../services/adminApi';
-import { LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import { formatKES } from '../utils/currency';
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { format } from 'date-fns'
+import {
+  ArrowDownToLine, ArrowUpFromLine, Banknote, CheckCircle2, ChevronDown, ChevronRight, Coins, Download, Landmark, RefreshCw, Scale, ShieldAlert,
+} from 'lucide-react'
+import { PageHeader } from '../components/PageHeader'
+import { StatCard } from '../components/StatCard'
+import { StatusBadge } from '../components/StatusBadge'
+import { Panel } from '../components/ui/Card'
+import { Button } from '../components/ui/Button'
+import { EmptyState } from '../components/ui/EmptyState'
+import { ErrorState } from '../components/ui/ErrorState'
+import { Skeleton } from '../components/ui/Skeleton'
+import { ChartLegend } from '../components/charts/ChartTooltip'
+import { SERIES } from '../lib/chartTheme'
+import { formatKES, formatKESShort, formatNumber, formatPercent } from '../lib/format'
+import { downloadCsv, financeApi } from '../components/finance/api'
+import { ChartSkeleton, MeterList, TimeBarChart, bucketDaily } from '../components/finance/charts'
+import type { FinanceReport, ReconciliationCheck, WithdrawalStatus } from '../components/finance/types'
+import {
+  Money, PeriodPicker, WITHDRAWAL_STATUS_LABEL, When, formatPeriod, periodParams, toNum, type Period,
+} from '../components/finance/ui'
 
-interface RevenueReport {
-  summary: {
-    total_deposits: number;
-    total_payouts: number;
-    total_withdrawals: number;
-    platform_fees: number;
-    net_revenue: number;
-    deposit_count: number;
-    payout_count: number;
-    withdrawal_count: number;
-  };
-  daily_data: Array<{
-    date: string;
-    revenue: number;
-    deposits: number;
-  }>;
+const DAILY_KEYS = ['deposits', 'withdrawals_requested', 'withdrawals_paid', 'entries', 'payouts', 'refunds', 'fees'] as const
+
+function sum(report: FinanceReport | undefined, key: (typeof DAILY_KEYS)[number]) {
+  return (report?.daily ?? []).reduce((a, r) => a + (Number(r[key]) || 0), 0)
 }
 
-interface RetentionReport {
-  summary: {
-    total_users: number;
-    active_users: number;
-    overall_retention: number;
-  };
-  weekly_data: Array<{
-    week_start: string;
-    new_users: number;
-    active_users: number;
-    retention_rate: number;
-  }>;
+function FlowRow({ label, note, value, sign, strong }: { label: string; note?: string; value: unknown; sign?: '+' | '−' | '='; strong?: boolean }) {
+  return (
+    <li className={strong ? 'flex items-baseline justify-between gap-3 border-t border-surface-strong px-4 pb-1 pt-2.5' : 'flex items-baseline justify-between gap-3 px-4 py-2'}>
+      <span className="min-w-0">
+        <span className={strong ? 'block text-sm font-semibold text-ink-primary' : 'block text-sm text-ink-secondary'}>{label}</span>
+        {note && <span className="block text-xs text-ink-muted">{note}</span>}
+      </span>
+      <span className="flex shrink-0 items-baseline gap-2">
+        {sign && <span className="mono w-3 text-center text-ink-muted" aria-hidden>{sign}</span>}
+        <Money value={value} className={strong ? 'font-semibold' : ''} />
+      </span>
+    </li>
+  )
 }
 
-interface ChallengeReport {
-  summary: {
-    total_challenges: number;
-    completed: number;
-    cancelled: number;
-    active: number;
-    pending: number;
-    completion_rate: number;
-    avg_participants: number;
-    total_prize_pool: number;
-    total_participants: number;
-    winners_count: number;
-  };
-  daily_data: Array<{
-    date: string;
-    count: number;
-  }>;
-  status_breakdown: Record<string, number>;
+function CheckItem({ check }: { check: ReconciliationCheck }) {
+  const [open, setOpen] = useState(false)
+  const hasRows = !!check.rows?.length || !!check.detail
+  const Icon = check.ok ? CheckCircle2 : ShieldAlert
+  return (
+    <li className="px-4 py-3">
+      <div className="flex items-start gap-3">
+        <Icon size={16} aria-hidden className={check.ok ? 'mt-0.5 shrink-0 text-success' : 'mt-0.5 shrink-0 text-danger'} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-ink-primary">{check.label}</p>
+            <span className="flex items-center gap-2">
+              {!check.ok && (
+                <span className="num text-sm font-semibold text-danger">
+                  {check.unit.startsWith('KSh') ? formatKES(toNum(check.value)) : formatNumber(check.value)}{' '}
+                  <span className="text-xs font-normal text-ink-muted">{check.unit.replace(/^KSh /, '')}</span>
+                </span>
+              )}
+              <StatusBadge size="sm" tone={check.ok ? 'success' : 'danger'} label={check.ok ? 'Pass' : 'Check'} />
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-ink-muted">{check.description}</p>
+          {hasRows && !check.ok && (
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+              className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline"
+            >
+              {open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
+              {open ? 'Hide details' : 'Show details'}
+            </button>
+          )}
+          {open && check.detail && (
+            <dl className="mt-2 grid grid-cols-2 gap-2 text-xs">
+              {Object.entries(check.detail).map(([k, v]) => (
+                <div key={k} className="rounded border border-surface-border px-2 py-1.5">
+                  <dt className="text-ink-muted">{k.replace(/_/g, ' ')}</dt>
+                  <dd className="mono text-ink-primary">{formatKES(toNum(v))}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {open && check.rows && check.rows.length > 0 && (
+            <div className="mt-2 overflow-x-auto rounded border border-surface-border">
+              <table className="w-full text-xs">
+                <caption className="sr-only">{check.label} details</caption>
+                <thead>
+                  <tr className="border-b border-surface-border text-left text-ink-muted">
+                    {Object.keys(check.rows[0]).filter((k) => !k.endsWith('_id')).map((k) => (
+                      <th key={k} scope="col" className="whitespace-nowrap px-2 py-1.5 font-medium">{k.replace(/_/g, ' ')}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {check.rows.map((r, i) => (
+                    <tr key={i} className="border-b border-surface-border last:border-b-0">
+                      {Object.entries(r).filter(([k]) => !k.endsWith('_id')).map(([k, v]) => (
+                        <td key={k} className={typeof v === 'string' && /^-?\d+\.\d{2}$/.test(v) ? 'mono whitespace-nowrap px-2 py-1.5 text-right text-ink-primary' : 'px-2 py-1.5 text-ink-primary'}>
+                          {typeof v === 'string' && /^-?\d+\.\d{2}$/.test(v) ? formatKES(toNum(v)) : String(v)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </li>
+  )
 }
 
-interface TransactionReport {
-  summary: {
-    total_volume: number;
-    total_transactions: number;
-    total_deposits: number;
-    total_payouts: number;
-    avg_transaction_value: number;
-  };
-  daily_data: Array<{
-    date: string;
-    deposit_amount: number;
-    deposit_count: number;
-    payout_amount: number;
-    payout_count: number;
-    total_volume: number;
-  }>;
+function GatewayTable({ report }: { report: FinanceReport }) {
+  const statuses = ['completed', 'pending', 'initiated', 'failed', 'cancelled']
+  const rows = (['deposit', 'payout'] as const).map((type) => {
+    const cells = statuses.map((s) => report.gateway[`${type}:${s}`] ?? { count: 0, amount_kes: '0.00' })
+    const total = cells.reduce((a, c) => a + c.count, 0)
+    const failed = cells[3].count + cells[4].count
+    return { type, cells, total, failed }
+  })
+  return (
+    <table className="w-full text-sm">
+      <caption className="sr-only">Gateway results by type and status</caption>
+      <thead>
+        <tr className="border-b border-surface-border text-xs text-ink-muted">
+          <th scope="col" className="px-4 py-2 text-left font-medium">Type</th>
+          {statuses.map((s) => <th key={s} scope="col" className="px-3 py-2 text-right font-medium capitalize">{s}</th>)}
+          <th scope="col" className="px-4 py-2 text-right font-medium">Failed or cancelled</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.type} className="border-b border-surface-border last:border-b-0">
+            <th scope="row" className="px-4 py-2 text-left font-medium text-ink-primary">{r.type === 'deposit' ? 'STK deposits' : 'Payouts'}</th>
+            {r.cells.map((c, i) => (
+              <td key={i} className="num px-3 py-2 text-right text-ink-primary" title={formatKES(toNum(c.amount_kes))}>
+                {c.count ? formatNumber(c.count) : <span className="text-ink-muted">0</span>}
+              </td>
+            ))}
+            <td className="num px-4 py-2 text-right">
+              {r.total ? (
+                <span className={r.failed ? 'font-semibold text-danger' : 'text-ink-secondary'}>{formatPercent((r.failed / r.total) * 100, { digits: 0 })}</span>
+              ) : (
+                <span className="text-ink-muted">—</span>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
 }
 
 export function ReportsPage() {
-  const navigate = useNavigate();
-  const [revenueData, setRevenueData] = useState<RevenueReport | null>(null);
-  const [retentionData, setRetentionData] = useState<RetentionReport | null>(null);
-  const [challengeData, setChallengeData] = useState<ChallengeReport | null>(null);
-  const [transactionData, setTransactionData] = useState<TransactionReport | null>(null);
-  const [timePeriod, setTimePeriod] = useState<number>(30);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [period, setPeriod] = useState<Period>({ preset: '30', from: '', to: '' })
+  const params = periodParams(period)
+  const q = useQuery({
+    queryKey: ['admin', 'finance', 'report', params],
+    queryFn: () => financeApi.report(params),
+    placeholderData: (prev) => prev,
+  })
+  const r = q.data
+  const loading = q.isLoading
 
-  const loadReports = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const [revenue, retention, challenges, transactions] = await Promise.all([
-        adminApi.getRevenueReport(timePeriod) as Promise<RevenueReport>,
-        adminApi.getUserRetention(timePeriod) as Promise<RetentionReport>,
-        adminApi.getChallengeAnalytics(timePeriod) as Promise<ChallengeReport>,
-        adminApi.getTransactionTrends(timePeriod) as Promise<TransactionReport>,
-      ]);
-      setRevenueData(revenue);
-      setRetentionData(retention);
-      setChallengeData(challenges);
-      setTransactionData(transactions);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [timePeriod]);
+  const deposits = sum(r, 'deposits')
+  const paid = sum(r, 'withdrawals_paid')
+  const { rows: flowRows, unit } = bucketDaily(r?.daily ?? [], [...DAILY_KEYS])
+  const failedChecks = (r?.reconciliation ?? []).filter((c) => !c.ok).length
 
-  useEffect(() => {
-    // Defer report loading to avoid synchronous setState in effect
-    queueMicrotask(() => { void loadReports(); });
-  }, [loadReports]);
-
-  const exportSummaryCSV = () => {
-    const rows = [
-      ['section', 'metric', 'value'],
-      ['revenue', 'platform_fees', revenueData?.summary.platform_fees ?? ''],
-      ['revenue', 'total_deposits', revenueData?.summary.total_deposits ?? ''],
-      ['revenue', 'total_payouts', revenueData?.summary.total_payouts ?? ''],
-      ['revenue', 'net_revenue', revenueData?.summary.net_revenue ?? ''],
-      ['retention', 'total_users', retentionData?.summary.total_users ?? ''],
-      ['retention', 'active_users', retentionData?.summary.active_users ?? ''],
-      ['retention', 'overall_retention', retentionData?.summary.overall_retention ?? ''],
-      ['challenges', 'total_challenges', challengeData?.summary.total_challenges ?? ''],
-      ['challenges', 'completion_rate', challengeData?.summary.completion_rate ?? ''],
-      ['transactions', 'total_volume', transactionData?.summary.total_volume ?? ''],
-      ['transactions', 'total_transactions', transactionData?.summary.total_transactions ?? ''],
-      ['transactions', 'avg_transaction_value', transactionData?.summary.avg_transaction_value ?? ''],
-    ];
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `reports-summary-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportToCSV = (data: Record<string, unknown>[], filename: string) => {
-    const headers = Object.keys(data[0] || {});
-    const rows = [
-      headers,
-      ...data.map(row => headers.map(h => row[h] ?? ''))
-    ];
-    const csv = rows.map(row => row.map(cell => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${filename}-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const statusColors: Record<string, string> = {
-    pending: '#fbbf24',
-    active: '#00f5e9',
-    completed: '#22c55e',
-    cancelled: '#ef4444',
-  };
-
-  if (loading) {
-    return (
-      <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
-        <Activity size={32} style={{ margin: '0 auto 16px' }} />
-        <p>Loading reports...</p>
-      </div>
-    );
+  const exportDaily = () => {
+    if (!r) return
+    downloadCsv(
+      `step2win-finance-${r.period.from}_${r.period.to}.csv`,
+      ['date', 'deposits_kes', 'withdrawals_requested_kes', 'withdrawals_paid_kes', 'challenge_entries_kes', 'challenge_payouts_kes', 'refunds_kes', 'platform_fees_kes'],
+      r.daily.map((d) => [d.date, d.deposits.toFixed(2), d.withdrawals_requested.toFixed(2), d.withdrawals_paid.toFixed(2), d.entries.toFixed(2), d.payouts.toFixed(2), d.refunds.toFixed(2), d.fees.toFixed(2)]),
+    )
   }
 
+  const withdrawalRows = r
+    ? (Object.keys(WITHDRAWAL_STATUS_LABEL) as WithdrawalStatus[]).map((s) => ({
+        key: s,
+        label: WITHDRAWAL_STATUS_LABEL[s],
+        value: toNum(r.withdrawals.requested_by_status[s]?.amount_kes),
+        note: `${r.withdrawals.requested_by_status[s]?.count ?? 0} requests`,
+      }))
+    : []
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 600, color: '#fff', marginBottom: '4px' }}>
-            <FileBarChart2 size={24} style={{ display: 'inline', marginRight: '8px', verticalAlign: 'middle' }} />
-            Advanced Reports
-          </h1>
-          <p style={{ color: '#64748b', fontSize: '14px' }}>
-            Comprehensive analytics with revenue, retention, and performance metrics
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <button
-            type="button"
-            onClick={() => void loadReports()}
-            style={{
-              padding: '8px 14px',
-              background: '#1a2332',
-              border: '1px solid #2d3748',
-              borderRadius: '6px',
-              color: '#fff',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <RefreshCw size={16} /> Refresh
-          </button>
-          <button
-            type="button"
-            onClick={exportSummaryCSV}
-            style={{
-              padding: '8px 14px',
-              background: '#00f5e9',
-              color: '#091120',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <Download size={16} /> Summary CSV
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/transactions')}
-            style={{
-              padding: '8px 14px',
-              background: '#1a2332',
-              border: '1px solid #2d3748',
-              borderRadius: '6px',
-              color: '#fff',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            Transactions <ArrowRight size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/withdrawals')}
-            style={{
-              padding: '8px 14px',
-              background: '#1a2332',
-              border: '1px solid #2d3748',
-              borderRadius: '6px',
-              color: '#fff',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            Withdrawals <ArrowRight size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/analytics')}
-            style={{
-              padding: '8px 14px',
-              background: '#1a2332',
-              border: '1px solid #2d3748',
-              borderRadius: '6px',
-              color: '#fff',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            Analytics <ArrowRight size={14} />
-          </button>
-          <Calendar size={16} style={{ color: '#64748b' }} />
-          <select
-            value={timePeriod}
-            onChange={(e) => setTimePeriod(Number(e.target.value))}
-            style={{
-              padding: '8px 16px',
-              background: '#1a2332',
-              border: '1px solid #2d3748',
-              borderRadius: '6px',
-              color: '#fff',
-              cursor: 'pointer',
-            }}
-          >
-            <option value={7}>Last 7 Days</option>
-            <option value={30}>Last 30 Days</option>
-            <option value={90}>Last 90 Days</option>
-            <option value={180}>Last 6 Months</option>
-          </select>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Financial reports"
+        description="Where money came from and went for a period, and whether the books agree."
+        meta={r ? `${formatPeriod(r.period.from, r.period.to)} · ${r.period.timezone} · generated ${format(new Date(r.generated_at), 'HH:mm')}` : undefined}
+        actions={
+          <>
+            <PeriodPicker value={period} onChange={setPeriod} />
+            <Button size="sm" variant="secondary" leftIcon={<Download size={13} />} onClick={exportDaily} disabled={!r}>
+              Export CSV
+            </Button>
+            <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={q.isFetching} onClick={() => void q.refetch()}>
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
-      {error && (
-        <div style={{ padding: '12px', background: '#7f1d1d', borderRadius: '6px', color: '#fca5a5' }}>
-          {error}
-        </div>
-      )}
+      {q.error && !r ? (
+        <Panel><ErrorState title="Could not load the financial report" error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} /></Panel>
+      ) : (
+        <>
+          <section aria-label="Period summary" className="grid grid-cols-2 gap-3 md:grid-cols-3 min-[87.5rem]:grid-cols-5">
+            <StatCard label="Platform fee revenue" icon={Coins} loading={loading} value={formatKESShort(r?.revenue.platform_fees_kes)}
+              hint={r ? `${r.revenue.fee_records} challenge${r.revenue.fee_records === 1 ? '' : 's'} finalised` : undefined} />
+            <StatCard label="Deposits credited" icon={ArrowDownToLine} loading={loading} value={formatKESShort(r?.ledger.deposit.amount_kes)}
+              hint={r ? `${formatNumber(r.ledger.deposit.count)} deposits` : undefined} to="/transactions" />
+            <StatCard label="Withdrawals paid" icon={ArrowUpFromLine} loading={loading} value={formatKESShort(r?.withdrawals.paid_kes)}
+              hint={r ? `${r.withdrawals.paid_count} confirmed by gateway` : undefined} to="/withdrawals" />
+            <StatCard label="Net cash in" icon={Scale} loading={loading} value={formatKESShort(r?.net_cash_kes)} hint="Deposits minus paid withdrawals" />
+            <StatCard label="Held in open pools" icon={Landmark} loading={loading} value={formatKESShort(r?.pools.open_kes)}
+              hint={r ? `${r.pools.open_count} open challenges · right now` : undefined} to="/challenges" />
+          </section>
 
-      {/* Revenue Report */}
-      {revenueData && (
-        <div className="stat-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <DollarSign size={20} />
-              Revenue Analytics
-            </h2>
-            <button
-              onClick={() => exportToCSV(revenueData.daily_data, 'revenue-report')}
-              style={{
-                padding: '6px 12px',
-                background: '#00f5e9',
-                color: '#091120',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <Panel
+              className="xl:col-span-2"
+              title="Cash in vs cash out"
+              description={`Deposits credited vs withdrawals paid, KSh per ${unit}`}
+              actions={
+                <ChartLegend items={[
+                  { label: 'Deposits', color: SERIES[0], value: formatKESShort(deposits) },
+                  { label: 'Withdrawals paid', color: SERIES[1], value: formatKESShort(paid) },
+                ]} />
+              }
             >
-              <Download size={16} /> Export CSV
-            </button>
+              {loading ? <ChartSkeleton height={240} /> : deposits + paid === 0 ? (
+                <EmptyState size="compact" icon={Banknote} title="No deposits or paid withdrawals in this period" />
+              ) : (
+                <TimeBarChart rows={flowRows} unit={unit} kind="kes" height={240} series={[
+                  { key: 'deposits', label: 'Deposits', color: SERIES[0] },
+                  { key: 'withdrawals_paid', label: 'Withdrawals paid', color: SERIES[1] },
+                ]} />
+              )}
+            </Panel>
+
+            <Panel padding="none" title="Challenge money" description="Entries in, winnings and refunds out, fees kept">
+              {loading || !r ? (
+                <div className="space-y-3 p-4" aria-hidden>{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} height={18} />)}</div>
+              ) : (
+                <ul className="py-1">
+                  <FlowRow label="Entry contributions" note={`${formatNumber(r.ledger.challenge_entry.count)} entries debited`} value={r.ledger.challenge_entry.amount_kes} />
+                  <FlowRow label="Paid to winners" note={`${formatNumber(r.ledger.payout.count)} payouts credited`} value={r.ledger.payout.amount_kes} sign="−" />
+                  <FlowRow label="Refunded" note={`${formatNumber(r.ledger.refund.count)} refunds (challenges and failed payouts)`} value={r.ledger.refund.amount_kes} sign="−" />
+                  <FlowRow label="Platform fees" note="Recorded when a challenge is finalised" value={r.revenue.platform_fees_kes} strong />
+                  <li className="mt-2 border-t border-surface-border px-4 py-2.5 text-xs text-ink-muted">
+                    Pools finalised: <Money value={r.pools.finalised_kes} className="text-xs" /> ({r.pools.finalised_count}) · cancelled:{' '}
+                    <Money value={r.pools.cancelled_kes} className="text-xs" /> ({r.pools.cancelled_count})
+                  </li>
+                </ul>
+              )}
+            </Panel>
           </div>
 
-          {/* Summary Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-            <div style={{ padding: '16px', background: 'linear-gradient(135deg, #065f46 0%, #064e3b 100%)', borderRadius: '8px' }}>
-              <p style={{ color: '#6ee7b7', fontSize: '13px', marginBottom: '4px' }}>Platform Fees</p>
-              <p style={{ fontSize: '24px', fontWeight: 700, color: '#fff' }}>
-                {formatKES(revenueData.summary.platform_fees)}
-              </p>
-            </div>
-            <div style={{ padding: '16px', background: 'linear-gradient(135deg, #0e7490 0%, #0c4a6e 100%)', borderRadius: '8px' }}>
-              <p style={{ color: '#67e8f9', fontSize: '13px', marginBottom: '4px' }}>Total Deposits</p>
-              <p style={{ fontSize: '24px', fontWeight: 700, color: '#fff' }}>
-                {formatKES(revenueData.summary.total_deposits)}
-              </p>
-              <p style={{ color: '#a5f3fc', fontSize: '12px' }}>{revenueData.summary.deposit_count} transactions</p>
-            </div>
-            <div style={{ padding: '16px', background: 'linear-gradient(135deg, #7c2d12 0%, #431407 100%)', borderRadius: '8px' }}>
-              <p style={{ color: '#fdba74', fontSize: '13px', marginBottom: '4px' }}>Total Payouts</p>
-              <p style={{ fontSize: '24px', fontWeight: 700, color: '#fff' }}>
-                {formatKES(revenueData.summary.total_payouts)}
-              </p>
-              <p style={{ color: '#fed7aa', fontSize: '12px' }}>{revenueData.summary.payout_count} payouts</p>
-            </div>
-            <div style={{ padding: '16px', background: 'linear-gradient(135deg, #6b21a8 0%, #581c87 100%)', borderRadius: '8px' }}>
-              <p style={{ color: '#e9d5ff', fontSize: '13px', marginBottom: '4px' }}>Net Revenue</p>
-              <p style={{ fontSize: '24px', fontWeight: 700, color: '#fff' }}>
-                {formatKES(revenueData.summary.net_revenue)}
-              </p>
-            </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Panel title="Withdrawals requested, by outcome" description="Requests created in the period, KSh by current status"
+              footer={<Link to="/withdrawals" className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline">Open withdrawals <ChevronRight size={13} aria-hidden /></Link>}>
+              {loading ? <div className="space-y-4" aria-hidden>{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={26} />)}</div>
+                : withdrawalRows.every((w) => w.value === 0) ? <EmptyState size="compact" title="No withdrawal requests in this period" />
+                : <MeterList rows={withdrawalRows.filter((w) => w.value > 0)} color={SERIES[1]} format={(v) => formatKES(v)} />}
+            </Panel>
+
+            <Panel padding="none" title="Gateway results" description="IntaSend transactions created in the period, by status (hover a count for KSh)">
+              {loading || !r ? <div className="space-y-3 p-4" aria-hidden><Skeleton height={20} /><Skeleton height={20} /></div> : <div className="overflow-x-auto"><GatewayTable report={r} /></div>}
+            </Panel>
           </div>
 
-          {/* Revenue Chart */}
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={revenueData.daily_data}>
-              <defs>
-                <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#00f5e9" stopOpacity={0.8} />
-                  <stop offset="95%" stopColor="#00f5e9" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="date" stroke="#64748b" style={{ fontSize: '12px' }} />
-              <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-              <Tooltip
-                contentStyle={{ background: '#1a2332', border: '1px solid #2d3748', borderRadius: '6px' }}
-                labelStyle={{ color: '#fff' }}
-              />
-              <Legend />
-              <Area type="monotone" dataKey="revenue" stroke="#00f5e9" fillOpacity={1} fill="url(#colorRevenue)" name="Platform Revenue" />
-              <Area type="monotone" dataKey="deposits" stroke="#22c55e" fillOpacity={0.3} fill="#22c55e" name="Total Deposits" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* User Retention Report */}
-      {retentionData && (
-        <div className="stat-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Users size={20} />
-              User Retention Analysis
-            </h2>
-            <button
-              onClick={() => exportToCSV(retentionData.weekly_data, 'retention-report')}
-              style={{
-                padding: '6px 12px',
-                background: '#00f5e9',
-                color: '#091120',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+            <Panel
+              padding="none"
+              title="Reconciliation checks"
+              description={r ? `Point-in-time checks · run ${format(new Date(r.generated_at), 'HH:mm')}` : 'Point-in-time checks'}
+              actions={r && <StatusBadge tone={failedChecks ? 'danger' : 'success'} label={failedChecks ? `${failedChecks} to review` : 'All passing'} />}
             >
-              <Download size={16} /> Export CSV
-            </button>
+              {loading || !r ? (
+                <div className="space-y-3 p-4" aria-hidden>{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={34} />)}</div>
+              ) : (
+                <ul className="divide-y divide-[var(--border)]">
+                  {[...r.reconciliation].sort((a, b) => Number(a.ok) - Number(b.ok)).map((c) => <CheckItem key={c.key} check={c} />)}
+                </ul>
+              )}
+            </Panel>
+
+            <Panel padding="none" title="Fee revenue by challenge" description="Largest platform fees collected in the period">
+              {loading || !r ? (
+                <div className="space-y-3 p-4" aria-hidden>{[0, 1, 2].map((i) => <Skeleton key={i} height={18} />)}</div>
+              ) : r.revenue.top_challenges.length === 0 ? (
+                <EmptyState size="compact" icon={Coins} title="No platform fees in this period" description="Fees are recorded when a paid challenge is finalised." />
+              ) : (
+                <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <caption className="sr-only">Platform fees by challenge</caption>
+                  <thead>
+                    <tr className="border-b border-surface-border text-left text-xs text-ink-muted">
+                      <th scope="col" className="px-4 py-2 font-medium">Challenge</th>
+                      <th scope="col" className="hidden px-3 py-2 text-right font-medium sm:table-cell">Pool</th>
+                      <th scope="col" className="px-3 py-2 text-right font-medium">Fee</th>
+                      <th scope="col" className="px-4 py-2 text-right font-medium">Collected</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.revenue.top_challenges.map((c) => (
+                      <tr key={`${c.challenge_id}-${c.collected_at}`} className="border-b border-surface-border last:border-b-0">
+                        <td className="px-4 py-2 font-medium text-ink-primary"><span className="block max-w-[16rem] truncate" title={c.challenge}>{c.challenge}</span></td>
+                        <td className="hidden px-3 py-2 text-right sm:table-cell"><Money value={c.total_pool} muted /></td>
+                        <td className="px-3 py-2 text-right"><Money value={c.amount_kes} /></td>
+                        <td className="whitespace-nowrap px-4 py-2 text-right text-xs text-ink-muted"><When value={c.collected_at} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                </div>
+              )}
+            </Panel>
           </div>
-
-          {/* Summary Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-            <div style={{ padding: '16px', background: 'linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%)', borderRadius: '8px' }}>
-              <p style={{ color: '#93c5fd', fontSize: '13px', marginBottom: '4px' }}>Total Users</p>
-              <p style={{ fontSize: '24px', fontWeight: 700, color: '#fff' }}>
-                {retentionData.summary.total_users.toLocaleString()}
-              </p>
-            </div>
-            <div style={{ padding: '16px', background: 'linear-gradient(135deg, #065f46 0%, #064e3b 100%)', borderRadius: '8px' }}>
-              <p style={{ color: '#6ee7b7', fontSize: '13px', marginBottom: '4px' }}>Active Users</p>
-              <p style={{ fontSize: '24px', fontWeight: 700, color: '#fff' }}>
-                {retentionData.summary.active_users.toLocaleString()}
-              </p>
-            </div>
-            <div style={{ padding: '16px', background: 'linear-gradient(135deg, #7c2d12 0%, #431407 100%)', borderRadius: '8px' }}>
-              <p style={{ color: '#fdba74', fontSize: '13px', marginBottom: '4px' }}>Retention Rate</p>
-              <p style={{ fontSize: '24px', fontWeight: 700, color: '#fff' }}>
-                {retentionData.summary.overall_retention}%
-              </p>
-            </div>
-          </div>
-
-          {/* Retention Chart */}
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={retentionData.weekly_data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="week_start" stroke="#64748b" style={{ fontSize: '12px' }} />
-              <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-              <Tooltip
-                contentStyle={{ background: '#1a2332', border: '1px solid #2d3748', borderRadius: '6px' }}
-                labelStyle={{ color: '#fff' }}
-              />
-              <Legend />
-              <Bar dataKey="new_users" fill="#3b82f6" name="New Users" />
-              <Bar dataKey="active_users" fill="#22c55e" name="Active Users" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* Challenge Analytics */}
-      {challengeData && (
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' }}>
-          <div className="stat-card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Activity size={20} />
-                Challenge Performance
-              </h2>
-              <button
-                onClick={() => exportToCSV(challengeData.daily_data, 'challenge-report')}
-                style={{
-                  padding: '6px 12px',
-                  background: '#00f5e9',
-                  color: '#091120',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                <Download size={16} /> Export CSV
-              </button>
-            </div>
-
-            {/* Summary Stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '20px' }}>
-              <div>
-                <p style={{ color: '#64748b', fontSize: '13px' }}>Total Challenges</p>
-                <p style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>{challengeData.summary.total_challenges}</p>
-              </div>
-              <div>
-                <p style={{ color: '#64748b', fontSize: '13px' }}>Completion Rate</p>
-                <p style={{ fontSize: '20px', fontWeight: 700, color: '#22c55e' }}>{challengeData.summary.completion_rate}%</p>
-              </div>
-              <div>
-                <p style={{ color: '#64748b', fontSize: '13px' }}>Total Participants</p>
-                <p style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>{challengeData.summary.total_participants}</p>
-              </div>
-            </div>
-
-            {/* Daily Challenge Creation Chart */}
-            <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={challengeData.daily_data}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-                <XAxis dataKey="date" stroke="#64748b" style={{ fontSize: '12px' }} />
-                <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-                <Tooltip
-                  contentStyle={{ background: '#1a2332', border: '1px solid #2d3748', borderRadius: '6px' }}
-                  labelStyle={{ color: '#fff' }}
-                />
-                <Line type="monotone" dataKey="count" stroke="#00f5e9" strokeWidth={2} name="Challenges Created" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Status Breakdown Pie Chart */}
-          <div className="stat-card">
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px', color: '#fff' }}>
-              Status Distribution
-            </h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={Object.entries(challengeData.status_breakdown).map(([name, value]) => ({ name, value }))}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {Object.keys(challengeData.status_breakdown).map((key) => (
-                    <Cell key={key} fill={statusColors[key] || '#94a3b8'} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ background: '#1a2332', border: '1px solid #2d3748', borderRadius: '6px' }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {/* Transaction Trends */}
-      {transactionData && (
-        <div className="stat-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <TrendingUp size={20} />
-              Transaction Trends
-            </h2>
-            <button
-              onClick={() => exportToCSV(transactionData.daily_data, 'transaction-report')}
-              style={{
-                padding: '6px 12px',
-                background: '#00f5e9',
-                color: '#091120',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              <Download size={16} /> Export CSV
-            </button>
-          </div>
-
-          {/* Summary Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '24px' }}>
-            <div style={{ padding: '12px', background: '#1a2332', borderRadius: '6px', borderLeft: '3px solid #22c55e' }}>
-              <p style={{ color: '#64748b', fontSize: '12px' }}>Total Volume</p>
-              <p style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>
-                {formatKES(transactionData.summary.total_volume)}
-              </p>
-            </div>
-            <div style={{ padding: '12px', background: '#1a2332', borderRadius: '6px', borderLeft: '3px solid #3b82f6' }}>
-              <p style={{ color: '#64748b', fontSize: '12px' }}>Total Transactions</p>
-              <p style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>
-                {transactionData.summary.total_transactions.toLocaleString()}
-              </p>
-            </div>
-            <div style={{ padding: '12px', background: '#1a2332', borderRadius: '6px', borderLeft: '3px solid #fbbf24' }}>
-              <p style={{ color: '#64748b', fontSize: '12px' }}>Avg Transaction</p>
-              <p style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>
-                {formatKES(transactionData.summary.avg_transaction_value)}
-              </p>
-            </div>
-          </div>
-
-          {/* Transaction Volume Chart */}
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={transactionData.daily_data}>
-              <defs>
-                <linearGradient id="colorDeposits" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.8} />
-                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="colorPayouts" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.8} />
-                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="date" stroke="#64748b" style={{ fontSize: '12px' }} />
-              <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-              <Tooltip
-                contentStyle={{ background: '#1a2332', border: '1px solid #2d3748', borderRadius: '6px' }}
-                labelStyle={{ color: '#fff' }}
-              />
-              <Legend />
-              <Area type="monotone" dataKey="deposit_amount" stroke="#22c55e" fillOpacity={1} fill="url(#colorDeposits)" name="Deposits" />
-              <Area type="monotone" dataKey="payout_amount" stroke="#f59e0b" fillOpacity={1} fill="url(#colorPayouts)" name="Payouts" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+        </>
       )}
     </div>
-  );
+  )
 }
+

@@ -1,688 +1,473 @@
-import { useState, useCallback } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEditor, EditorContent } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import Underline from '@tiptap/extension-underline';
-import Link from '@tiptap/extension-link';
-import TextAlign from '@tiptap/extension-text-align';
-import {
-  FileText, Upload, Eye, History, Save, Send,
-  AlertCircle, CheckCircle,
-  RotateCcw, X, Loader2, Download
-} from 'lucide-react';
-import { legalAdminService } from '../services/legalApi';
-import { formatDistanceToNow } from 'date-fns';
-import { sanitizeHtml } from '../utils/sanitize';
+import { useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Eye, FileText, FileUp, History, Monitor, PenLine, Plus, RefreshCw, RotateCcw, Save, Send, Smartphone, Trash2 } from 'lucide-react'
+import { PageHeader } from '../components/PageHeader'
+import { StatusBadge } from '../components/StatusBadge'
+import { ConfirmModal } from '../components/ConfirmModal'
+import { Panel } from '../components/ui/Card'
+import { Button } from '../components/ui/Button'
+import { Input, Select, Textarea } from '../components/ui/Input'
+import { Modal } from '../components/ui/Modal'
+import { SegmentedControl, Tabs } from '../components/ui/Tabs'
+import { EmptyState } from '../components/ui/EmptyState'
+import { ErrorState } from '../components/ui/ErrorState'
+import { Skeleton } from '../components/ui/Skeleton'
+import { LegalEditor } from '../components/content/LegalEditor'
+import { DOC_TYPE_LABEL, DOC_TYPOGRAPHY, legalApi, nextVersionLabel, type LegalDoc, type LegalDocType, type LegalVersion } from '../components/content/api'
+import { sanitizeHtml, stripHtml } from '../utils/sanitize'
+import { cn } from '../lib/cn'
+import { formatDateTime, formatNumber, formatRelative } from '../lib/format'
+import { errorMessage } from '../lib/errors'
 
-type LegalDocument = {
-  id: number
-  title: string
-  status: string
-  version_label: string
-  content_html: string
-  updated_at?: string
-  uploaded_file?: string
-  last_edited_by_username?: string
+type Tab = 'edit' | 'preview' | 'history'
+
+function docState(d: LegalDoc): { label: string; tone: 'success' | 'warning' | 'neutral' } {
+  if (d.status === 'published') return d.has_unpublished_changes ? { label: 'Live · unpublished edits', tone: 'warning' } : { label: 'Live', tone: 'success' }
+  if (d.status === 'archived') return { label: 'Archived', tone: 'neutral' }
+  return { label: 'Draft, never published', tone: 'neutral' }
 }
 
-type LegalHistoryVersion = {
-  id: number
-  version_label: string
-  change_summary?: string
-  published_by_username?: string
-  published_at: string
+function wordCount(html: string): number {
+  const text = stripHtml(html).replace(/\s+/g, ' ').trim()
+  return text ? text.split(' ').length : 0
 }
 
-type LegalHistoryResponse = {
-  history: LegalHistoryVersion[]
-}
+export default function LegalDocumentsPage() {
+  const qc = useQueryClient()
+  const [params, setParams] = useSearchParams()
+  const docsQ = useQuery({ queryKey: ['legal', 'docs'], queryFn: legalApi.list })
+  const docs = useMemo(() => docsQ.data ?? [], [docsQ.data])
+  const selectedId = Number(params.get('doc')) || docs[0]?.id || null
+  const doc = docs.find((d) => d.id === selectedId) ?? null
 
-type UploadResponse = {
-  content_html: string
-}
+  const [dirty, setDirty] = useState(false)
+  const [pendingSwitch, setPendingSwitch] = useState<number | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
 
-type PublishResponse = {
-  version_label: string
-}
-
-// ── Tiptap toolbar button ────────────────────────────────────────────────────
-function ToolbarBtn({
-  onClick, active = false, disabled = false, children, title
-}: {
-  onClick: () => void
-  active?: boolean
-  disabled?: boolean
-  children: React.ReactNode
-  title?: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={`px-2.5 py-1.5 rounded text-xs font-semibold transition-colors ${
-        active
-          ? 'bg-indigo-600 text-white'
-          : 'text-slate-300 hover:bg-slate-700 hover:text-white'
-      } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}>
-      {children}
-    </button>
-  );
-}
-
-// ── Rich text editor with toolbar ────────────────────────────────────────────
-function RichEditor({
-  content, onChange
-}: {
-  content: string
-  onChange: (html: string) => void
-}) {
-  const editor = useEditor({
-    extensions: [
-      StarterKit,
-      Underline,
-      TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      Link.configure({ openOnClick: false }),
-    ],
-    content,
-    onUpdate: ({ editor }) => onChange(editor.getHTML()),
-    editorProps: {
-      attributes: {
-        class: 'prose prose-invert max-w-none min-h-100 p-4 focus:outline-none text-slate-200',
-      },
-    },
-  });
-
-  if (!editor) return null;
+  const select = (id: number) => {
+    if (id === selectedId) return
+    if (dirty) { setPendingSwitch(id); return }
+    const next = new URLSearchParams(params)
+    next.set('doc', String(id))
+    setParams(next, { replace: true })
+  }
+  const missingTypes = (Object.keys(DOC_TYPE_LABEL) as LegalDocType[]).filter((t) => !docs.some((d) => d.document_type === t))
 
   return (
-    <div className="border border-slate-700 rounded-xl overflow-hidden">
-      {/* Toolbar */}
-      <div className="flex flex-wrap gap-1 p-2 bg-slate-800 border-b border-slate-700">
-        <ToolbarBtn onClick={() => editor.chain().focus().toggleBold().run()}
-          active={editor.isActive('bold')} title="Bold">B</ToolbarBtn>
-        <ToolbarBtn onClick={() => editor.chain().focus().toggleItalic().run()}
-          active={editor.isActive('italic')} title="Italic"><em>I</em></ToolbarBtn>
-        <ToolbarBtn onClick={() => editor.chain().focus().toggleUnderline().run()}
-          active={editor.isActive('underline')} title="Underline"><u>U</u></ToolbarBtn>
-        <div className="w-px bg-slate-600 mx-1" />
-        <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-          active={editor.isActive('heading', { level: 1 })} title="Heading 1">H1</ToolbarBtn>
-        <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-          active={editor.isActive('heading', { level: 2 })} title="Heading 2">H2</ToolbarBtn>
-        <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-          active={editor.isActive('heading', { level: 3 })} title="Heading 3">H3</ToolbarBtn>
-        <div className="w-px bg-slate-600 mx-1" />
-        <ToolbarBtn onClick={() => editor.chain().focus().toggleBulletList().run()}
-          active={editor.isActive('bulletList')} title="Bullet List">• List</ToolbarBtn>
-        <ToolbarBtn onClick={() => editor.chain().focus().toggleOrderedList().run()}
-          active={editor.isActive('orderedList')} title="Numbered List">1. List</ToolbarBtn>
-        <div className="w-px bg-slate-600 mx-1" />
-        <ToolbarBtn onClick={() => editor.chain().focus().setTextAlign('left').run()}
-          active={editor.isActive({ textAlign: 'left' })} title="Align Left">≡</ToolbarBtn>
-        <ToolbarBtn onClick={() => editor.chain().focus().setTextAlign('center').run()}
-          active={editor.isActive({ textAlign: 'center' })} title="Center">≡</ToolbarBtn>
-        <div className="w-px bg-slate-600 mx-1" />
-        <ToolbarBtn onClick={() => editor.chain().focus().toggleBlockquote().run()}
-          active={editor.isActive('blockquote')} title="Quote">" "</ToolbarBtn>
-        <ToolbarBtn onClick={() => editor.chain().focus().setHorizontalRule().run()}
-          title="Divider">—</ToolbarBtn>
-        <ToolbarBtn onClick={() => editor.chain().focus().undo().run()}
-          disabled={!editor.can().undo()} title="Undo">↩</ToolbarBtn>
-        <ToolbarBtn onClick={() => editor.chain().focus().redo().run()}
-          disabled={!editor.can().redo()} title="Redo">↪</ToolbarBtn>
-      </div>
-
-      {/* Editor area */}
-      <div className="bg-slate-900 min-h-100">
-        <EditorContent editor={editor} />
-      </div>
-    </div>
-  );
-}
-
-// ── File upload drop zone ─────────────────────────────────────────────────────
-function FileDropZone({
-  onFile, loading
-}: {
-  onFile: (file: File) => void
-  loading: boolean
-}) {
-  const [dragging, setDragging] = useState(false);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) onFile(file);
-  }, [onFile]);
-
-  return (
-    <div
-      onDragOver={e => { e.preventDefault(); setDragging(true); }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={handleDrop}
-      className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all ${
-        dragging
-          ? 'border-indigo-500 bg-indigo-950/30'
-          : 'border-slate-600 hover:border-slate-500 bg-slate-800/50'
-      }`}>
-      {loading ? (
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 size={28} className="text-indigo-400 animate-spin" />
-          <p className="text-slate-400 text-sm">Converting file...</p>
-        </div>
-      ) : (
-        <>
-          <Upload size={28} className="text-slate-500 mx-auto mb-3" />
-          <p className="text-slate-300 text-sm font-semibold mb-1">
-            Drop your file here
-          </p>
-          <p className="text-slate-500 text-xs mb-4">
-            Supports .docx, .pdf, .html
-          </p>
-          <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2
-                            bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white
-                            text-sm font-semibold transition-colors">
-            <Upload size={14} />
-            Browse File
-            <input
-              type="file"
-              accept=".docx,.pdf,.html"
-              className="hidden"
-              onChange={e => {
-                const f = e.target.files?.[0];
-                if (f) onFile(f);
-              }}
-            />
-          </label>
-          <p className="text-slate-600 text-xs mt-3">
-            DOCX recommended — preserves all formatting
-          </p>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ── History panel ─────────────────────────────────────────────────────────────
-function HistoryPanel({
-  docId, onRestore, onClose
-}: {
-  docId: number
-  onRestore: () => void
-  onClose: () => void
-}) {
-  const qc = useQueryClient();
-  const { data, isLoading } = useQuery<LegalHistoryResponse>({
-    queryKey: ['legal', 'history', docId],
-    queryFn:  () => legalAdminService.history(docId),
-  });
-  const restoreMut = useMutation({
-    mutationFn: ({ versionId }: { versionId: number }) =>
-      legalAdminService.restore(docId, versionId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['legal', 'admin'] });
-      onRestore();
-      onClose();
-    },
-  });
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.7)' }}>
-      <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-lg max-h-[80vh]
-                      overflow-y-auto border border-slate-700">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-white font-bold text-lg">Version History</h3>
-          <button onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-slate-700 flex items-center justify-center">
-            <X size={16} className="text-slate-400" />
-          </button>
-        </div>
-        {isLoading ? (
-          <div className="flex justify-center py-8">
-            <Loader2 size={24} className="text-indigo-400 animate-spin" />
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {(data?.history || []).map((v) => (
-              <div key={v.id}
-                className="flex items-center gap-3 p-3 rounded-xl bg-slate-900
-                           border border-slate-700">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-indigo-400 font-mono text-sm font-bold">
-                      v{v.version_label}
-                    </span>
-                    {v.change_summary && (
-                      <span className="text-slate-400 text-xs">
-                        — {v.change_summary}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-slate-500 text-xs mt-0.5">
-                    {v.published_by_username} · {' '}
-                    {formatDistanceToNow(new Date(v.published_at),
-                      { addSuffix: true })}
-                  </p>
-                </div>
-                <button
-                  onClick={() => restoreMut.mutate({ versionId: v.id })}
-                  disabled={restoreMut.isPending}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg
-                             bg-slate-700 hover:bg-slate-600 text-slate-300
-                             text-xs font-semibold transition-colors">
-                  <RotateCcw size={12} />
-                  Restore
-                </button>
-              </div>
-            ))}
-            {data?.history?.length === 0 && (
-              <p className="text-slate-500 text-sm text-center py-4">
-                No version history yet. Publish the document to start tracking versions.
-              </p>
+    <div className="space-y-5">
+      <PageHeader
+        title="Legal documents"
+        description="Edit policies as drafts, preview them as users will see them, and publish new versions."
+        actions={
+          <>
+            <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={docsQ.isFetching && !docsQ.isLoading}
+              disabled={dirty} title={dirty ? 'Save or discard your edits first' : undefined}
+              onClick={() => void qc.invalidateQueries({ queryKey: ['legal'] })}>Refresh</Button>
+            {missingTypes.length > 0 && (
+              <Button size="sm" variant="primary" leftIcon={<Plus size={13} />} onClick={() => setCreateOpen(true)}>New document</Button>
             )}
+          </>
+        }
+      />
+
+      <div className="grid gap-4 lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start">
+        <Panel padding="none" title="Documents" description={docsQ.data ? `${formatNumber(docs.length)} documents` : undefined} className="lg:sticky lg:top-20">
+          {docsQ.isLoading ? (
+            <div className="space-y-3 p-4">{[0, 1, 2].map((i) => <Skeleton key={i} height={40} label={i === 0 ? 'Loading documents' : undefined} />)}</div>
+          ) : docsQ.error ? (
+            <ErrorState size="compact" error={docsQ.error} onRetry={() => void docsQ.refetch()} />
+          ) : docs.length === 0 ? (
+            <EmptyState size="compact" icon={FileText} title="No legal documents yet" description="Create the privacy policy and terms first."
+              action={<Button size="sm" variant="primary" leftIcon={<Plus size={13} />} onClick={() => setCreateOpen(true)}>New document</Button>} />
+          ) : (
+            <ul className="divide-y divide-[var(--border)]" aria-label="Legal documents">
+              {docs.map((d) => {
+                const st = docState(d)
+                const active = d.id === selectedId
+                return (
+                  <li key={d.id}>
+                    <button type="button" aria-current={active ? 'true' : undefined} onClick={() => select(d.id)}
+                      className={cn('relative block w-full px-4 py-3 text-left transition-colors', active ? 'bg-brand-soft' : 'hover:bg-surface-elevated')}>
+                      {active && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-brand" />}
+                      <span className="block truncate text-sm font-medium text-ink-primary">{d.title}</span>
+                      <span className="mt-0.5 block text-xs text-ink-muted">
+                        {d.status === 'published' ? <>v{d.version_label} · published {formatRelative(d.published_at)}</> : 'Not published'}
+                      </span>
+                      <StatusBadge size="sm" className="mt-1.5" tone={st.tone} label={st.label} />
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </Panel>
+
+        {doc ? (
+          <DocWorkspace key={doc.id} doc={doc} onDirtyChange={setDirty} />
+        ) : !docsQ.isLoading && !docsQ.error && docs.length > 0 ? (
+          <Panel><EmptyState title="Select a document" /></Panel>
+        ) : docsQ.isLoading ? (
+          <Panel><Skeleton height={480} /></Panel>
+        ) : null}
+      </div>
+
+      <ConfirmModal
+        open={pendingSwitch !== null}
+        onClose={() => setPendingSwitch(null)}
+        onConfirm={() => {
+          const id = pendingSwitch!
+          setPendingSwitch(null); setDirty(false)
+          const next = new URLSearchParams(params); next.set('doc', String(id)); setParams(next, { replace: true })
+        }}
+        variant="warning"
+        title="Leave without saving?"
+        message="You have edits in this document that are not saved as a draft. They will be lost."
+        confirmLabel="Discard edits"
+        cancelLabel="Keep editing"
+      />
+      {createOpen && <CreateDialog types={missingTypes} onClose={() => setCreateOpen(false)} onCreated={(id) => { setCreateOpen(false); select(id) }} />}
+    </div>
+  )
+}
+
+function DocWorkspace({ doc, onDirtyChange }: { doc: LegalDoc; onDirtyChange: (d: boolean) => void }) {
+  const qc = useQueryClient()
+  const [tab, setTab] = useState<Tab>('edit')
+  const [revision, setRevision] = useState(0)
+  const [html, setHtml] = useState('')
+  const [baseline, setBaseline] = useState<string | null>(null)
+  const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const [publishOpen, setPublishOpen] = useState(false)
+  const [discardOpen, setDiscardOpen] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const historyQ = useQuery({ queryKey: ['legal', 'history', doc.id], queryFn: () => legalApi.history(doc.id) })
+  const history = historyQ.data?.history
+
+  const dirty = baseline !== null && html !== baseline
+  const setDirtyBoth = (v: boolean) => onDirtyChange(v)
+  const hasDraft = doc.has_unpublished_changes || (doc.status !== 'published' && !!doc.draft_html)
+  const editorSource = doc.draft_html || doc.content_html
+
+  const afterMutation = async (text: string) => {
+    await qc.invalidateQueries({ queryKey: ['legal'] })
+    setBaseline(null)
+    setRevision((r) => r + 1)
+    setDirtyBoth(false)
+    setBanner({ tone: 'success', text })
+  }
+  const fail = (err: unknown) => setBanner({ tone: 'danger', text: errorMessage(err) ?? 'Request failed.' })
+
+  const saveDraft = useMutation({
+    mutationFn: () => legalApi.saveDraft(doc.id, sanitizeHtml(html)),
+    onSuccess: () => afterMutation('Draft saved. Users still see the published version.'),
+    onError: fail,
+  })
+  const discard = useMutation({
+    mutationFn: () => legalApi.saveDraft(doc.id, ''),
+    onSuccess: () => { setDiscardOpen(false); return afterMutation('Draft discarded. The editor shows the published version again.') },
+    onError: (e) => { setDiscardOpen(false); fail(e) },
+  })
+  const upload = useMutation({
+    mutationFn: (f: File) => legalApi.upload(doc.id, f),
+    onSuccess: (_d, f) => { setUploadFile(null); return afterMutation(`Converted ${f.name} into the draft. Review it before publishing.`) },
+    onError: (e) => { setUploadFile(null); fail(e) },
+  })
+
+  const onEditorChange = (v: string) => {
+    setHtml(v)
+    setDirtyBoth(baseline !== null && v !== baseline)
+  }
+  const words = wordCount(html || editorSource)
+
+  return (
+    <div className="min-w-0 space-y-3">
+      <Panel padding="none">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-semibold text-ink-primary">{doc.title}</h2>
+              <StatusBadge size="sm" tone={docState(doc).tone} label={docState(doc).label} />
+              {dirty && <StatusBadge size="sm" tone="warning" label="Unsaved edits" />}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input ref={fileRef} type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="sr-only"
+              aria-label="Upload a DOCX or PDF" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setUploadFile(f) }} />
+            <Button size="sm" variant="ghost" leftIcon={<FileUp size={13} />} onClick={() => fileRef.current?.click()} loading={upload.isPending} loadingText="Converting…">Import DOCX/PDF</Button>
+            {hasDraft && !dirty && doc.status === 'published' && (
+              <Button size="sm" variant="ghost" leftIcon={<Trash2 size={13} />} onClick={() => setDiscardOpen(true)}>Discard draft</Button>
+            )}
+            <Button size="sm" variant={dirty ? 'primary' : 'secondary'} leftIcon={<Save size={13} />} disabled={!dirty} loading={saveDraft.isPending} loadingText="Saving…" onClick={() => saveDraft.mutate()}>
+              Save draft
+            </Button>
+            <Button size="sm" variant={dirty ? 'secondary' : 'primary'} leftIcon={<Send size={13} />}
+              disabled={!(hasDraft || dirty) && doc.status === 'published'}
+              title={!(hasDraft || dirty) && doc.status === 'published' ? 'No changes since the live version' : undefined}
+              onClick={() => setPublishOpen(true)}>
+              Publish…
+            </Button>
+          </div>
+        </div>
+          <p className="-mt-1 flex flex-wrap gap-x-1.5 px-4 pb-3 text-xs text-ink-muted">
+            <span>{DOC_TYPE_LABEL[doc.document_type]}</span><span aria-hidden>·</span>
+            <span className="mono">/legal/{doc.slug}</span><span aria-hidden>·</span>
+            {doc.status === 'published'
+              ? <span>Live v{doc.version_label} since <time dateTime={doc.published_at ?? undefined} title={formatDateTime(doc.published_at)}>{formatDateTime(doc.published_at)}</time></span>
+              : <span>Not visible to users</span>}
+            <span aria-hidden>·</span>
+            <span>Last edit {formatRelative(doc.updated_at)}{doc.last_edited_by_username ? ` by ${doc.last_edited_by_username}` : ''}</span>
+          </p>
+        {banner && (
+          <div role={banner.tone === 'danger' ? 'alert' : 'status'} className={cn('flex items-center gap-2 border-t px-4 py-2 text-xs font-medium', banner.tone === 'success' ? 'border-success-line bg-success-soft text-success' : 'border-danger-line bg-danger-soft text-danger')}>
+            <span className="flex-1">{banner.text}</span>
+            <button type="button" className="underline" onClick={() => setBanner(null)}>Dismiss</button>
           </div>
         )}
+        <div className="border-t border-surface-border px-4 pt-2">
+          <Tabs label="Document views" value={tab} onChange={setTab} idPrefix={`legal-${doc.id}`}
+            items={[
+              { value: 'edit', label: <span className="inline-flex items-center gap-1.5"><PenLine size={13} aria-hidden />Edit draft</span> },
+              { value: 'preview', label: <span className="inline-flex items-center gap-1.5"><Eye size={13} aria-hidden />Preview</span> },
+              { value: 'history', label: <span className="inline-flex items-center gap-1.5"><History size={13} aria-hidden />Versions</span>, count: history?.length },
+            ]} className="border-b-0" />
+        </div>
+      </Panel>
+
+      {/* Editor stays mounted (hidden) while previewing so unsaved edits survive tab switches. */}
+      <div role="tabpanel" id={`legal-${doc.id}-panel-edit`} aria-labelledby={`legal-${doc.id}-tab-edit`} hidden={tab !== 'edit'}>
+        <p className="mb-2 text-xs text-ink-muted">
+          {doc.status === 'published'
+            ? hasDraft ? 'Editing the unpublished draft. Users keep seeing the live version until you publish.' : 'Editing starts a draft from the live version. Users see nothing until you publish.'
+            : 'This document has never been published. Users cannot see it yet.'}
+          <span className="num"> · {formatNumber(words)} words</span>
+        </p>
+        <LegalEditor
+          key={revision}
+          label={`${doc.title} content`}
+          initialHtml={editorSource}
+          onReady={(v) => { setBaseline(v); setHtml(v) }}
+          onChange={onEditorChange}
+        />
       </div>
+      {tab === 'preview' && (
+        <div role="tabpanel" id={`legal-${doc.id}-panel-preview`} aria-labelledby={`legal-${doc.id}-tab-preview`}>
+          <Preview doc={doc} draftHtml={html || editorSource} hasDraft={hasDraft || dirty} />
+        </div>
+      )}
+      {tab === 'history' && (
+        <div role="tabpanel" id={`legal-${doc.id}-panel-history`} aria-labelledby={`legal-${doc.id}-tab-history`}>
+          <Versions doc={doc} q={historyQ} editorDirty={dirty} onRestored={(label) => { setTab('edit'); void afterMutation(`Content from v${label} restored into the draft. The live version is unchanged until you publish.`) }} />
+        </div>
+      )}
+
+      {publishOpen && (
+        <PublishDialog doc={doc} history={history} html={html} dirty={dirty}
+          onClose={() => setPublishOpen(false)}
+          onPublished={(label) => { setPublishOpen(false); void afterMutation(`Published v${label}. It is now live in the app.`) }} />
+      )}
+      <ConfirmModal
+        open={discardOpen} onClose={() => setDiscardOpen(false)} onConfirm={() => discard.mutate()} loading={discard.isPending}
+        variant="warning" title="Discard the draft?" confirmLabel="Discard draft"
+        message="The unpublished edits are deleted. The live version stays as it is."
+        details={[{ label: 'Document', value: doc.title }, { label: 'Live version', value: `v${doc.version_label}` }]}
+      />
+      <ConfirmModal
+        key={uploadFile?.name ?? 'none'}
+        open={!!uploadFile} onClose={() => setUploadFile(null)} onConfirm={() => uploadFile && upload.mutate(uploadFile)} loading={upload.isPending}
+        variant="warning" title="Replace the draft with this file?" confirmLabel="Import file"
+        message="The file is converted to formatted text and replaces the current draft. The live version is not changed."
+        details={[{ label: 'File', value: uploadFile?.name }, { label: 'Size', value: uploadFile ? `${formatNumber(uploadFile.size / 1024, 0)} KB` : '' }]}
+        consequence={dirty ? 'Your unsaved edits in the editor will be lost.' : undefined}
+      />
     </div>
-  );
+  )
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
-export default function LegalDocumentsPage() {
-  const qc = useQueryClient();
-  const [selectedId,    setSelectedId]    = useState<number | null>(null);
-  const [editorContent, setEditorContent] = useState('');
-  const [showHistory,   setShowHistory]   = useState(false);
-  const [showPublish,   setShowPublish]   = useState(false);
-  const [notifyUsers,   setNotifyUsers]   = useState(false);
-  const [changeSummary, setChangeSummary] = useState('');
-  const [uploadLoading, setUploadLoading] = useState(false);
-  const [toast,         setToast]         = useState<{type:'success'|'error'; msg:string}|null>(null);
-  const [previewMode,   setPreviewMode]   = useState(false);
-
-  const showToast = (type: 'success' | 'error', msg: string) => {
-    setToast({ type, msg });
-    setTimeout(() => setToast(null), 3500);
-  };
-
-  // ── Fetch all docs ──────────────────────────────────────────────────────
-  const { data: docs = [], isLoading } = useQuery<LegalDocument[]>({
-    queryKey: ['legal', 'admin'],
-    queryFn:  () => legalAdminService.list(),
-  });
-
-  const selectedDoc = docs.find((d) => d.id === selectedId);
-
-  // ── Save draft ──────────────────────────────────────────────────────────
-  const saveMut = useMutation({
-    mutationFn: () => legalAdminService.updateContent(selectedId!, {
-      content_html: editorContent,
-    }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['legal', 'admin'] });
-      showToast('success', 'Draft saved.');
-    },
-    onError: () => showToast('error', 'Save failed. Try again.'),
-  });
-
-  // ── File upload ─────────────────────────────────────────────────────────
-  const handleFileUpload = async (file: File) => {
-    if (!selectedId) return;
-    setUploadLoading(true);
-    try {
-      const result = await legalAdminService.uploadFile(selectedId, file) as UploadResponse;
-      setEditorContent(result.content_html);
-      qc.invalidateQueries({ queryKey: ['legal', 'admin'] });
-      showToast('success', `${file.name} uploaded and converted successfully.`);
-    } catch (err: unknown) {
-      showToast('error', err instanceof Error ? err.message : 'Upload failed.');
-    } finally {
-      setUploadLoading(false);
-    }
-  };
-
-  // ── Publish ─────────────────────────────────────────────────────────────
-  const publishMut = useMutation({
-    mutationFn: () => legalAdminService.publish(selectedId!, {
-      notify_users:   notifyUsers,
-      change_summary: changeSummary,
-    }),
-    onSuccess: (data: PublishResponse) => {
-      qc.invalidateQueries({ queryKey: ['legal', 'admin'] });
-      setShowPublish(false);
-      setChangeSummary('');
-      showToast('success',
-        `Published as v${data.version_label}${notifyUsers ? ' — users will be notified.' : '.'}`
-      );
-    },
-    onError: () => showToast('error', 'Publish failed. Try again.'),
-  });
-
-  const openDoc = (doc: LegalDocument) => {
-    setSelectedId(doc.id);
-    setEditorContent(doc.content_html || '');
-    setPreviewMode(false);
-    setShowHistory(false);
-    setShowPublish(false);
-  };
-
-  const statusColor = (s: string) =>
-    s === 'published' ? 'text-emerald-400' :
-    s === 'draft'     ? 'text-yellow-400'  : 'text-slate-500';
-
+function Preview({ doc, draftHtml, hasDraft }: { doc: LegalDoc; draftHtml: string; hasDraft: boolean }) {
+  const canLive = doc.status === 'published' && !!doc.content_html
+  const [which, setWhich] = useState<'draft' | 'live'>(hasDraft || !canLive ? 'draft' : 'live')
+  const [device, setDevice] = useState<'phone' | 'wide'>('phone')
+  const src = which === 'live' ? doc.content_html : draftHtml
+  const clean = useMemo(() => sanitizeHtml(src), [src])
   return (
-    <div className="p-6 min-h-screen" style={{ background: '#13151F' }}>
-
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed top-4 right-4 z-100 flex items-center gap-3
-                         px-4 py-3 rounded-xl shadow-lg border text-sm font-semibold
-                         ${toast.type === 'success'
-                           ? 'bg-emerald-950 border-emerald-700 text-emerald-300'
-                           : 'bg-red-950 border-red-700 text-red-300'}`}>
-          {toast.type === 'success'
-            ? <CheckCircle size={16} />
-            : <AlertCircle size={16} />}
-          {toast.msg}
+    <Panel
+      title="Preview"
+      description="Rendered with the same sanitising and typography as the customer app."
+      actions={
+        <div className="flex flex-wrap gap-2">
+          <SegmentedControl label="Version to preview" value={which} onChange={setWhich}
+            items={[{ value: 'draft', label: 'Draft' }, { value: 'live', label: 'Live', disabled: !canLive }]} />
+          <SegmentedControl label="Preview width" value={device} onChange={setDevice}
+            items={[{ value: 'phone', label: <span className="inline-flex items-center gap-1"><Smartphone size={12} aria-hidden />Phone</span> }, { value: 'wide', label: <span className="inline-flex items-center gap-1"><Monitor size={12} aria-hidden />Wide</span> }]} />
         </div>
+      }
+    >
+      {which === 'draft' && (
+        <p className="mb-3 rounded-md border border-warning-line bg-warning-soft px-3 py-2 text-xs text-warning">
+          Draft preview. Users do not see this until it is published.
+        </p>
       )}
-
-      {/* History modal */}
-      {showHistory && selectedId && (
-        <HistoryPanel
-          docId={selectedId}
-          onRestore={() => {
-            const doc = docs.find((d) => d.id === selectedId);
-            if (doc) setEditorContent(doc.content_html);
-          }}
-          onClose={() => setShowHistory(false)}
-        />
-      )}
-
-      {/* Publish confirm modal */}
-      {showPublish && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.7)' }}>
-          <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-md
-                          border border-slate-700">
-            <h3 className="text-white font-bold text-lg mb-1">Publish Document</h3>
-            <p className="text-slate-400 text-sm mb-5">
-              This will make the document live to all users immediately.
+      <div className="flex justify-center rounded-md bg-surface-sunken p-4 sm:p-6">
+        <article className={cn('w-full overflow-hidden rounded-lg border border-surface-border bg-surface-card shadow-card', device === 'phone' ? 'max-w-[390px]' : 'max-w-[760px]')}>
+          <header className="border-b border-surface-border px-5 py-4">
+            <h1 className="text-lg font-bold text-ink-primary">{doc.title}</h1>
+            <p className="mt-0.5 text-xs text-ink-muted">
+              {which === 'live' ? `Version ${doc.version_label} · Updated ${formatDateTime(doc.published_at)}` : 'Unpublished draft'}
             </p>
-
-            <label className="block text-slate-400 text-xs font-semibold
-                               uppercase tracking-wider mb-1.5">
-              What changed? (optional)
-            </label>
-            <input
-              value={changeSummary}
-              onChange={e => setChangeSummary(e.target.value)}
-              placeholder="e.g. Updated Section 5 — withdrawal limits"
-              className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border
-                         border-slate-700 text-slate-200 text-sm mb-4
-                         focus:outline-none focus:border-indigo-500"
-            />
-
-            <label className="flex items-center gap-3 cursor-pointer mb-5">
-              <div
-                onClick={() => setNotifyUsers(v => !v)}
-                className={`w-11 h-6 rounded-full transition-colors shrink-0
-                            flex items-center px-0.5 ${
-                  notifyUsers ? 'bg-indigo-600' : 'bg-slate-600'
-                }`}>
-                <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                  notifyUsers ? 'translate-x-5' : 'translate-x-0'
-                }`} />
-              </div>
-              <div>
-                <p className="text-slate-200 text-sm font-semibold">
-                  Notify users of changes
-                </p>
-                <p className="text-slate-500 text-xs">
-                  Shows "Updated" badge to users who haven't re-read this version
-                </p>
-              </div>
-            </label>
-
-            <div className="flex gap-3">
-              <button onClick={() => setShowPublish(false)}
-                className="flex-1 py-2.5 rounded-xl bg-slate-700 text-slate-300
-                           text-sm font-semibold hover:bg-slate-600 transition-colors">
-                Cancel
-              </button>
-              <button
-                onClick={() => publishMut.mutate()}
-                disabled={publishMut.isPending}
-                className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500
-                           text-white text-sm font-semibold transition-colors
-                           flex items-center justify-center gap-2">
-                {publishMut.isPending
-                  ? <Loader2 size={16} className="animate-spin" />
-                  : <Send size={16} />}
-                Publish Now
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-white text-2xl font-bold">Legal Documents</h1>
-          <p className="text-slate-400 text-sm mt-0.5">
-            Manage Privacy Policy, Terms and Conditions, and other legal documents
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-12 gap-6">
-
-        {/* ── Left: document list ── */}
-        <div className="col-span-4">
-          <div className="rounded-2xl overflow-hidden"
-            style={{ background: '#1A1D2E', border: '1px solid #252840' }}>
-            <div className="px-4 py-3 border-b border-slate-700/50">
-              <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider">
-                Documents
-              </p>
-            </div>
-            {isLoading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 size={24} className="text-indigo-400 animate-spin" />
-              </div>
-            ) : (
-              docs.map((doc) => (
-                <button
-                  key={doc.id}
-                  onClick={() => openDoc(doc)}
-                  className={`w-full flex items-start gap-3 px-4 py-4 text-left
-                              transition-colors border-b border-slate-700/30
-                              hover:bg-slate-700/30 ${
-                    selectedId === doc.id ? 'bg-indigo-950/40' : ''
-                  }`}>
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center
-                                  shrink-0 bg-indigo-950">
-                    <FileText size={16} className="text-indigo-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-slate-200 text-sm font-semibold truncate">
-                      {doc.title}
-                    </p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className={`text-xs font-medium capitalize ${statusColor(doc.status)}`}>
-                        {doc.status}
-                      </span>
-                      <span className="text-slate-600 text-xs">·</span>
-                      <span className="text-slate-500 text-xs font-mono">
-                        v{doc.version_label}
-                      </span>
-                    </div>
-                    {doc.updated_at && (
-                      <p className="text-slate-600 text-xs mt-0.5">
-                        {formatDistanceToNow(new Date(doc.updated_at), { addSuffix: true })}
-                      </p>
-                    )}
-                  </div>
-                </button>
-              ))
+            {which === 'live' && doc.notify_users && doc.change_summary && (
+              <p className="mt-2 rounded-md bg-surface-elevated px-3 py-2 text-xs text-ink-secondary"><span className="font-semibold text-ink-primary">What changed: </span>{doc.change_summary}</p>
             )}
-          </div>
-        </div>
-
-        {/* ── Right: editor ── */}
-        <div className="col-span-8">
-          {!selectedDoc ? (
-            <div className="flex flex-col items-center justify-center h-64
-                            rounded-2xl border border-dashed border-slate-700">
-              <FileText size={32} className="text-slate-600 mb-3" />
-              <p className="text-slate-400 text-sm">
-                Select a document to edit
-              </p>
-            </div>
+          </header>
+          {clean.trim() ? (
+            <div className={cn('px-5 py-5', DOC_TYPOGRAPHY)} dangerouslySetInnerHTML={{ __html: clean }} />
           ) : (
-            <div className="rounded-2xl overflow-hidden"
-              style={{ background: '#1A1D2E', border: '1px solid #252840' }}>
-
-              {/* Editor header */}
-              <div className="flex items-center justify-between px-5 py-4
-                              border-b border-slate-700/50">
-                <div>
-                  <h2 className="text-white font-bold text-base">
-                    {selectedDoc.title}
-                  </h2>
-                  <p className="text-slate-500 text-xs mt-0.5">
-                    {selectedDoc.status === 'published'
-                      ? `Published · v${selectedDoc.version_label}`
-                      : 'Draft — not visible to users yet'
-                    }
-                    {selectedDoc.last_edited_by_username &&
-                      ` · Last edited by ${selectedDoc.last_edited_by_username}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {/* Download original */}
-                  {selectedDoc.uploaded_file && (
-                    <a
-                      href={selectedDoc.uploaded_file}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg
-                                 bg-slate-700 hover:bg-slate-600 text-slate-300
-                                 text-xs font-semibold transition-colors">
-                      <Download size={13} />
-                      Original
-                    </a>
-                  )}
-                  {/* Preview toggle */}
-                  <button
-                    onClick={() => setPreviewMode(v => !v)}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg
-                                text-xs font-semibold transition-colors ${
-                      previewMode
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-                    }`}>
-                    <Eye size={13} />
-                    Preview
-                  </button>
-                  {/* History */}
-                  <button
-                    onClick={() => setShowHistory(true)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg
-                               bg-slate-700 hover:bg-slate-600 text-slate-300
-                               text-xs font-semibold transition-colors">
-                    <History size={13} />
-                    History
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-5">
-                {previewMode ? (
-                  /* Preview mode — render HTML */
-                  <div className="bg-slate-900 rounded-xl p-6 min-h-100
-                                  prose prose-invert prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(editorContent) }} />
-                ) : (
-                  <>
-                    {/* File upload section */}
-                    <div className="mb-5">
-                      <p className="text-slate-400 text-xs font-semibold uppercase
-                                    tracking-wider mb-2">
-                        Upload Document File
-                      </p>
-                      <FileDropZone
-                        onFile={handleFileUpload}
-                        loading={uploadLoading}
-                      />
-                      <p className="text-slate-600 text-xs mt-2">
-                        Uploading a file will replace the editor content below.
-                        The original file is stored for download.
-                      </p>
-                    </div>
-
-                    {/* Divider */}
-                    <div className="flex items-center gap-3 mb-5">
-                      <div className="flex-1 h-px bg-slate-700" />
-                      <span className="text-slate-500 text-xs font-medium">
-                        OR EDIT DIRECTLY
-                      </span>
-                      <div className="flex-1 h-px bg-slate-700" />
-                    </div>
-
-                    {/* Rich text editor */}
-                    <div className="mb-5">
-                      <p className="text-slate-400 text-xs font-semibold uppercase
-                                    tracking-wider mb-2">
-                        Document Content
-                      </p>
-                      <RichEditor
-                        content={editorContent}
-                        onChange={setEditorContent}
-                      />
-                    </div>
-                  </>
-                )}
-
-                {/* Action buttons */}
-                <div className="flex items-center gap-3 pt-4 border-t border-slate-700/50">
-                  <button
-                    onClick={() => saveMut.mutate()}
-                    disabled={saveMut.isPending || previewMode}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl
-                               bg-slate-700 hover:bg-slate-600 text-slate-200
-                               text-sm font-semibold transition-colors
-                               disabled:opacity-50 disabled:cursor-not-allowed">
-                    {saveMut.isPending
-                      ? <Loader2 size={15} className="animate-spin" />
-                      : <Save size={15} />}
-                    Save Draft
-                  </button>
-                  <button
-                    onClick={() => setShowPublish(true)}
-                    disabled={!editorContent.trim()}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl
-                               bg-indigo-600 hover:bg-indigo-500 text-white
-                               text-sm font-semibold transition-colors
-                               disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ boxShadow: '0 4px 14px rgba(99,102,241,0.3)' }}>
-                    <Send size={15} />
-                    Publish
-                  </button>
-                  <p className="text-slate-500 text-xs ml-auto">
-                    Drafts are not visible to users until published
-                  </p>
-                </div>
-              </div>
-            </div>
+            <EmptyState size="compact" title="Nothing to show" description="This version has no content yet." />
           )}
-        </div>
+        </article>
       </div>
-    </div>
-  );
+    </Panel>
+  )
+}
+
+function Versions({ doc, q, editorDirty, onRestored }: {
+  doc: LegalDoc
+  q: ReturnType<typeof useQuery<{ history: LegalVersion[] }>>
+  editorDirty: boolean
+  onRestored: (label: string) => void
+}) {
+  const [viewing, setViewing] = useState<LegalVersion | null>(null)
+  const [restoring, setRestoring] = useState<LegalVersion | null>(null)
+  const restore = useMutation({
+    mutationFn: (v: LegalVersion) => legalApi.restore(doc.id, v.id),
+    onSuccess: (_r, v) => { setRestoring(null); onRestored(v.version_label) },
+  })
+  const rows = q.data?.history ?? []
+  return (
+    <Panel padding="none" title="Published versions" description="Each publish is kept. Restoring copies a version into the draft; nothing goes live until you publish.">
+      {q.isLoading ? (
+        <div className="space-y-3 p-4">{[0, 1].map((i) => <Skeleton key={i} height={44} label={i === 0 ? 'Loading versions' : undefined} />)}</div>
+      ) : q.error ? (
+        <ErrorState size="compact" error={q.error} onRetry={() => void q.refetch()} />
+      ) : rows.length === 0 ? (
+        <EmptyState size="compact" icon={History} title="Not published yet" description="Versions appear here each time the document is published." />
+      ) : (
+        <ol className="divide-y divide-[var(--border)]">
+          {rows.map((v) => {
+            const live = doc.status === 'published' && v.version === doc.version
+            return (
+              <li key={v.id} className="flex flex-wrap items-start gap-3 px-4 py-3">
+                <span className="mono mt-0.5 w-12 shrink-0 text-sm font-semibold text-ink-primary">v{v.version_label}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="flex flex-wrap items-center gap-2 text-sm text-ink-primary">
+                    {v.change_summary || <span className="text-ink-muted">No change summary</span>}
+                    {live && <StatusBadge size="sm" tone="success" label="Live" />}
+                  </p>
+                  <p className="mt-0.5 text-xs text-ink-muted">
+                    Published by <span className="text-ink-secondary">{v.published_by_username}</span> ·{' '}
+                    <time dateTime={v.published_at}>{formatDateTime(v.published_at)}</time> ({formatRelative(v.published_at)}) · {formatNumber(wordCount(v.content_html))} words
+                  </p>
+                </div>
+                <div className="flex gap-1.5">
+                  <Button size="sm" variant="ghost" leftIcon={<Eye size={13} />} onClick={() => setViewing(v)}>View</Button>
+                  <Button size="sm" variant="secondary" leftIcon={<RotateCcw size={13} />} onClick={() => setRestoring(v)}>Restore to draft</Button>
+                </div>
+              </li>
+            )
+          })}
+        </ol>
+      )}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} size="lg" title={viewing ? `${doc.title} · v${viewing.version_label}` : ''}
+        description={viewing ? `Published ${formatDateTime(viewing.published_at)} by ${viewing.published_by_username}` : undefined}
+        footer={<Button variant="secondary" onClick={() => setViewing(null)}>Close</Button>}>
+        {viewing && <div className={DOC_TYPOGRAPHY} dangerouslySetInnerHTML={{ __html: sanitizeHtml(viewing.content_html) }} />}
+      </Modal>
+      <ConfirmModal
+        key={restoring?.id ?? 'none'}
+        open={!!restoring} onClose={() => setRestoring(null)} onConfirm={() => restoring && restore.mutate(restoring)} loading={restore.isPending}
+        variant="warning" title={`Restore v${restoring?.version_label ?? ''} into the draft?`} confirmLabel="Restore to draft"
+        message="The draft is replaced with this version's content. The live version stays online until you review and publish."
+        details={[{ label: 'Document', value: doc.title }, { label: 'Restoring', value: `v${restoring?.version_label ?? ''}` }, { label: 'Live now', value: doc.status === 'published' ? `v${doc.version_label}` : 'Nothing' }]}
+        consequence={editorDirty ? 'Your unsaved edits in the editor will be lost.' : undefined}
+      >
+        {restore.error && <p className="text-sm text-danger">{errorMessage(restore.error)}</p>}
+      </ConfirmModal>
+    </Panel>
+  )
+}
+
+function PublishDialog({ doc, history, html, dirty, onClose, onPublished }: {
+  doc: LegalDoc; history?: LegalVersion[]; html: string; dirty: boolean; onClose: () => void; onPublished: (label: string) => void
+}) {
+  const first = doc.status !== 'published'
+  const [summary, setSummary] = useState('')
+  const [notify, setNotify] = useState(!first)
+  const next = nextVersionLabel(doc, history)
+  const publish = useMutation({
+    mutationFn: async () => {
+      if (dirty) await legalApi.saveDraft(doc.id, sanitizeHtml(html))
+      return legalApi.publish(doc.id, summary.trim(), notify)
+    },
+    onSuccess: (r) => onPublished(r.version_label),
+  })
+  const ok = summary.trim().length >= 5
+  return (
+    <Modal
+      open onClose={onClose} dismissible={!publish.isPending} role="alertdialog" size="md"
+      title={first ? `Publish ${doc.title}` : `Publish v${next} of ${doc.title}`}
+      description={first ? 'The document becomes visible in the app and on the sign-up screens.' : 'The draft replaces the live version for every user straight away.'}
+      icon={<span className="flex h-8 w-8 items-center justify-center rounded-md bg-warning-soft text-warning"><Send size={16} aria-hidden /></span>}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={publish.isPending}>Cancel</Button>
+          <Button variant="primary" onClick={() => publish.mutate()} disabled={!ok} loading={publish.isPending} loadingText="Publishing…">Publish v{next}</Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <dl className="divide-y divide-[var(--border)] rounded-md border border-surface-border text-sm">
+          <div className="flex justify-between gap-4 px-3 py-2"><dt className="text-xs text-ink-muted">Live now</dt><dd className="font-medium text-ink-primary">{first ? 'Nothing' : `v${doc.version_label}, since ${formatDateTime(doc.published_at)}`}</dd></div>
+          <div className="flex justify-between gap-4 px-3 py-2"><dt className="text-xs text-ink-muted">After publishing</dt><dd className="font-medium text-ink-primary">v{next}</dd></div>
+          <div className="flex justify-between gap-4 px-3 py-2"><dt className="text-xs text-ink-muted">Length</dt><dd className="num text-ink-primary">{formatNumber(wordCount(html || doc.draft_html || doc.content_html))} words</dd></div>
+        </dl>
+        {dirty && <p className="text-xs text-warning">Your unsaved edits are saved and included in this version.</p>}
+        <Textarea label="What changed" required rows={3} maxLength={500} value={summary} onChange={(e) => setSummary(e.target.value)}
+          placeholder="e.g. Added a data retention section and clarified payout timing."
+          hint={notify ? 'Shown to users with the update notice. At least 5 characters.' : 'Kept in the version history. At least 5 characters.'} />
+        <label className="flex items-start gap-2.5 rounded-md border border-surface-border px-3 py-2.5 text-sm">
+          <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--brand)]" />
+          <span>
+            <span className="font-medium text-ink-primary">Tell users about this update</span>
+            <span className="mt-0.5 block text-xs text-ink-muted">Users who have not read v{next} see an "Updated" badge and the summary above until they open it.</span>
+          </span>
+        </label>
+        {publish.error && <p role="alert" className="text-sm text-danger">{errorMessage(publish.error)}</p>}
+      </div>
+    </Modal>
+  )
+}
+
+function CreateDialog({ types, onClose, onCreated }: { types: LegalDocType[]; onClose: () => void; onCreated: (id: number) => void }) {
+  const qc = useQueryClient()
+  const [type, setType] = useState<LegalDocType>(types[0])
+  const [title, setTitle] = useState(DOC_TYPE_LABEL[types[0]])
+  const create = useMutation({
+    mutationFn: () => legalApi.create(type, title.trim()),
+    onSuccess: async (d) => { await qc.invalidateQueries({ queryKey: ['legal', 'docs'] }); onCreated(d.id) },
+  })
+  return (
+    <Modal open onClose={onClose} dismissible={!create.isPending} size="sm" title="New legal document"
+      description="Starts as an empty draft. Nothing is visible to users until you publish."
+      footer={<><Button variant="secondary" onClick={onClose} disabled={create.isPending}>Cancel</Button><Button variant="primary" onClick={() => create.mutate()} disabled={!title.trim()} loading={create.isPending}>Create draft</Button></>}>
+      <div className="space-y-4">
+        <Select label="Type" value={type} onChange={(e) => { const t = e.target.value as LegalDocType; setType(t); setTitle(DOC_TYPE_LABEL[t]) }} hint="One document per type.">
+          {types.map((t) => <option key={t} value={t}>{DOC_TYPE_LABEL[t]}</option>)}
+        </Select>
+        <Input label="Title shown to users" value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />
+        {create.error && <p role="alert" className="text-sm text-danger">{errorMessage(create.error)}</p>}
+      </div>
+    </Modal>
+  )
 }

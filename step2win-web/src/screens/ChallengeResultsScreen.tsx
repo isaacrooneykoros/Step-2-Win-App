@@ -1,212 +1,272 @@
-﻿import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery }    from '@tanstack/react-query'
-import { ChevronLeft, Info } from 'lucide-react'
-import { challengesService } from '../services/api/challenges'
+import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { CheckCircle2, Info, MinusCircle, RotateCcw, Wallet, type LucideIcon } from 'lucide-react';
+import { challengesService } from '../services/api/challenges';
+import { useAuthStore } from '../store/authStore';
+import { ScreenHeader } from '../components/ui/ScreenHeader';
+import Card from '../components/ui/Card';
+import Pill, { type Tone } from '../components/ui/Pill';
+import Button from '../components/ui/Button';
+import AnimatedNumber from '../components/ui/AnimatedNumber';
+import { ListGroup, ListRow } from '../components/ui/ListRow';
+import { LoadError, NotFoundError } from '../components/ui/ErrorState';
+import { LeaderboardList, LeaderboardRow } from '../components/challenge-detail/Leaderboard';
+import { ResultsSkeleton } from '../components/challenge-detail/Skeletons';
+import { formatCalendarDay, toNumber } from '../components/challenge-detail/meta';
+import type { ChallengeResultEntry, ChallengeResults } from '../components/challenge-detail/types';
+import { formatKES } from '../utils/currency';
+import { formatSteps } from '../lib/format';
 
-const MEDALS = ['', '', '']
+const PAYOUT_RULE: Record<string, string> = {
+  proportional: 'Proportional split',
+  winner_takes_all: 'Winner takes all',
+  top_3: 'Top 3 split (50 / 30 / 20)',
+};
 
-const METHOD_LABELS: Record<string, string> = {
-  proportional:    'Proportional split',
-  dead_heat:       'Tie  prize split',
-  tiebreaker:      'Tiebreaker win',
-  refund:          'Full refund',
-  no_payout:       'Did not qualify',
+type Outcome = { label: string; tone: Tone; icon: LucideIcon };
+
+function outcomeFor(result: ChallengeResultEntry, isRefund: boolean): Outcome {
+  if (isRefund || result.payout_method === 'refund') return { label: 'Refunded', tone: 'info', icon: RotateCcw };
+  if (toNumber(result.payout_kes) > 0) return { label: 'Won', tone: 'reward', icon: Wallet };
+  if (result.qualified) return { label: 'Qualified', tone: 'success', icon: CheckCircle2 };
+  return { label: 'Not qualified', tone: 'neutral', icon: MinusCircle };
+}
+
+function tieExplanation(result: ChallengeResultEntry): string | null {
+  if (!result.tied_with_count) return null;
+  const others = `${result.tied_with_count} other ${result.tied_with_count === 1 ? 'participant' : 'participants'}`;
+  if (result.payout_method === 'dead_heat') {
+    return `You tied with ${others}. The prize for the tied positions was split equally between you.`;
+  }
+  return `You tied with ${others}.${result.tiebreaker_label ? ` The tie was decided by ${result.tiebreaker_label.charAt(0).toLowerCase()}${result.tiebreaker_label.slice(1)}.` : ''}`;
+}
+
+function rowTrailing(result: ChallengeResultEntry) {
+  const payout = toNumber(result.payout_kes);
+  if (result.payout_method === 'refund') return <span className="font-medium text-info">Refunded</span>;
+  if (payout > 0) return <span className="num font-semibold text-reward-ink">{formatKES(payout)}</span>;
+  if (result.qualified) {
+    return (
+      <span className="inline-flex items-center gap-1 font-medium text-success">
+        <CheckCircle2 size={12} strokeWidth={2.5} aria-hidden />
+        Qualified
+      </span>
+    );
+  }
+  return <span className="text-text-muted">No payout</span>;
 }
 
 export default function ChallengeResultsScreen() {
-  const { id }   = useParams<{ id: string }>()
-  const navigate = useNavigate()
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch, isRefetching } = useQuery<ChallengeResults>({
     queryKey: ['challenges', 'results', id],
-    queryFn:  () => challengesService.getChallengeResults(Number(id)),
-    enabled:  !!id,
-  })
+    queryFn: () => challengesService.getChallengeResults(Number(id)),
+    enabled: !!id,
+  });
 
-  if (isLoading || !data) return (
-    <div className="min-h-screen flex items-center justify-center"
-      style={{ background: '#F8F9FB' }}>
-      <div className="w-8 h-8 border-2 border-[#4F9CF9] border-t-transparent
-                      rounded-full animate-spin" />
-    </div>
-  )
+  if (isLoading) {
+    return (
+      <div className="pb-nav">
+        <ScreenHeader title="Results" back={`/challenges/${id}`} />
+        <ResultsSkeleton />
+      </div>
+    );
+  }
 
-  const { challenge, summary, my_result, leaderboard } = data
-  const isRefund = summary.is_refund
+  if (isError || !data) {
+    const status = (error as { response?: { status?: number } } | null)?.response?.status;
+    return (
+      <div className="pb-nav">
+        <ScreenHeader title="Results" back={`/challenges/${id}`} />
+        {status === 404 || status === 400 ? (
+          <NotFoundError
+            message="Results appear here once the challenge has closed and payouts are calculated."
+            onGoBack={() => navigate(`/challenges/${id}`)}
+            className="pt-16"
+          />
+        ) : (
+          <LoadError resource="results" onRetry={() => refetch()} isRetrying={isRefetching} className="pt-16" />
+        )}
+      </div>
+    );
+  }
+
+  const { challenge, summary, my_result: me, leaderboard } = data;
+  const isRefund = summary.is_refund;
+  const milestone = challenge.milestone;
+  const outcome = me ? outcomeFor(me, isRefund) : null;
+  const myPayout = toNumber(me?.payout_kes);
+  const tie = me ? tieExplanation(me) : null;
+  const myName = me?.username ?? user?.username;
 
   return (
-    <div className="min-h-screen pb-12" style={{ background: '#F8F9FB' }}>
+    <div className="pb-nav">
+      <ScreenHeader title="Results" back={`/challenges/${challenge.id}`} />
 
-      {/*  Header  */}
-      <div className="px-4 pt-6 pb-4 flex items-center gap-3">
-        <button onClick={() => navigate(-1)}
-          className="w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{ background: '#FFF', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
-          <ChevronLeft size={20} color="#111827" />
-        </button>
-        <div>
-          <h1 className="text-[#111827] text-lg font-bold">{challenge.name}</h1>
-          <p className="text-[#9CA3AF] text-xs">Final Results</p>
-        </div>
-      </div>
-
-      {/*  My result hero card  */}
-      {my_result && (
-        <div className="mx-4 mb-4 rounded-2xl p-4"
-          style={{
-            background: my_result.payout_kes > '0'
-              ? 'linear-gradient(135deg, #34D399 0%, #10B981 100%)'
-              : isRefund
-              ? 'linear-gradient(135deg, #FBBF24 0%, #F59E0B 100%)'
-              : '#F9FAFB',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
-          }}>
-          <p className="text-white text-xs font-semibold mb-1 opacity-80">
-            {isRefund ? 'REFUNDED' : my_result.payout_kes > '0' ? 'YOU WON' : 'NOT QUALIFIED'}
+      <div className="space-y-8 px-5 pt-1">
+        <header>
+          <p className="text-caption text-text-muted">
+            Final results
+            {challenge.end_date ? ` · closed ${formatCalendarDay(challenge.end_date)}` : ''}
           </p>
-          <p className="text-white font-bold"
-            style={{ fontSize: 32, fontFamily: 'DM Serif Display, serif' }}>
-            KES {Number(my_result.payout_kes).toLocaleString()}
-          </p>
-          <p className="text-white text-sm opacity-80 mt-1">
-            {my_result.final_steps.toLocaleString()} steps
-            {my_result.final_rank ? `  Rank #${my_result.final_rank}` : ''}
-          </p>
+          <h1 className="mt-1 text-title-lg text-text-primary [overflow-wrap:anywhere]">{challenge.name}</h1>
+        </header>
 
-          {/* Tie explanation */}
-          {my_result.tied_with_count > 0 && (
-            <div className="mt-3 rounded-xl p-3"
-              style={{ background: 'rgba(255,255,255,0.2)' }}>
-              <div className="flex items-start gap-2">
-                <Info size={14} className="text-white mt-0.5 flex-shrink-0" />
-                <p className="text-white text-xs leading-relaxed">
-                  {my_result.payout_method === 'dead_heat'
-                    ? `You tied with ${my_result.tied_with_count} other participant(s). 
-                       The prize pool for tied positions was split equally.`
-                    : `You tied with ${my_result.tied_with_count} other participant(s). 
-                       Tie broken by: ${my_result.tiebreaker_label}.`
-                  }
-                </p>
-              </div>
-            </div>
-          )}
+        {/* ── Your outcome ─────────────────────────────────────── */}
+        {me && outcome && (
+          <section aria-labelledby="outcome-title">
+            <Card padding="lg">
+              <Pill tone={outcome.tone} icon={outcome.icon} size="md">
+                {outcome.label}
+              </Pill>
 
-          {/* Refund explanation */}
-          {isRefund && (
-            <p className="text-white text-xs opacity-80 mt-2">
-              No participants reached the {(challenge.milestone/1000).toFixed(0)}K
-              step goal. Entry fees refunded in full.
-            </p>
-          )}
-        </div>
-      )}
+              {isRefund ? (
+                <>
+                  <h2 id="outcome-title" className="mt-4 text-callout text-text-secondary">
+                    Returned to your wallet
+                  </h2>
+                  <AnimatedNumber value={myPayout} startFromValue format={(v) => formatKES(v)} className="mt-1 block text-display text-text-primary" />
+                  <p className="mt-2 text-callout text-text-secondary">
+                    Nobody reached {formatSteps(milestone)} steps, so every entry contribution was refunded in full.
+                  </p>
+                </>
+              ) : myPayout > 0 ? (
+                <>
+                  <h2 id="outcome-title" className="mt-4 text-callout text-text-secondary">
+                    You earned
+                  </h2>
+                  <AnimatedNumber value={myPayout} startFromValue format={(v) => formatKES(v)} className="mt-1 block text-display text-reward-ink" />
+                  <p className="mt-2 text-callout text-text-secondary">Credited to your Step2Win wallet.</p>
+                </>
+              ) : me.qualified ? (
+                <>
+                  <h2 id="outcome-title" className="mt-4 text-title text-text-primary">
+                    You reached the goal
+                  </h2>
+                  <p className="mt-2 text-callout text-text-secondary">
+                    You qualified, but under the {PAYOUT_RULE[challenge.payout_structure]?.toLowerCase() ?? 'payout'} rule this finish didn’t earn a share of the pool.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h2 id="outcome-title" className="mt-4 text-title text-text-primary">
+                    <span className="num">{formatSteps(Math.max(0, milestone - me.final_steps))}</span> steps short
+                  </h2>
+                  <p className="mt-2 text-callout text-text-secondary">
+                    You walked {formatSteps(me.final_steps)} of the {formatSteps(milestone)} steps needed to qualify. Your entry contribution was shared by the qualified finishers.
+                  </p>
+                </>
+              )}
 
-      {/*  Summary stats  */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mx-4 mb-4">
-        {[
-          { label: 'Participants', value: summary.total_participants },
-          { label: 'Qualified',    value: summary.qualified_count },
-          { label: 'Prize Pool',   value: `KES ${Number(challenge.net_pool).toLocaleString()}` },
-        ].map(s => (
-          <div key={s.label} className="rounded-xl p-3 text-center"
-            style={{ background: '#FFF', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-            <p className="text-[#111827] text-sm font-bold">{s.value}</p>
-            <p className="text-[#9CA3AF] text-xs">{s.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/*  Leaderboard  */}
-      <div className="mx-4 rounded-2xl overflow-hidden"
-        style={{ background: '#FFF', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-        <div className="px-4 py-3" style={{ borderBottom: '1px solid hsl(var(--border-light))' }}>
-          <p className="text-[#111827] text-sm font-bold">Final Leaderboard</p>
-        </div>
-
-        {leaderboard.map((result: any, i: number) => (
-          <div key={result.username}
-            className={`px-4 py-3.5 ${i < leaderboard.length - 1
-              ? 'border-b border-[#F3F4F6]' : ''}`}
-            style={{
-              background: result.username === my_result?.username
-                ? '#F0FDF4' : undefined
-            }}>
-
-            <div className="flex items-center gap-3">
-              {/* Rank */}
-              <div className="w-8 text-center flex-shrink-0">
-                {result.final_rank && result.final_rank <= 3
-                  ? <span className="text-xl">{MEDALS[result.final_rank - 1]}</span>
-                  : <span className="text-[#9CA3AF] text-sm font-bold">
-                      {result.final_rank || ''}
-                    </span>
-                }
-              </div>
-
-              {/* Avatar initials */}
-              <div className="w-9 h-9 rounded-full flex items-center justify-center
-                              text-white text-xs font-bold flex-shrink-0"
-                style={{ background: result.payout_kes > '0' ? '#4F9CF9' : '#D1D5DB' }}>
-                {result.username.slice(0, 2).toUpperCase()}
-              </div>
-
-              {/* Name + details */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <p className="text-[#111827] text-sm font-bold truncate">
-                    {result.username}
-                    {result.username === my_result?.username && (
-                      <span className="text-[#4F9CF9]"> (you)</span>
+              <dl className="mt-5 grid grid-cols-3 divide-x divide-border-light border-t border-border-light pt-4">
+                <div className="min-w-0 pr-3">
+                  <dt className="text-caption text-text-muted">Final rank</dt>
+                  <dd className="num mt-0.5 truncate text-headline text-text-primary">
+                    {me.final_rank ? (
+                      <>
+                        {me.final_rank}
+                        <span className="text-callout font-normal text-text-muted"> of {summary.total_participants}</span>
+                      </>
+                    ) : (
+                      '–'
                     )}
-                  </p>
-                  {result.qualified && (
-                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full
-                                     text-white bg-[#34D399] flex-shrink-0">
-                       QLD
-                    </span>
-                  )}
+                  </dd>
                 </div>
-                <p className="text-[#9CA3AF] text-xs">
-                  {result.final_steps.toLocaleString()} steps
-                  {result.tied_with_count > 0 && (
-                    <span className="text-[#FBBF24]">
-                      {' '} tied {result.tied_with_count + 1}
-                    </span>
-                  )}
-                </p>
+                <div className="min-w-0 px-3">
+                  <dt className="text-caption text-text-muted">Your steps</dt>
+                  <dd className="num mt-0.5 truncate text-headline text-text-primary">{formatSteps(me.final_steps)}</dd>
+                </div>
+                <div className="min-w-0 pl-3">
+                  <dt className="text-caption text-text-muted">Goal</dt>
+                  <dd className="num mt-0.5 truncate text-headline text-text-primary">{formatSteps(milestone)}</dd>
+                </div>
+              </dl>
 
-                {/* Tie explanation inline */}
-                {result.tied_with_count > 0 && result.tiebreaker_label && (
-                  <p className="text-[#9CA3AF] text-xs mt-0.5 italic">
-                    {result.payout_method === 'dead_heat'
-                      ? 'Prize split equally'
-                      : `Order: ${result.tiebreaker_label}`}
-                  </p>
-                )}
-              </div>
+              {tie && (
+                <div className="mt-4 flex gap-2.5 rounded-control bg-bg-input p-3">
+                  <Info size={16} className="mt-0.5 shrink-0 text-text-secondary" aria-hidden />
+                  <p className="text-callout text-text-secondary">{tie}</p>
+                </div>
+              )}
+            </Card>
+          </section>
+        )}
 
-              {/* Payout */}
-              <div className="text-right flex-shrink-0">
-                <p className="text-sm font-bold"
-                  style={{ color: result.payout_kes > '0' ? '#34D399' : '#9CA3AF' }}>
-                  {result.payout_method === 'refund'
-                    ? 'Refunded'
-                    : result.payout_kes > '0'
-                    ? `KES ${Number(result.payout_kes).toLocaleString()}`
-                    : ''
-                  }
-                </p>
-                <p className="text-[#9CA3AF] text-xs">
-                  {METHOD_LABELS[result.payout_method] || result.payout_method}
-                </p>
-              </div>
-            </div>
+        {/* ── Summary ──────────────────────────────────────────── */}
+        <ListGroup title="Summary">
+          <ListRow
+            title="Participants"
+            trailing={<span className="num text-callout text-text-secondary">{summary.total_participants}</span>}
+          />
+          <ListRow
+            title="Qualified"
+            trailing={
+              <span className="num text-callout text-text-secondary">
+                {summary.qualified_count} of {summary.total_participants}
+              </span>
+            }
+          />
+          <ListRow
+            title="Entry contribution"
+            trailing={<span className="num text-callout text-text-secondary">{formatKES(challenge.entry_fee)}</span>}
+          />
+          <ListRow title="Total pool" trailing={<span className="num text-callout text-text-secondary">{formatKES(challenge.total_pool)}</span>} />
+          <ListRow
+            title="Net pool"
+            subtitle={PAYOUT_RULE[challenge.payout_structure] ?? undefined}
+            trailing={<span className="num text-callout font-semibold text-text-primary">{formatKES(challenge.net_pool)}</span>}
+          />
+          <ListRow
+            title={isRefund ? 'Refunded' : 'Paid out'}
+            trailing={<span className="num text-headline text-reward-ink">{formatKES(summary.total_paid_out)}</span>}
+          />
+        </ListGroup>
+
+        {/* ── Final leaderboard ────────────────────────────────── */}
+        <section aria-labelledby="final-board">
+          <div className="mb-3">
+            <h2 id="final-board" className="text-headline text-text-primary">
+              Final leaderboard
+            </h2>
+            <p className="mt-0.5 text-caption text-text-muted">Ranked by total steps when the challenge closed</p>
           </div>
-        ))}
+          <LeaderboardList label="Final leaderboard">
+            {leaderboard.map((r, index) => (
+              <LeaderboardRow
+                key={r.username}
+                id={r.username}
+                rank={r.final_rank ?? (isRefund ? null : index + 1)}
+                name={r.username}
+                steps={r.final_steps}
+                progress={milestone > 0 ? (r.final_steps / milestone) * 100 : 0}
+                qualified={r.qualified}
+                isYou={!!myName && r.username === myName}
+                trailing={rowTrailing(r)}
+                note={
+                  r.tied_with_count > 0 ? (
+                    <span>
+                      Tied with {r.tied_with_count} {r.tied_with_count === 1 ? 'other' : 'others'}
+                      {r.payout_method === 'dead_heat' ? ' · prize split equally' : r.tiebreaker_label ? ` · ${r.tiebreaker_label}` : ''}
+                    </span>
+                  ) : undefined
+                }
+              />
+            ))}
+          </LeaderboardList>
+        </section>
+
+        <div className="flex flex-col gap-2 min-[420px]:flex-row">
+          <Button variant="secondary" size="lg" className="w-full min-[420px]:flex-1" onClick={() => navigate(`/challenges/${challenge.id}`)}>
+            Challenge details
+          </Button>
+          <Button size="lg" className="w-full min-[420px]:flex-1" onClick={() => navigate('/challenges')}>
+            Find a new challenge
+          </Button>
+        </div>
       </div>
-
     </div>
-  )
+  );
 }
-
-

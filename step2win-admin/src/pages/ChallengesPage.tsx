@@ -1,294 +1,214 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Trophy, Activity, CheckCircle, Clock, Eye, XCircle, Users } from 'lucide-react'
-import { StatCard } from '../components/StatCard'
+import { useSearchParams } from 'react-router-dom'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { Ban, CheckCircle2, Clock, Coins, Lock, RefreshCw, Star, Trophy, Users } from 'lucide-react'
 import { PageHeader } from '../components/PageHeader'
-import { AdminTable } from '../components/AdminTable'
+import { StatCard } from '../components/StatCard'
 import { StatusBadge } from '../components/StatusBadge'
-import { ConfirmModal } from '../components/ConfirmModal'
-import { SlideOver } from '../components/SlideOver'
-import { DetailRow } from '../components/DetailRow'
-import api from '../services/api/client'
-import { format, formatDistanceToNow } from 'date-fns'
+import { AdminTable, type Column } from '../components/AdminTable'
+import { Panel } from '../components/ui/Card'
+import { Button } from '../components/ui/Button'
+import { SearchInput } from '../components/ui/Input'
+import { Tabs } from '../components/ui/Tabs'
+import { Toolbar } from '../components/ui/Toolbar'
+import { ErrorState } from '../components/ui/ErrorState'
+import { EmptyState } from '../components/ui/EmptyState'
+import { Skeleton } from '../components/ui/Skeleton'
+import { formatKES, formatKESShort, formatNumber } from '../lib/format'
+import { consoleApi } from '../components/users/api'
+import type { ChallengeRow } from '../components/users/types'
+import { Timestamp } from '../components/users/shared'
+import { ChallengeDrawer } from '../components/users/ChallengeDrawer'
+import { challengeStatusLabel, formatDay, useDebounced, type ChallengeAction } from '../components/users/utils'
 
-type ChallengeStatus = 'pending' | 'active' | 'completed' | 'cancelled' | 'inactive'
-
-interface Challenge {
-  id: string
-  name: string
-  status: ChallengeStatus
-  challenge_type: 'public' | 'private' | string
-  participant_count: number
-  entry_fee: number
-  prize_pool: number
-  milestone_steps: number
-  start_date: string
-  end_date: string
-  created_by_username: string
+type StatusTab = 'all' | 'pending' | 'active' | 'completed' | 'cancelled'
+const PAGE_SIZE = 25
+const SORT_FIELD: Record<string, string> = {
+  name: 'name', fee: 'entry_fee', pool: 'total_pool', milestone: 'milestone', dates: 'end_date', created: 'created_at',
 }
 
-interface ChallengesData {
-  results: Challenge[]
-  total: number
-}
-
-interface ChallengeStats {
-  total: number
-  active: number
-  pending: number
-  total_pool: number
-  growth_pct: number
-  active_spark: number[]
-}
-
-interface ActionBtnProps {
-  icon: React.ElementType
-  color: string
-  title: string
-  onClick: () => void
+function daysLeft(c: ChallengeRow): string {
+  const end = new Date(`${c.end_date}T23:59:59`).getTime()
+  const start = new Date(`${c.start_date}T00:00:00`).getTime()
+  const now = Date.now()
+  if (c.status === 'pending') return start > now ? `starts in ${Math.ceil((start - now) / 86_400_000)}d` : 'start date passed'
+  if (c.status !== 'active') return ''
+  const d = Math.ceil((end - now) / 86_400_000)
+  return d <= 0 ? 'ends today' : `${d}d left`
 }
 
 export function ChallengesPage() {
-  const qc = useQueryClient()
+  const [params, setParams] = useSearchParams()
+  const [tab, setTab] = useState<StatusTab>((params.get('status') as StatusTab) || 'all')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
-  const [status, setStatus] = useState('all')
-  const [type, setType] = useState('all')
-  const [selected, setSelected] = useState<Challenge | null>(null)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [confirmCancel, setConfirmCancel] = useState<Challenge | null>(null)
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'created', dir: 'desc' })
+  const [pendingAction, setPendingAction] = useState<ChallengeAction | null>(null)
+  const q = useDebounced(search.trim(), 300)
+  const openId = params.get('open') ? Number(params.get('open')) : null
 
-  const { data, isLoading } = useQuery<ChallengesData>({
-    queryKey: ['admin', 'challenges', { search, page, status, type }],
-    queryFn: async (): Promise<ChallengesData> => {
-      const response = await api.get<ChallengesData>('/api/admin/challenges/', {
-        params: { search, page, status, type },
-      })
-      return response.data
-    },
+  const ordering = `${sort.dir === 'desc' ? '-' : ''}${SORT_FIELD[sort.key] ?? 'created_at'}`
+  const listQ = useQuery({
+    queryKey: ['admin', 'challenges', { tab, q, page, ordering }],
+    queryFn: () => consoleApi.listChallenges({ page, page_size: PAGE_SIZE, status: tab === 'all' ? undefined : tab, search: q, ordering }),
+    placeholderData: keepPreviousData,
   })
-
-  const { data: stats } = useQuery<ChallengeStats>({
-    queryKey: ['admin', 'challenge-stats'],
-    queryFn: async (): Promise<ChallengeStats> => {
-      const response = await api.get<ChallengeStats>('/api/admin/challenges/stats/')
-      return response.data
-    },
+  const queueQ = useQuery({
+    queryKey: ['admin', 'challenges', 'queue'],
+    queryFn: () => consoleApi.listChallenges({ page: 1, page_size: 50, status: 'pending', ordering: 'start_date' }),
   })
+  const statsQ = useQuery({ queryKey: ['admin', 'challenge-stats'], queryFn: consoleApi.challengeStats })
+  const s = statsQ.data
+  const queue = queueQ.data?.results ?? []
 
-  const cancelMut = useMutation({
-    mutationFn: async (challenge: Challenge) => {
-      const response = await api.post(`/api/admin/challenges/${challenge.id}/cancel/`)
-      return response.data
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'challenges'] })
-      setConfirmCancel(null)
-    },
-  })
+  const open = (id: number | null, action: ChallengeAction | null = null) => {
+    setPendingAction(action)
+    const p = new URLSearchParams(params)
+    if (id === null) p.delete('open')
+    else p.set('open', String(id))
+    setParams(p, { replace: true })
+  }
 
-  const columns = [
+  const columns: Column<ChallengeRow>[] = [
     {
-      key: 'name', label: 'Challenge', sortable: true,
-      render: (challenge: Challenge) => (
-        <div className="flex items-center gap-3">
-          <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-            style={{ background: 'rgba(124,111,247,0.12)' }}>
-            <Trophy size={15} color="#7C6FF7" />
-          </div>
-          <div>
-            <p className="text-ink-primary text-sm font-semibold">{challenge.name}</p>
-            <p className="text-ink-muted text-xs">
-              {challenge.challenge_type} · {challenge.milestone_steps?.toLocaleString()} steps
-            </p>
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'status', label: 'Status',
-      render: (challenge: Challenge) => <StatusBadge variant={challenge.status} />,
-    },
-    {
-      key: 'type', label: 'Type',
-      render: (challenge: Challenge) => (
-        <StatusBadge variant={challenge.challenge_type === 'public' ? 'public' : 'private'} />
-      ),
-    },
-    {
-      key: 'participants', label: 'Participants',
-      render: (challenge: Challenge) => (
-        <div className="flex items-center gap-1.5">
-          <Users size={12} color="#7B82A0" />
-          <span className="text-ink-secondary text-sm">{challenge.participant_count ?? 0}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'pool', label: 'Prize Pool', sortable: true,
-      render: (challenge: Challenge) => (
-        <span className="text-ink-primary text-sm font-mono font-semibold">
-          KSh {Number(challenge.prize_pool ?? 0).toLocaleString()}
+      key: 'name', label: 'Challenge', sortable: true, width: '28%',
+      render: (c) => (
+        <span className="block min-w-0">
+          <span className="flex items-center gap-1.5">
+            <span className="truncate font-medium text-ink-primary">{c.name}</span>
+            {c.is_featured && <Star size={12} className="shrink-0 text-ink-muted" aria-label="Featured" />}
+            {c.is_private && <Lock size={12} className="shrink-0 text-ink-muted" aria-label="Private" />}
+          </span>
+          <span className="block truncate text-xs text-ink-muted">by {c.created_by_username}</span>
         </span>
       ),
     },
     {
-      key: 'start_date', label: 'Dates', sortable: true,
-      render: (challenge: Challenge) => (
-        <div>
-          <p className="text-ink-secondary text-xs">
-            {challenge.start_date ? format(new Date(challenge.start_date), 'MMM d') : '—'}
-            {' → '}
-            {challenge.end_date ? format(new Date(challenge.end_date), 'MMM d') : '—'}
-          </p>
-          {challenge.status === 'active' && challenge.end_date && (
-            <p className="text-up text-[10px] mt-0.5">
-              Ends {formatDistanceToNow(new Date(challenge.end_date), { addSuffix: true })}
-            </p>
-          )}
-        </div>
-      ),
+      key: 'status', label: 'Status',
+      render: (c) => <StatusBadge size="sm" status={c.status === 'active' ? 'live' : c.status} label={challengeStatusLabel(c.status)} />,
     },
     {
-      key: 'actions', label: 'Actions',
-      render: (challenge: Challenge) => (
-        <div className="flex items-center gap-1">
-          <ActionBtn
-            icon={Eye}
-            color="#4F9CF9"
-            title="View details"
-            onClick={() => {
-              setSelected(challenge)
-              setDrawerOpen(true)
-            }}
-          />
-          {challenge.status === 'active' && (
-            <ActionBtn
-              icon={XCircle}
-              color="#F06060"
-              title="Cancel challenge"
-              onClick={() => setConfirmCancel(challenge)}
-            />
-          )}
-        </div>
+      key: 'participants', label: 'Entries', numeric: true,
+      render: (c) => <span>{formatNumber(c.current_entries)}<span className="text-ink-muted"> / {formatNumber(c.max_participants)}</span></span>,
+    },
+    { key: 'fee', label: 'Entry fee', sortable: true, numeric: true, hideBelow: 'md', render: (c) => <span className="mono text-[13px]">{Number(c.entry_fee) ? formatKES(c.entry_fee) : 'Free'}</span> },
+    { key: 'pool', label: 'Pool', sortable: true, numeric: true, render: (c) => <span className="mono text-[13px]">{formatKES(c.total_pool)}</span> },
+    { key: 'milestone', label: 'Milestone', sortable: true, numeric: true, hideBelow: 'xl', render: (c) => formatNumber(c.milestone) },
+    {
+      key: 'dates', label: 'Runs', sortable: true, hideBelow: 'lg',
+      render: (c) => (
+        <span className="block whitespace-nowrap">
+          <span className="text-ink-secondary">{formatDay(c.start_date)} – {formatDay(c.end_date)}</span>
+          {daysLeft(c) && <span className="block text-xs text-ink-muted">{daysLeft(c)}</span>}
+        </span>
       ),
     },
+    { key: 'created', label: 'Created', sortable: true, hideBelow: 'xl', render: (c) => <Timestamp value={c.created_at} className="text-ink-secondary" /> },
+  ]
+
+  const tabs = [
+    { value: 'all' as const, label: 'All', count: s?.total_challenges },
+    { value: 'pending' as const, label: 'Awaiting approval', count: s?.pending_challenges },
+    { value: 'active' as const, label: 'Live', count: s?.live_challenges },
+    { value: 'completed' as const, label: 'Completed', count: s?.completed_challenges },
+    { value: 'cancelled' as const, label: 'Cancelled', count: s?.cancelled_challenges },
   ]
 
   return (
-    <div className="space-y-6 fade-in">
+    <div className="space-y-5">
       <PageHeader
         title="Challenges"
-        subtitle={`${data?.total ?? 0} total challenges`}
+        description="Approve new challenges, watch live pools and step into any challenge's leaderboard."
         actions={
-          <div className="flex items-center gap-2">
-            <select
-              value={status}
-              onChange={event => setStatus(event.target.value)}
-              className="px-3 py-2 rounded-xl text-xs text-ink-secondary outline-none"
-              style={{ background: '#13161F', border: '1px solid #21263A' }}>
-              <option value="all">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="active">Active</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-            <select
-              value={type}
-              onChange={event => setType(event.target.value)}
-              className="px-3 py-2 rounded-xl text-xs text-ink-secondary outline-none"
-              style={{ background: '#13161F', border: '1px solid #21263A' }}>
-              <option value="all">All Types</option>
-              <option value="public">Public</option>
-              <option value="private">Private</option>
-            </select>
-          </div>
+          <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={listQ.isFetching || statsQ.isFetching}
+            onClick={() => { void listQ.refetch(); void statsQ.refetch(); void queueQ.refetch() }}>
+            Refresh
+          </Button>
         }
       />
 
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard title="Total Challenges" value={stats?.total ?? 0} icon={Trophy} color="purple" trend={stats?.growth_pct} />
-        <StatCard title="Active Now" value={stats?.active ?? 0} icon={Activity} color="teal" sparkData={stats?.active_spark} />
-        <StatCard title="Pending Start" value={stats?.pending ?? 0} icon={Clock} color="amber" />
-        <StatCard title="Total Prize Pool" value={stats?.total_pool ?? 0} icon={CheckCircle} color="blue" prefix="KSh " isMoney />
+      {statsQ.error && !s ? (
+        <ErrorState variant="inline" title="Could not load challenge totals" error={statsQ.error} onRetry={() => void statsQ.refetch()} />
+      ) : (
+        <section aria-label="Challenge totals" className="grid grid-cols-2 gap-3 md:grid-cols-3 min-[87.5rem]:grid-cols-5">
+          <StatCard label="Awaiting approval" icon={Clock} loading={statsQ.isLoading} value={formatNumber(s?.pending_challenges)}
+            tone={s?.pending_challenges ? 'warning' : 'default'} hint={s ? `${formatKESShort(s.pending_pool)} in entries` : undefined}
+            onClick={() => { setTab('pending'); setPage(1) }} />
+          <StatCard label="Live" icon={Trophy} loading={statsQ.isLoading} value={formatNumber(s?.live_challenges)}
+            hint={s ? `${formatKESShort(s.live_pool)} in live pools` : undefined} onClick={() => { setTab('active'); setPage(1) }} />
+          <StatCard label="Completed" icon={CheckCircle2} loading={statsQ.isLoading} value={formatNumber(s?.completed_challenges)}
+            hint="Finalised at end date" onClick={() => { setTab('completed'); setPage(1) }} />
+          <StatCard label="Cancelled" icon={Ban} loading={statsQ.isLoading} value={formatNumber(s?.cancelled_challenges)}
+            hint="Closed without payout" onClick={() => { setTab('cancelled'); setPage(1) }} />
+          <StatCard label="Entries, all time" icon={Users} loading={statsQ.isLoading} value={formatNumber(s?.total_entries)}
+            hint={s ? `${formatKESShort(s.total_prize_pool)} total pools` : undefined} />
+        </section>
+      )}
+
+      {(queueQ.isLoading || queue.length > 0 || queueQ.error) && (
+        <Panel padding="none" title="Approval queue" description={queue.length ? `${queue.length} challenge${queue.length === 1 ? '' : 's'} not yet visible to users · soonest start first` : 'Challenges waiting for a decision'}>
+          {queueQ.isLoading ? (
+            <ul aria-hidden>{[0, 1].map((i) => <li key={i} className="px-4 py-3"><Skeleton width="60%" /><Skeleton width="40%" height={10} className="mt-2" /></li>)}</ul>
+          ) : queueQ.error ? (
+            <ErrorState size="compact" error={queueQ.error} onRetry={() => void queueQ.refetch()} />
+          ) : (
+            <ul className="divide-y divide-[var(--border)]">
+              {queue.map((c) => (
+                <li key={c.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
+                  <button type="button" onClick={() => open(c.id)} className="min-w-0 flex-1 text-left">
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate text-sm font-medium text-ink-primary hover:underline">{c.name}</span>
+                      {c.is_private && <StatusBadge size="sm" tone="violet" label="Private" />}
+                    </span>
+                    <span className="block truncate text-xs text-ink-muted">
+                      by {c.created_by_username} · {formatNumber(c.milestone)} steps · {formatDay(c.start_date)} – {formatDay(c.end_date)} · {daysLeft(c)}
+                    </span>
+                  </button>
+                  <span className="text-right">
+                    <span className="mono block text-sm text-ink-primary">{Number(c.entry_fee) ? formatKES(c.entry_fee) : 'Free'}</span>
+                    <span className="block text-xs text-ink-muted">{formatNumber(c.current_entries)} joined · pool {formatKESShort(c.total_pool)}</span>
+                  </span>
+                  <span className="flex gap-1.5">
+                    <Button size="sm" variant="danger-soft" onClick={() => open(c.id, 'reject')}>Reject</Button>
+                    <Button size="sm" variant="primary" onClick={() => open(c.id, 'approve')}>Approve</Button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+      )}
+
+      <div className="space-y-3">
+        <Tabs label="Challenge status" items={tabs} value={tab} onChange={(v) => { setTab(v); setPage(1) }} />
+        <AdminTable
+          columns={columns}
+          data={listQ.data?.results ?? []}
+          rowKey={(c) => c.id}
+          isLoading={listQ.isLoading}
+          error={listQ.error && !listQ.data ? listQ.error : undefined}
+          onRetry={() => void listQ.refetch()}
+          onRowClick={(c) => open(c.id)}
+          isRowActive={(c) => c.id === openId}
+          sortKey={sort.key}
+          sortDir={sort.dir}
+          onSort={(k) => { setSort((cur) => (cur.key === k ? { key: k, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: k === 'name' ? 'asc' : 'desc' })); setPage(1) }}
+          skeletonRows={8}
+          toolbar={
+            <Toolbar actions={<span className="num text-xs text-ink-muted">{listQ.data ? `${formatNumber(listQ.data.count)} challenges` : ''}</span>}>
+              <SearchInput size="sm" value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search name, creator or invite code" containerClassName="sm:w-72" />
+            </Toolbar>
+          }
+          emptyState={
+            <EmptyState size="compact" icon={tab === 'pending' ? Clock : Coins}
+              title={q ? 'No challenges match this search' : tab === 'pending' ? 'Nothing waiting for approval' : `No ${tab === 'all' ? '' : challengeStatusLabel(tab).toLowerCase() + ' '}challenges`}
+              description={q ? 'Try the creator username or the exact invite code.' : undefined} />
+          }
+          pagination={listQ.data ? { page, total: listQ.data.count, pageSize: PAGE_SIZE, onPage: setPage, itemLabel: 'challenges' } : undefined}
+        />
       </div>
 
-      <AdminTable
-        title="All Challenges"
-        columns={columns}
-        data={data?.results ?? []}
-        isLoading={isLoading}
-        rowKey={(challenge: Challenge) => challenge.id}
-        onRowClick={(challenge: Challenge) => {
-          setSelected(challenge)
-          setDrawerOpen(true)
-        }}
-        searchValue={search}
-        onSearchChange={value => {
-          setSearch(value)
-          setPage(1)
-        }}
-        searchPlaceholder="Search challenges..."
-        pagination={{ page, total: data?.total ?? 0, pageSize: 20, onPage: setPage }}
-      />
-
-      <SlideOver
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title={selected?.name ?? 'Challenge Details'}
-        subtitle={`${selected?.challenge_type ?? 'Unknown'} challenge`}>
-        {selected && (
-          <div>
-            <div className="flex items-center gap-2 mb-5">
-              <StatusBadge variant={selected.status} />
-              <StatusBadge variant={selected.challenge_type === 'public' ? 'public' : 'private'} />
-            </div>
-            <h4 className="text-ink-muted text-xs font-semibold uppercase tracking-wider mb-3">Challenge Info</h4>
-            <DetailRow label="Challenge ID" value={selected.id} mono />
-            <DetailRow label="Milestone" value={`${selected.milestone_steps?.toLocaleString()} steps`} />
-            <DetailRow label="Participants" value={selected.participant_count ?? 0} />
-            <DetailRow label="Entry Fee" value={`KSh ${Number(selected.entry_fee ?? 0).toLocaleString()}`} mono />
-            <DetailRow label="Prize Pool" value={`KSh ${Number(selected.prize_pool ?? 0).toLocaleString()}`} mono />
-            <DetailRow label="Platform Fee" value={`KSh ${Number((selected.prize_pool ?? 0) * 0.1).toLocaleString()}`} mono />
-            <DetailRow label="Start Date" value={selected.start_date ? format(new Date(selected.start_date), 'MMM d, yyyy') : '—'} />
-            <DetailRow label="End Date" value={selected.end_date ? format(new Date(selected.end_date), 'MMM d, yyyy') : '—'} />
-            <DetailRow label="Created By" value={selected.created_by_username ?? 'System'} />
-          </div>
-        )}
-      </SlideOver>
-
-      <ConfirmModal
-        open={!!confirmCancel}
-        onClose={() => setConfirmCancel(null)}
-        onConfirm={() => {
-          if (confirmCancel) {
-            cancelMut.mutate(confirmCancel)
-          }
-        }}
-        loading={cancelMut.isPending}
-        title="Cancel Challenge"
-        message={`Cancel "${confirmCancel?.name}"? All entry fees will be refunded to participants' wallets.`}
-        confirmLabel="Cancel Challenge"
-        variant="warning"
-      />
+      <ChallengeDrawer key={`${openId}-${pendingAction ?? ''}`} challengeId={openId} initialAction={pendingAction} onClose={() => open(null)} />
     </div>
-  )
-}
-
-function ActionBtn({ icon: Icon, color, title, onClick }: ActionBtnProps) {
-  return (
-    <button
-      title={title}
-      onClick={event => {
-        event.stopPropagation()
-        onClick()
-      }}
-      className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
-      style={{ color }}
-      onMouseEnter={event => (event.currentTarget.style.background = `${color}18`)}
-      onMouseLeave={event => (event.currentTarget.style.background = 'transparent')}>
-      <Icon size={13} />
-    </button>
   )
 }

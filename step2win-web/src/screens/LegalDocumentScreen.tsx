@@ -1,146 +1,202 @@
-﻿import { useState, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { ArrowLeft, Download, RefreshCw, AlertCircle } from 'lucide-react';
-import { legalService } from '../services/api/legal';
+import { useState } from "react";
+import { createPortal } from "react-dom";
+import { useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download, FileQuestion, Info } from "lucide-react";
+import { legalService } from "../services/api/legal";
+import { formatShortDate } from "../lib/format";
+import { ScreenHeader } from "../components/ui/ScreenHeader";
+import Button from "../components/ui/Button";
+import { Skeleton } from "../components/ui/Skeleton";
+import { EmptyState } from "../components/ui/EmptyState";
+import { LoadError } from "../components/ui/ErrorState";
+import { useToast } from "../components/ui/Toast";
+import { apiErrorMessage } from "../components/settings/apiError";
+import { sanitizeHtml } from '../utils/sanitize';
+
+const FALLBACK_TITLES: Record<string, string> = {
+  "privacy-policy": "Privacy policy",
+  "terms-and-conditions": "Terms of service",
+};
 
 export default function LegalDocumentScreen() {
-  const { slug }     = useParams<{ slug: string }>();
-  const navigate     = useNavigate();
-  const contentRef   = useRef<HTMLDivElement>(null);
-  const [hasScrolled, setHasScrolled] = useState(false);
+  const { slug } = useParams<{ slug: string }>();
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const [acknowledged, setAcknowledged] = useState(false);
 
-  const { data: doc, isLoading, error } = useQuery({
-    queryKey: ['legal', slug],
-    queryFn:  () => legalService.get(slug!),
-    enabled:  !!slug,
+  const {
+    data: doc,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+  } = useQuery({
+    queryKey: ["legal", slug],
+    queryFn: () => legalService.get(slug!),
+    enabled: !!slug,
+    retry: (count, err: any) => err?.response?.status !== 404 && count < 2,
   });
 
   const ackMut = useMutation({
     mutationFn: () => legalService.acknowledge(slug!),
+    onSuccess: () => {
+      setAcknowledged(true);
+      queryClient.invalidateQueries({ queryKey: ["legal", slug] });
+      showToast({
+        message: "Thanks — we’ve recorded that you’ve read this version.",
+        type: "success",
+      });
+    },
+    onError: (err: unknown) =>
+      showToast({
+        message: apiErrorMessage(
+          err,
+          "We couldn’t record that. Please try again.",
+        ),
+        type: "error",
+      }),
   });
 
-  // Acknowledge when user scrolls to bottom
-  const handleScroll = () => {
-    if (!contentRef.current || hasScrolled) return;
-    const { scrollTop, scrollHeight, clientHeight } = contentRef.current;
-    if (scrollTop + clientHeight >= scrollHeight - 60) {
-      setHasScrolled(true);
-      ackMut.mutate();
-    }
-  };
+  const notFound = (error as any)?.response?.status === 404;
+  const title = doc?.title ?? FALLBACK_TITLES[slug ?? ""] ?? "Document";
+  const showAck = Boolean(doc?.has_update) || acknowledged;
 
   return (
-    <div className="flex flex-col h-screen bg-bg-page">
+    <div
+      className="pb-nav"
+      style={
+        showAck
+          ? {
+              paddingBottom:
+                "calc(var(--nav-height) + max(env(safe-area-inset-bottom), 8px) + 96px)",
+            }
+          : undefined
+      }
+    >
+      <ScreenHeader
+        title={title}
+        back
+        actions={
+          doc?.uploaded_file ? (
+            <a
+              href={doc.uploaded_file}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full text-text-primary hover:bg-bg-input"
+              aria-label="Download original document"
+              title="Download original"
+            >
+              <Download size={20} aria-hidden />
+            </a>
+          ) : undefined
+        }
+      />
 
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-4 bg-bg-elevated
-                      border-b border-border-light flex-shrink-0"
-        style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
-        <button
-          onClick={() => navigate(-1)}
-          className="w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{ background: 'hsl(var(--bg-input))' }}>
-          <ArrowLeft size={18} className="text-text-primary" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-text-primary text-base font-bold truncate">
-            {isLoading ? 'Loading...' : doc?.title}
-          </h1>
-          {doc && (
-            <p className="text-text-muted text-xs">
-              Version {doc.version_label}  {' '}
-              {doc.published_at
-                ? new Date(doc.published_at).toLocaleDateString('en-KE', {
-                    day: 'numeric', month: 'short', year: 'numeric'
-                  })
-                : ''}
-            </p>
-          )}
-        </div>
-        {/* Download original */}
-        {doc?.uploaded_file && (
-          <a
-            href={doc.uploaded_file}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: 'hsl(var(--bg-input))' }}>
-            <Download size={16} className="text-accent-blue" />
-          </a>
-        )}
-      </div>
-
-      {/* Update banner */}
-      {doc?.has_update && (
-        <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0"
-          style={{ background: 'hsl(var(--bg-input))', borderBottom: '1px solid hsl(var(--border-light))' }}>
-          <AlertCircle size={16} className="text-accent-yellow" />
-          <div className="flex-1">
-            <p className="text-text-primary text-xs font-bold">
-              This document has been updated
-            </p>
-            {doc.change_summary && (
-              <p className="text-text-secondary text-xs">{doc.change_summary}</p>
-            )}
+      <article className="mx-auto w-full max-w-prose px-5 pb-10 pt-2">
+        {isLoading ? (
+          <div
+            aria-busy="true"
+            aria-label="Loading document"
+            className="space-y-3"
+          >
+            <Skeleton className="h-8 w-2/3 rounded" />
+            <Skeleton className="h-3 w-40 rounded" />
+            <div className="space-y-2 pt-4">
+              {[100, 95, 98, 80, 100, 90, 60].map((w, i) => (
+                <Skeleton
+                  key={i}
+                  className="h-4 rounded"
+                  style={{ width: `${w}%` }}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* Content */}
-      <div
-        ref={contentRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-5 py-5">
-
-        {isLoading && (
-          <div className="flex flex-col items-center justify-center py-20">
-            <RefreshCw size={24} className="text-accent-blue animate-spin mb-3" />
-            <p className="text-text-muted text-sm">Loading document...</p>
-          </div>
-        )}
-
-        {error && (
-          <div className="flex flex-col items-center justify-center py-20">
-            <AlertCircle size={32} className="text-error mb-3" />
-            <p className="text-text-primary font-semibold mb-1">Failed to load</p>
-            <p className="text-text-muted text-sm text-center">
-              Could not load this document. Please check your connection and try again.
-            </p>
-          </div>
-        )}
-
-        {doc && (
+        ) : notFound ? (
+          <EmptyState
+            icon={FileQuestion}
+            title={`${title} isn’t available yet`}
+            description="This document hasn’t been published. Please check back later or contact support if you need it now."
+          />
+        ) : error || !doc ? (
+          <LoadError
+            resource="this document"
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
+        ) : (
           <>
-            {/* Render HTML content */}
+            <header className="mb-6 border-b border-border-light pb-5">
+              <h1 className="text-title-lg text-text-primary">{doc.title}</h1>
+              <p className="mt-2 text-caption text-text-muted">
+                Version <span className="num">{doc.version_label}</span>
+                {doc.published_at ? (
+                  <> · Updated {formatShortDate(doc.published_at)}</>
+                ) : null}
+              </p>
+              {doc.has_update && !acknowledged && (
+                <div
+                  className="mt-4 flex gap-3 rounded-control bg-info-soft px-3 py-3"
+                  role="note"
+                >
+                  <Info
+                    size={18}
+                    className="mt-0.5 shrink-0 text-info"
+                    aria-hidden
+                  />
+                  <div className="min-w-0">
+                    <p className="text-callout font-semibold text-text-primary">
+                      This document has changed since you last read it
+                    </p>
+                    {doc.change_summary && (
+                      <p className="mt-0.5 text-callout text-text-secondary">
+                        {doc.change_summary}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </header>
             <div
               className="legal-content"
-              dangerouslySetInnerHTML={{ __html: doc.content_html }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(doc.content_html) }}
             />
-
-            {/* Scroll prompt */}
-            {!hasScrolled && (
-              <div className="flex items-center justify-center gap-2 py-6 mt-4
-                              border-t border-border-light">
-                <p className="text-text-muted text-xs">
-                  Scroll to the bottom to mark as read
-                </p>
-              </div>
-            )}
-
-            {hasScrolled && (
-              <div className="flex items-center justify-center gap-2 py-6 mt-4
-                              rounded-2xl" style={{ background: '#ECFDF5' }}>
-                <span style={{ fontSize: '16px' }}></span>
-                <p className="text-success text-sm font-semibold">
-                  Document read and acknowledged
-                </p>
-              </div>
-            )}
           </>
         )}
-      </div>
+      </article>
+
+      {/* Portalled: the route wrapper animates with a transform, which would break position: fixed. */}
+      {doc &&
+        showAck &&
+        createPortal(
+          <div
+            className="fixed inset-x-0 z-40 border-t border-border-light bg-bg-elevated/95 px-5 py-3 backdrop-blur-md"
+            style={{
+              bottom:
+                "calc(var(--nav-height) + env(safe-area-inset-bottom, 0px))",
+            }}
+          >
+            <div className="mx-auto flex w-full max-w-prose items-center gap-3">
+              <p className="min-w-0 flex-1 text-caption text-text-secondary">
+                {acknowledged
+                  ? "You’ve acknowledged this version."
+                  : `Please confirm you’ve read version ${doc.version_label}.`}
+              </p>
+              <Button
+                onClick={() => {
+                  if (!acknowledged) ackMut.mutate();
+                }}
+                isLoading={ackMut.isPending}
+                loadingText="Saving"
+                isSuccess={acknowledged}
+                successText="Acknowledged"
+              >
+                I’ve read it
+              </Button>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
-

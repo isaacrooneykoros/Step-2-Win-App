@@ -1,191 +1,175 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { Search, LayoutDashboard, Users, Trophy, Banknote,
-         FileText, Settings, ArrowRight, Zap, BarChart2, Shield,
-         ArrowLeftRight, Activity, HeadphonesIcon, FileBarChart } from 'lucide-react'
-
-const PAGES = [
-  { label: 'Dashboard',         to: '/',              icon: LayoutDashboard, group: 'Pages'   },
-  { label: 'Analytics',         to: '/analytics',     icon: BarChart2,       group: 'Pages'   },
-  { label: 'Users',             to: '/users',         icon: Users,           group: 'Pages'   },
-  { label: 'Challenges',        to: '/challenges',    icon: Trophy,          group: 'Pages'   },
-  { label: 'Transactions',      to: '/transactions',  icon: ArrowLeftRight,  group: 'Pages'   },
-  { label: 'Withdrawals',       to: '/withdrawals',   icon: Banknote,        group: 'Pages'   },
-  { label: 'Moderation',        to: '/moderation',    icon: Shield,          group: 'Pages'   },
-  { label: 'Anti-Cheat',        to: '/fraud',         icon: Shield,          group: 'Pages'   },
-  { label: 'Activity Logs',     to: '/activity',      icon: Activity,        group: 'Pages'   },
-  { label: 'Reports',           to: '/reports',       icon: FileBarChart,    group: 'Pages'   },
-  { label: 'Support',           to: '/support',       icon: HeadphonesIcon,  group: 'Pages'   },
-  { label: 'Badges',            to: '/badges',        icon: Trophy,          group: 'Pages'   },
-  { label: 'Legal Documents',   to: '/legal',         icon: FileText,        group: 'Pages'   },
-  { label: 'Settings',          to: '/settings',      icon: Settings,        group: 'Pages'   },
-]
-
-const ACTIONS = [
-  { label: 'Approve all withdrawals', icon: Zap, group: 'Actions', action: 'approve-all' },
-  { label: 'Export users CSV',        icon: Zap, group: 'Actions', action: 'export-users' },
-  { label: 'Publish Privacy Policy',  icon: Zap, group: 'Actions', action: 'publish-privacy' },
-]
+import { CornerDownLeft, Monitor, Moon, Search, Sun } from 'lucide-react'
+import type { ElementType } from 'react'
+import { NAV_GROUPS } from '../lib/nav'
+import { useThemeStore, type ThemePreference } from '../lib/theme'
+import { useFocusTrap } from '../lib/useFocusTrap'
+import { cn } from '../lib/cn'
 
 interface Props {
   open: boolean
   onClose: () => void
 }
 
+interface PaletteItem {
+  id: string
+  label: string
+  group: string
+  icon: ElementType
+  keywords?: string
+  run: () => void
+}
+
+/**
+ * Ctrl/Cmd+K palette: jump to any page or switch theme. Arrow keys move,
+ * Enter runs, Escape closes. Only real, working commands are listed.
+ */
 export default function CommandPalette({ open, onClose }: Props) {
-  const [query, setQuery]       = useState('')
-  const [selected, setSelected] = useState(0)
-  const navigate                = useNavigate()
-  const inputRef                = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (open) {
-      // Reset state when opening
-      setTimeout(() => {
-        setQuery('')
-        setSelected(0)
-        inputRef.current?.focus()
-      }, 0)
-    }
-  }, [open])
-
-  const allItems = [...PAGES, ...ACTIONS]
-  const filtered = query.trim()
-    ? allItems.filter(i => i.label.toLowerCase().includes(query.toLowerCase()))
-    : allItems
-
-  // Group filtered results
-  const groups = filtered.reduce((acc, item) => {
-    if (!acc[item.group]) acc[item.group] = []
-    acc[item.group].push(item)
-    return acc
-  }, {} as Record<string, typeof allItems>)
-
-  const flatFiltered = Object.values(groups).flat()
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (!open) return
-      if (e.key === 'Escape') { onClose(); return }
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setSelected(s => Math.min(s + 1, flatFiltered.length - 1))
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setSelected(s => Math.max(s - 1, 0))
-      }
-      if (e.key === 'Enter' && flatFiltered[selected]) {
-        const item = flatFiltered[selected]
-        if ('to' in item && item.to) { navigate(item.to); onClose() }
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [open, selected, flatFiltered, navigate, onClose])
-
   if (!open) return null
+  return <PaletteDialog onClose={onClose} />
+}
 
-  return (
-    <div
-      className="fixed inset-0 z-200 flex items-start justify-center pt-24"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-      onClick={onClose}>
+function PaletteDialog({ onClose }: { onClose: () => void }) {
+  const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState(0)
+  const navigate = useNavigate()
+  const setTheme = useThemeStore((s) => s.setPreference)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const listId = useId()
+  const ref = useFocusTrap<HTMLDivElement>(true, onClose, inputRef)
+
+  const items = useMemo<PaletteItem[]>(() => {
+    const pages = NAV_GROUPS.flatMap((g) =>
+      g.items.map((i) => ({
+        id: `page:${i.to}`,
+        label: i.label,
+        group: g.label,
+        icon: i.icon,
+        keywords: i.keywords,
+        run: () => navigate(i.to),
+      })),
+    )
+    const theme = (pref: ThemePreference, label: string, icon: ElementType): PaletteItem => ({
+      id: `theme:${pref}`, label, group: 'Preferences', icon, keywords: 'theme appearance mode', run: () => setTheme(pref),
+    })
+    return [
+      ...pages,
+      theme('light', 'Use light theme', Sun),
+      theme('dark', 'Use dark theme', Moon),
+      theme('system', 'Match system theme', Monitor),
+    ]
+  }, [navigate, setTheme])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return items
+    return items.filter((i) => `${i.label} ${i.group} ${i.keywords ?? ''}`.toLowerCase().includes(q))
+  }, [items, query])
+
+  const safeSelected = Math.min(selected, Math.max(0, filtered.length - 1))
+
+  useEffect(() => {
+    listRef.current?.querySelector(`[data-index="${safeSelected}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [safeSelected])
+
+  const runItem = (item: PaletteItem | undefined) => {
+    if (!item) return
+    item.run()
+    onClose()
+  }
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setSelected((s) => Math.min(Math.min(s, filtered.length - 1) + 1, filtered.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setSelected((s) => Math.max(Math.min(s, filtered.length - 1) - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      runItem(filtered[safeSelected])
+    }
+  }
+
+  let lastGroup = ''
+
+  return createPortal(
+    <div className="fixed inset-0 z-200 flex items-start justify-center px-4 pt-[12vh]">
+      <div className="absolute inset-0 bg-[var(--scrim)]" aria-hidden onClick={onClose} />
       <div
-        className="w-full max-w-xl rounded-2xl overflow-hidden fade-in"
-        style={{
-          background: '#191C28',
-          border: '1px solid #21263A',
-          boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
-        }}
-        onClick={e => e.stopPropagation()}>
-
-        {/* Search input */}
-        <div className="flex items-center gap-3 px-4 py-4"
-          style={{ borderBottom: '1px solid #21263A' }}>
-          <Search size={16} color="#7B82A0" className="shrink-0" />
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        className="fade-in relative w-full max-w-lg overflow-hidden rounded-lg border border-surface-border bg-surface-overlay shadow-pop"
+      >
+        <div className="flex items-center gap-2.5 border-b border-surface-border px-3.5">
+          <Search size={16} className="shrink-0 text-ink-muted" aria-hidden />
           <input
             ref={inputRef}
             value={query}
-            onChange={e => { setQuery(e.target.value); setSelected(0) }}
-            placeholder="Search pages, users, actions..."
-            className="flex-1 bg-transparent text-ink-primary text-sm outline-none
-                       placeholder-ink-muted"
+            onChange={(e) => { setQuery(e.target.value); setSelected(0) }}
+            onKeyDown={onKeyDown}
+            placeholder="Go to page or run a command…"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls={listId}
+            aria-activedescendant={filtered[safeSelected] ? `${listId}-${safeSelected}` : undefined}
+            aria-autocomplete="list"
+            className="h-12 flex-1 bg-transparent text-sm text-ink-primary outline-none placeholder:text-ink-muted focus-visible:outline-none"
           />
-          <kbd className="text-[10px] text-ink-muted px-1.5 py-0.5 rounded"
-            style={{ background: '#21263A', border: '1px solid #2E3450' }}>
-            ESC
-          </kbd>
+          <kbd className="rounded border border-surface-border bg-surface-sunken px-1.5 py-0.5 font-mono text-2xs text-ink-muted">Esc</kbd>
         </div>
 
-        {/* Results */}
-        <div className="max-h-80 overflow-y-auto py-2">
-          {Object.entries(groups).map(([groupName, items]) => {
+        <div ref={listRef} id={listId} role="listbox" aria-label="Results" className="max-h-80 overflow-y-auto py-1.5">
+          {filtered.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-ink-muted">
+              No pages or commands match “<span className="text-ink-primary">{query}</span>”
+            </p>
+          )}
+          {filtered.map((item, idx) => {
+            const showGroup = item.group !== lastGroup
+            lastGroup = item.group
+            const Icon = item.icon
+            const isSelected = idx === safeSelected
             return (
-              <div key={groupName}>
-                <p className="text-ink-muted text-[10px] font-semibold uppercase
-                               tracking-widest px-4 py-1.5">
-                  {groupName}
-                </p>
-                {items.map((item) => {
-                  const idx = flatFiltered.indexOf(item)
-                  const isSelected = idx === selected
-                  const Icon = item.icon
-                  return (
-                    <button
-                      key={item.label}
-                      onMouseEnter={() => setSelected(idx)}
-                      onClick={() => {
-                        if ('to' in item && item.to) { navigate(item.to); onClose() }
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-2.5
-                                 transition-colors text-left"
-                      style={{ background: isSelected ? '#21263A' : 'transparent' }}>
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                        style={{ background: isSelected ? '#22C55E' : '#21263A' }}>
-                        <Icon size={13} color={isSelected ? '#fff' : '#7B82A0'} />
-                      </div>
-                      <span className={`text-sm font-medium ${
-                        isSelected ? 'text-white' : 'text-ink-secondary'
-                      }`}>
-                        {item.label}
-                      </span>
-                      {isSelected && (
-                        <ArrowRight size={13} color="#22C55E" className="ml-auto" />
-                      )}
-                    </button>
-                  )
-                })}
+              <div key={item.id}>
+                {showGroup && (
+                  <p className="px-3.5 pb-1 pt-2 text-2xs font-medium uppercase tracking-[0.06em] text-ink-muted" aria-hidden>
+                    {item.group}
+                  </p>
+                )}
+                <div
+                  id={`${listId}-${idx}`}
+                  data-index={idx}
+                  role="option"
+                  aria-selected={isSelected}
+                  onMouseMove={() => setSelected(idx)}
+                  onClick={() => runItem(item)}
+                  className={cn(
+                    'mx-1.5 flex h-9 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-sm',
+                    isSelected ? 'bg-surface-elevated text-ink-primary' : 'text-ink-secondary',
+                  )}
+                >
+                  <Icon size={15} className={isSelected ? 'text-brand-text' : 'text-ink-muted'} aria-hidden />
+                  <span className="flex-1 truncate">{item.label}</span>
+                  {isSelected && <CornerDownLeft size={13} className="text-ink-muted" aria-hidden />}
+                </div>
               </div>
             )
           })}
-          {flatFiltered.length === 0 && (
-            <div className="px-4 py-8 text-center">
-              <p className="text-ink-muted text-sm">
-                No results for "<span className="text-ink-secondary">{query}</span>"
-              </p>
-            </div>
-          )}
         </div>
 
-        {/* Footer hint */}
-        <div className="flex items-center gap-4 px-4 py-2.5"
-          style={{ borderTop: '1px solid #21263A' }}>
-          {[
-            ['↑↓', 'Navigate'],
-            ['↵',  'Select'],
-            ['Esc','Close'],
-          ].map(([key, hint]) => (
-            <div key={key} className="flex items-center gap-1.5">
-              <kbd className="text-[10px] text-ink-muted px-1.5 py-0.5 rounded font-mono"
-                style={{ background: '#21263A', border: '1px solid #2E3450' }}>
-                {key}
-              </kbd>
-              <span className="text-ink-muted text-[10px]">{hint}</span>
-            </div>
-          ))}
+        <div className="flex items-center gap-4 border-t border-surface-border px-3.5 py-2 text-2xs text-ink-muted">
+          <span><kbd className="font-mono">↑ ↓</kbd> move</span>
+          <span><kbd className="font-mono">Enter</kbd> open</span>
+          <span><kbd className="font-mono">Esc</kbd> close</span>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

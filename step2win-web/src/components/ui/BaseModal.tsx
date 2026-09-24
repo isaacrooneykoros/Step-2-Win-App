@@ -1,31 +1,23 @@
-import React, { ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import { Sheet } from './Sheet';
 
 interface BaseModalProps {
   open: boolean;
   onClose: () => void;
   title?: string;
+  description?: string;
+  footer?: ReactNode;
+  dismissible?: boolean;
   children: ReactNode;
 }
 
-export const BaseModal: React.FC<BaseModalProps> = ({ open, onClose, title, children }) => {
-  if (!open) return null;
-
+/** Legacy API — renders the shared Sheet. */
+export function BaseModal({ open, onClose, title, description, footer, dismissible, children }: BaseModalProps) {
   return (
-    <div 
-      className="fixed inset-0 z-[100] flex items-end bg-black/50 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div 
-        className="w-full max-w-lg mx-auto rounded-t-4xl p-6 pb-10 bg-bg-elevated border border-border shadow-modal screen-enter"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Handle */}
-        <div className="w-10 h-1 bg-border rounded-full mx-auto mb-6" />
-        
-        {title && <h2 className="text-text-primary text-xl font-black mb-5">{title}</h2>}
-        
-        {children}
-      </div>
-    </div>
+    <Sheet open={open} onClose={onClose} title={title} description={description} footer={footer} dismissible={dismissible}>
+      {children}
+    </Sheet>
   );
-};
+}
+
+export default BaseModal;

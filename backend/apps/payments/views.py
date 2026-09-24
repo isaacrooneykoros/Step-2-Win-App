@@ -428,6 +428,12 @@ def request_withdrawal(request):
       6. Notify admin
       7. Return confirmation to user
     """
+    from apps.admin_api.platform import feature_block
+
+    blocked = feature_block("withdrawals")
+    if blocked:
+        return blocked
+
     try:
         idem_key = request.headers.get("X-Idempotency-Key")
         if not acquire_idempotency_slot(

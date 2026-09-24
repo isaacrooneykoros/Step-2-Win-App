@@ -1,5 +1,6 @@
-import { AlertTriangle, ChevronRight } from 'lucide-react';
+import { AlertTriangle, BellOff, ChevronRight, Footprints, Info } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { permissionCopy } from '../../utils/platform';
 
 interface PermissionStatusBannerProps {
   status: 'granted' | 'denied' | 'unavailable';
@@ -8,80 +9,64 @@ interface PermissionStatusBannerProps {
   dismissible?: boolean;
 }
 
-/**
- * Displays permission status banner with call-to-action
- * Used on screens that require permissions
- */
-export function PermissionStatusBanner({
-  status,
-  permissionName,
-  onEnable,
-}: PermissionStatusBannerProps) {
-  const navigate = useNavigate();
+const COPY = {
+  steps: {
+    icon: Footprints,
+    title: 'Step counting is off',
+    description: `Allow ${permissionCopy().motionName} so your steps count toward challenges.`,
+    unavailable: 'Step counting needs the Step2Win phone app.',
+  },
+  notifications: {
+    icon: BellOff,
+    title: 'Notifications are off',
+    description: 'Turn them on to hear about challenge deadlines and payouts.',
+    unavailable: 'Notifications need the mobile app.',
+  },
+  both: {
+    icon: AlertTriangle,
+    title: 'Some permissions are off',
+    description: 'Allow step counting and notifications to use every feature.',
+    unavailable: 'These features need the mobile app.',
+  },
+} as const;
 
-  if (status === 'granted') {
-    // Don't show banner when granted
-    return null;
-  }
+/**
+ * Slim status strip for screens that depend on a device permission.
+ * Hidden when granted; "Fix" takes the user to Settings.
+ */
+export function PermissionStatusBanner({ status, permissionName, onEnable }: PermissionStatusBannerProps) {
+  const navigate = useNavigate();
+  const copy = COPY[permissionName];
+
+  if (status === 'granted') return null;
 
   if (status === 'unavailable') {
     return (
-      <div className="sticky top-0 z-40 bg-bg-input border-b border-border px-4 py-3 flex items-center gap-3">
-        <AlertTriangle size={18} className="text-text-muted flex-shrink-0" />
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-text-primary">
-            {permissionName === 'steps'
-              ? 'Step tracking'
-              : permissionName === 'notifications'
-                ? 'App notifications'
-                : 'Permissions'}{' '}
-            unavailable
-          </p>
-          <p className="text-xs text-text-muted">Mobile app required</p>
-        </div>
+      <div className="sticky top-0 z-40 flex items-center gap-3 border-b border-border-light bg-bg-sunken px-4 py-2.5" role="status">
+        <Info size={18} className="shrink-0 text-text-muted" aria-hidden />
+        <p className="min-w-0 flex-1 text-callout text-text-secondary">{copy.unavailable}</p>
       </div>
     );
   }
 
-  // Denied status
-  const getMessage = () => {
-    switch (permissionName) {
-      case 'steps':
-        return {
-          title: 'Step tracking permission required',
-          description: 'Enable in settings to count and sync your steps',
-        };
-      case 'notifications':
-        return {
-          title: 'Notifications disabled',
-          description: 'Enable to get alerts about challenges and payouts',
-        };
-      case 'both':
-        return {
-          title: 'Enable permissions',
-          description: 'Enable both to use all app features',
-        };
-    }
-  };
-
-  const msg = getMessage();
-
+  const Icon = copy.icon;
   return (
-    <div className="sticky top-0 z-40 bg-tint-yellow/30 border-b border-accent-yellow px-4 py-3 flex items-center gap-3">
-      <AlertTriangle size={18} className="text-accent-yellow flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-text-primary">{msg.title}</p>
-        <p className="text-xs text-text-secondary">{msg.description}</p>
+    <div className="sticky top-0 z-40 flex items-center gap-3 border-b border-warning/30 bg-warning-soft px-4 py-2" role="status">
+      <Icon size={18} className="shrink-0 text-warning" aria-hidden />
+      <div className="min-w-0 flex-1">
+        <p className="text-callout font-semibold text-text-primary">{copy.title}</p>
+        <p className="text-caption text-text-secondary">{copy.description}</p>
       </div>
       <button
+        type="button"
         onClick={() => {
           onEnable?.();
           navigate('/settings');
         }}
-        className="flex-shrink-0 flex items-center gap-1 text-accent-yellow hover:text-accent-yellow/80 transition-colors"
+        className="inline-flex min-h-[44px] shrink-0 items-center gap-0.5 rounded-full px-2 text-callout font-semibold text-text-primary hover:bg-warning/10"
       >
-        <span className="text-xs font-semibold">Enable</span>
-        <ChevronRight size={16} />
+        Fix
+        <ChevronRight size={16} aria-hidden />
       </button>
     </div>
   );

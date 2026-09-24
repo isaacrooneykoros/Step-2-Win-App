@@ -1,102 +1,82 @@
+import { ProgressRing } from './ProgressRing';
+
+type BarTone = 'brand' | 'reward' | 'success' | 'warning' | 'danger' | 'info' | 'primary' | 'error';
+
 interface ProgressBarProps {
-  progress: number; // 0-100
+  /** 0–100 */
+  progress: number;
   showLabel?: boolean;
-  height?: 'sm' | 'md' | 'lg';
-  color?: 'primary' | 'success' | 'warning' | 'error';
+  height?: 'xs' | 'sm' | 'md' | 'lg';
+  color?: BarTone;
   className?: string;
+  /** Accessible name, e.g. "Challenge progress" */
+  label?: string;
 }
+
+const toneFill: Record<BarTone, string> = {
+  brand: 'bg-brand',
+  primary: 'bg-brand',
+  reward: 'bg-reward',
+  success: 'bg-success',
+  warning: 'bg-warning',
+  danger: 'bg-danger',
+  error: 'bg-danger',
+  info: 'bg-info',
+};
+
+const heights = { xs: 'h-1', sm: 'h-1.5', md: 'h-2', lg: 'h-3' };
 
 export default function ProgressBar({
   progress,
   showLabel = false,
   height = 'md',
-  color = 'primary',
+  color = 'brand',
   className = '',
+  label = 'Progress',
 }: ProgressBarProps) {
-  const clampedProgress = Math.max(0, Math.min(100, progress));
-
-  const heightClasses = {
-    sm: 'h-1',
-    md: 'h-2',
-    lg: 'h-3',
-  };
-
-  const colorClasses = {
-    primary: 'bg-gradient-to-r from-primary to-accent',
-    success: 'bg-success',
-    warning: 'bg-warning',
-    error: 'bg-error',
-  };
+  const clamped = Math.max(0, Math.min(100, Number.isFinite(progress) ? progress : 0));
 
   return (
     <div className={className}>
-      <div className={`progress-bar ${heightClasses[height]}`}>
+      <div
+        className={`w-full overflow-hidden rounded-full bg-bg-input ${heights[height]}`}
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(clamped)}
+      >
         <div
-          className={`progress-fill ${colorClasses[color]}`}
-          style={{ width: `${clampedProgress}%` }}
+          className={`h-full rounded-full ${toneFill[color]} transition-[width] duration-deliberate ease-standard`}
+          style={{ width: `${clamped}%` }}
         />
       </div>
-      {showLabel && (
-        <p className="text-xs text-muted mt-1 text-right">{clampedProgress}%</p>
-      )}
+      {showLabel && <p className="num mt-1 text-right text-caption text-text-muted">{Math.round(clamped)}%</p>}
     </div>
   );
 }
 
+export { ProgressBar };
+
 interface CircularProgressProps {
-  progress: number; // 0-100
+  progress: number;
   size?: number;
   strokeWidth?: number;
-  color?: string;
   showLabel?: boolean;
   label?: string;
 }
 
-export function CircularProgress({
-  progress,
-  size = 120,
-  strokeWidth = 8,
-  color = '#14B8A6',
-  showLabel = true,
-  label,
-}: CircularProgressProps) {
-  const clampedProgress = Math.max(0, Math.min(100, progress));
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (clampedProgress / 100) * circumference;
-
+/** Legacy API kept for compatibility — renders the shared ProgressRing. */
+export function CircularProgress({ progress, size = 120, strokeWidth = 8, showLabel = true, label }: CircularProgressProps) {
+  const clamped = Math.max(0, Math.min(100, progress));
   return (
-    <div className="relative inline-flex items-center justify-center">
-      <svg width={size} height={size} className="transform -rotate-90">
-        {/* Background circle */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="#1A2050"
-          strokeWidth={strokeWidth}
-        />
-        {/* Progress circle */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth={strokeWidth}
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          className="transition-all duration-500"
-        />
-      </svg>
+    <ProgressRing value={clamped} goal={100} size={size} strokeWidth={strokeWidth} sweep={1} label={`${Math.round(clamped)}%${label ? ` ${label}` : ''}`}>
       {showLabel && (
-        <div className="absolute text-center">
-          <div className="text-2xl font-bold">{Math.round(clampedProgress)}%</div>
-          {label && <div className="text-xs text-muted">{label}</div>}
-        </div>
+        <>
+          <span className="num text-title text-text-primary">{Math.round(clamped)}%</span>
+          {label && <span className="text-caption text-text-muted">{label}</span>}
+        </>
       )}
-    </div>
+    </ProgressRing>
   );
 }

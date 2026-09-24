@@ -4,25 +4,47 @@
   "webDir": "dist",
   "server": {
     "androidScheme": "https",
-    "cleartext": true,
+    "cleartext": false,
     "allowNavigation": [
-      "*"
+      "https://step-2-win-app.onrender.com",
+      "https://step-2-win-app.vercel.app",
+      "https://*.intasend.com",
+      "https://*.google.com"
     ]
   },
   "plugins": {
     "SplashScreen": {
-      "launchShowDuration": 2000,
-      "backgroundColor": "#0A0E27",
+      "launchAutoHide": false,
+      "launchShowDuration": 1000,
+      "backgroundColor": "#F6F5F2",
       "showSpinner": false
+    },
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "DEFAULT"
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_step2win",
+      "iconColor": "#14855D"
+    },
+    "SocialLogin": {
+      "providers": {
+        "google": true,
+        "apple": true,
+        "facebook": false,
+        "twitter": false
+      },
+      "logLevel": 1
     }
   },
   "android": {
     "buildOptions": {
-      "keystorePath": "",
-      "keystorePassword": "",
-      "keystoreAlias": "",
-      "keystoreAliasPassword": "",
-      "releaseType": "APK"
-    }
+      "releaseType": "AAB"
+    },
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#F6F5F2"
   }
 }

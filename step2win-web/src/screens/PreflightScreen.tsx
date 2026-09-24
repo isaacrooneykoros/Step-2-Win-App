@@ -1,6 +1,10 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, RefreshCw, Wifi, Radio } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, RefreshCw, Radio } from 'lucide-react';
+import { Button } from '../components/ui/Button';
+import { Pill } from '../components/ui/Pill';
+import { Spinner } from '../components/ui/Spinner';
+import { BrandMark } from '../components/brand/BrandMark';
 import { resolveApiBaseUrl, resolveWsBaseUrl } from '../config/network';
 
 type CheckState = 'idle' | 'running' | 'pass' | 'fail';
@@ -62,7 +66,7 @@ async function checkApi(baseUrl: string): Promise<CheckResult> {
       label: 'API health',
       state: 'fail',
       detail: isColdStart
-        ? 'Request timed out  the backend may still be waking up. Tap Retry in a moment.'
+        ? 'Request timed out. The backend may still be waking up. Tap Retry in a moment.'
         : `Request failed: ${msg}. Check your network connection and tap Retry. If the problem persists, the backend URL or CORS config on Render may need updating.`,
     };
   }
@@ -82,7 +86,7 @@ async function checkWebSocket(wsBase: string): Promise<CheckResult> {
       resolve({
         label: 'Realtime WebSocket',
         state: 'fail',
-        detail: 'Connection timed out  backend may still be starting. Tap Retry.',
+        detail: 'Connection timed out. The backend may still be starting. Tap Retry.',
       });
     }, 20000);
 
@@ -187,73 +191,111 @@ export default function PreflightScreen() {
 
   const renderState = (result: CheckResult) => {
     if (result.state === 'running') {
-      return <RefreshCw className="animate-spin text-accent-blue" size={18} />;
+      return (
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-bg-input text-text-secondary">
+          <Spinner size={16} />
+        </span>
+      );
     }
     if (result.state === 'pass') {
-      return <CheckCircle2 className="text-accent-green" size={18} />;
+      return (
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-success-soft text-success">
+          <CheckCircle2 size={18} aria-hidden />
+        </span>
+      );
     }
     if (result.state === 'fail') {
-      return <AlertTriangle className="text-accent-red" size={18} />;
+      return (
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-danger-soft text-danger">
+          <AlertTriangle size={18} aria-hidden />
+        </span>
+      );
     }
-    return <Radio className="text-text-muted" size={18} />;
+    return (
+      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-bg-input text-text-muted">
+        <Radio size={18} aria-hidden />
+      </span>
+    );
+  };
+
+  const statusPill = (result: CheckResult) => {
+    switch (result.state) {
+      case 'pass':
+        return <Pill tone="success">Reachable</Pill>;
+      case 'fail':
+        return <Pill tone="danger">Failed</Pill>;
+      case 'running':
+        return <Pill tone="neutral">Checking</Pill>;
+      default:
+        return <Pill tone="neutral">Waiting</Pill>;
+    }
   };
 
   return (
-    <div className="min-h-screen bg-bg-page px-4 py-8">
-      <div className="max-w-xl mx-auto card p-6 screen-enter">
-        <div className="flex items-center gap-3 mb-3">
-          <Wifi className="text-accent-blue" size={22} />
-          <h1 className="text-2xl font-black text-text-primary">App Debug Preflight</h1>
-        </div>
+    <main className="min-h-[100dvh] bg-bg-page">
+      <div className="mx-auto w-full max-w-[420px] px-5 pt-safe pb-safe">
+        <header className="pt-8">
+          <BrandMark size={44} title="Step2Win" />
+          <h1 className="mt-6 text-title-lg text-text-primary">Connection check</h1>
+          <p className="mt-1.5 text-body text-text-secondary">
+            Making sure your phone can reach Step2Win before you sign in. The first check after a quiet period can
+            take up to a minute while the server wakes up.
+          </p>
+        </header>
 
-        <p className="text-sm text-text-muted mb-6">
-          Network checks run before login to confirm your phone can reach both API and realtime services.
-          On Render's free tier the backend sleeps when idle  <strong>first launch may take up to 70 s</strong> to wake up. Tap <em>Retry Checks</em> if checks fail on the first attempt.
-        </p>
-
-        <div className="space-y-3 mb-5">
-          {[apiResult, wsResult].map((result) => (
-            <div key={result.label} className="bg-bg-card rounded-2xl p-4 border border-border flex items-start gap-3">
-              <div className="mt-0.5">{renderState(result)}</div>
-              <div>
-                <div className="text-sm font-bold text-text-primary">{result.label}</div>
-                <div className="text-xs text-text-muted mt-1">{result.detail || 'Pending...'}</div>
+        <ul className="mt-6 overflow-hidden rounded-card border border-border-light bg-bg-card shadow-card" aria-live="polite">
+          {[apiResult, wsResult].map((result, i) => (
+            <li
+              key={result.label}
+              className={`flex items-start gap-3 p-4 ${i > 0 ? 'border-t border-border-light' : ''}`}
+            >
+              {renderState(result)}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-body font-semibold text-text-primary">{result.label}</span>
+                  {statusPill(result)}
+                </div>
+                <p className="mt-0.5 break-words text-caption text-text-secondary">{result.detail || 'Waiting to start'}</p>
               </div>
-            </div>
+            </li>
           ))}
-        </div>
-
-        <div className="text-xs text-text-muted mb-6 space-y-1">
-          <div>API base: {apiBase}</div>
-          <div>WS base: {wsBase}</div>
-        </div>
+        </ul>
 
         {checksDone && !allPassed && (
-          <div className="bg-tint-red border border-red-200 text-accent-red px-4 py-3 rounded-xl text-sm mb-4">
-            One or more checks failed. If the backend just woke up from sleep, tap <strong>Retry Checks</strong>. Otherwise verify backend URL, CORS, and SSL on Render.
+          <div role="alert" className="mt-4 rounded-control bg-danger-soft px-4 py-3 text-callout text-danger">
+            One or more checks failed. If the server was asleep, retry in a moment. Otherwise check your network
+            connection.
           </div>
         )}
 
-        <div className="flex gap-3">
-          <button
-            type="button"
+        <dl className="mt-4 space-y-1 break-all text-caption text-text-muted">
+          <div>
+            <dt className="inline font-semibold">API </dt>
+            <dd className="inline">{apiBase}</dd>
+          </div>
+          <div>
+            <dt className="inline font-semibold">Realtime </dt>
+            <dd className="inline">{wsBase}</dd>
+          </div>
+        </dl>
+
+        <div className="mt-6 flex flex-col gap-3 pb-6">
+          <Button size="lg" fullWidth onClick={continueToLogin} disabled={!allPassed}>
+            Continue to sign in
+          </Button>
+          <Button
+            size="lg"
+            variant="outline"
+            fullWidth
             onClick={() => void runChecks()}
-            disabled={running}
-            className="btn-secondary px-4 py-2 rounded-xl disabled:opacity-60"
+            isLoading={running}
+            loadingText="Checking"
+            leftIcon={<RefreshCw size={16} aria-hidden />}
           >
-            Retry Checks
-          </button>
-          <button
-            type="button"
-            onClick={continueToLogin}
-            disabled={!allPassed}
-            className="btn-primary px-4 py-2 rounded-xl disabled:opacity-60"
-          >
-            Continue to Login
-          </button>
+            Retry checks
+          </Button>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
-

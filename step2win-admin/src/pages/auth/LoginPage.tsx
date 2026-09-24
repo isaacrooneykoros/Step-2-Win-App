@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, Lock } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { AuthLayout } from '../../components/auth/AuthLayout';
 import { AuthInput } from '../../components/auth/AuthInput';
 import { AuthButton } from '../../components/auth/AuthButton';
@@ -96,86 +96,63 @@ export default function LoginPage() {
 
   return (
     <AuthLayout mode="login">
-      <h1
-        className="text-3xl font-extrabold mb-1.5 leading-tight"
-        style={{ fontFamily: 'Syne, sans-serif', color: '#F0F2F8', letterSpacing: 0 }}>
-        Welcome back
-      </h1>
-      <p className="text-sm mb-8 leading-relaxed" style={{ color: '#7B82A0' }}>
-        Sign in to your admin account to continue
-      </p>
+      <h1 className="text-lg font-semibold text-ink-primary">Sign in</h1>
+      <p className="mb-5 mt-1 text-sm text-ink-secondary">Use your staff account to open the console.</p>
 
       {errors.general && (
         <div
-          className="flex items-center gap-2.5 px-4 py-3 rounded-xl mb-5 text-sm"
-          style={{
-            background: 'rgba(240,96,96,0.1)',
-            border: '1px solid rgba(240,96,96,0.2)',
-            color: '#F06060',
-          }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="#F06060" strokeWidth="1.5" />
-            <path d="M12 8v4m0 4h.01" stroke="#F06060" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-          {errors.general}
+          role="alert"
+          className="mb-4 flex items-start gap-2 rounded-md border border-danger-line bg-danger-soft px-3 py-2.5 text-sm text-danger">
+          <AlertCircle size={15} className="mt-0.5 shrink-0" aria-hidden />
+          <span>{errors.general}</span>
         </div>
       )}
 
       <form onSubmit={handleSubmit} noValidate>
         <AuthInput
+          label="Username or email"
           type="text"
-          placeholder="Username or email"
           autoComplete="username"
           autoFocus
           value={form.username}
           onChange={(event) => setForm((prev) => ({ ...prev, username: event.target.value }))}
           error={errors.username}
-          icon={<Mail size={15} color="#7B82A0" />}
+          icon={<Mail size={15} />}
         />
 
-        <div className="relative">
-          <AuthInput
-            type={show ? 'text' : 'password'}
-            placeholder="Password"
-            autoComplete="current-password"
-            value={form.password}
-            onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
-            error={errors.password}
-            icon={<Lock size={15} color="#7B82A0" />}
-          />
-          <button
-            type="button"
-            onClick={() => setShow((value) => !value)}
-            className="absolute right-3.5 top-3.5 text-xs transition-colors"
-            style={{ color: '#3D4260' }}
-            onMouseEnter={(event) => {
-              event.currentTarget.style.color = '#7B82A0';
-            }}
-            onMouseLeave={(event) => {
-              event.currentTarget.style.color = '#3D4260';
-            }}>
-            {show ? 'Hide' : 'Show'}
-          </button>
-        </div>
+        <AuthInput
+          label="Password"
+          type={show ? 'text' : 'password'}
+          autoComplete="current-password"
+          value={form.password}
+          onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
+          error={errors.password}
+          icon={<Lock size={15} />}
+          rightSlot={
+            <button
+              type="button"
+              onClick={() => setShow((value) => !value)}
+              aria-label={show ? 'Hide password' : 'Show password'}
+              aria-pressed={show}
+              className="flex h-8 items-center gap-1 rounded px-2 text-xs font-medium text-ink-secondary hover:bg-surface-elevated hover:text-ink-primary">
+              {show ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
+              {show ? 'Hide' : 'Show'}
+            </button>
+          }
+        />
 
-        <div className="text-right -mt-2 mb-5">
-          <span className="text-xs" style={{ color: '#3D4260' }}>
-            Admin access only
-          </span>
-        </div>
-
-        <AuthButton type="submit" loading={loginMutation.isPending}>
-          {loginMutation.isPending ? 'Signing in...' : 'Sign In to Dashboard'}
+        <AuthButton type="submit" loading={loginMutation.isPending} className="mt-1">
+          {loginMutation.isPending ? 'Signing in…' : 'Sign in'}
         </AuthButton>
       </form>
 
-      <AuthDivider label="Authorized personnel only" />
+      <AuthDivider label="First time here?" />
 
-      <p className="text-center text-sm" style={{ color: '#7B82A0' }}>
-        Don&apos;t have an account?{' '}
-        <Link to="/register" className="font-semibold transition-colors" style={{ color: '#7C6FF7' }}>
-          Request access
-        </Link>
+      <p className="text-center text-sm text-ink-secondary">
+        <Link to="/register" className="font-medium text-brand-text hover:underline">
+          Set up an admin account
+        </Link>{' '}
+        <span className="text-ink-muted">with a registration code</span>
       </p>
     </AuthLayout>
   );

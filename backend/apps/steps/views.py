@@ -1044,12 +1044,9 @@ def health_summary(request):
     today_record = week_qs.filter(date=today).first()
     today_steps = today_record.steps if today_record else 0
 
-    from apps.challenges.models import Challenge
-
-    active = Challenge.objects.filter(
-        participants__user=request.user, status="active"
-    ).first()
-    milestone = active.milestone if active else 10000
+    # Daily target is the user's own goal. Challenge milestones are multi-day totals
+    # and are reported by the challenge endpoints, not as a daily goal.
+    milestone = request.user.daily_goal or 10000
 
     agg = week_qs.aggregate(
         week_steps=Sum("steps"),
@@ -1210,13 +1207,8 @@ def day_detail(request, date_str):
     active_hours = hourly_qs.filter(steps__gt=0).count()
     active_minutes = active_hours * 60
 
-    # Goal from active challenge
-    from apps.challenges.models import Challenge
-
-    active_challenge = Challenge.objects.filter(
-        participants__user=user, status="active"
-    ).first()
-    goal = active_challenge.milestone if active_challenge else 10_000
+    # Daily target is the user's own goal (challenge milestones are multi-day totals).
+    goal = user.daily_goal or 10_000
 
     # Also check daily model for total (use if more accurate than hourly sum)
     daily_record = HealthRecord.objects.filter(user=user, date=day).first()

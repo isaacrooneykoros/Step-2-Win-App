@@ -9,7 +9,7 @@ from decimal import Decimal
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -160,9 +160,9 @@ def check_wallet_balance_consistency():
     Fixes orphaned locked balances and alerts on mismatches.
 
     Checks:
-    1. locked_balance > wallet_balance (impossible state)
-    2. orphaned locked balances (user not in any active challenge)
-    3. unlocked balances that should be locked (participant exists)
+    1. negative wallet/locked balances (report only)
+    2. orphaned locked balances (user not in any pending/active challenge) - released
+    3. locked_balance lower than the user's unresolved entries (report only)
     """
     from apps.challenges.models import Challenge, Participant
     from apps.users.models import User
@@ -170,50 +170,51 @@ def check_wallet_balance_consistency():
     issues = []
     fixes = []
 
-    # Check 1: locked_balance > wallet_balance (impossible)
-    bad_state = User.objects.filter(locked_balance__gt=0).extra(
-        where=["locked_balance > wallet_balance"],
-    )
+    # Balance model: challenge entries are debited from wallet_balance on join/create,
+    # and locked_balance separately tracks money committed to unresolved challenges
+    # (released on payout/refund). So locked_balance > wallet_balance is a normal state
+    # (e.g. a user who put most of their balance into a challenge) and must not be "fixed".
+    open_statuses = ("pending", "active")
 
-    for user in bad_state:
+    # Check 1: negative balances are always invalid. Report only — never auto-move money.
+    for user in User.objects.filter(
+        Q(wallet_balance__lt=0) | Q(locked_balance__lt=0)
+    ):
         issues.append(
-            f"User {user.username} has invalid state: locked={user.locked_balance} > wallet={user.wallet_balance}"
+            f"User {user.username} has a negative balance: "
+            f"wallet={user.wallet_balance} locked={user.locked_balance}"
         )
-        # Fix: zero out locked_balance if it exceeds wallet
-        if user.locked_balance > user.wallet_balance:
-            user.locked_balance = Decimal("0.00")
-            user.save(update_fields=["locked_balance"])
-            fixes.append(f"Fixed {user.username}: reset locked_balance to 0")
 
-    # Check 2: orphaned locked balances
+    # Check 2: orphaned locked balances (locked money but no unresolved challenge).
     locked_users = User.objects.filter(locked_balance__gt=Decimal("0.00"))
     for user in locked_users:
-        active_participants = Participant.objects.filter(
-            user=user, challenge__status="active"
+        open_participations = Participant.objects.filter(
+            user=user, challenge__status__in=open_statuses
         ).count()
-        if active_participants == 0:
+        if open_participations == 0:
+            released = user.locked_balance
             issues.append(
-                f"User {user.username} has locked balance KES {user.locked_balance} but no active challenges"
+                f"User {user.username} has locked balance KES {released} but no pending/active challenges"
             )
-            # Fix: release locked balance
-            user.wallet_balance += user.locked_balance
+            # Fix: release the orphaned lock back to the spendable wallet.
+            user.wallet_balance += released
             user.locked_balance = Decimal("0.00")
             user.save(update_fields=["wallet_balance", "locked_balance"])
             fixes.append(
-                f"Fixed {user.username}: released orphaned locked balance KES {user.locked_balance}"
+                f"Fixed {user.username}: released orphaned locked balance KES {released}"
             )
 
-    # Check 3: sync participant balance locks
-    participants = Participant.objects.filter(
-        challenge__status="active"
-    ).select_related("user", "challenge")
-
-    for participant in participants:
-        expected_lock = participant.challenge.entry_fee
-        if participant.user.locked_balance < expected_lock:
+    # Check 3: locked_balance should cover every unresolved entry. Report only.
+    expected_locks = (
+        Participant.objects.filter(challenge__status__in=open_statuses)
+        .values("user_id", "user__username", "user__locked_balance")
+        .annotate(expected=Sum("challenge__entry_fee"))
+    )
+    for row in expected_locks:
+        if row["user__locked_balance"] < row["expected"]:
             issues.append(
-                f"User {participant.user.username} is in active challenge "
-                f"but locked_balance={participant.user.locked_balance} < entry_fee={expected_lock}"
+                f"User {row['user__username']} has unresolved entries totalling KES {row['expected']} "
+                f"but locked_balance={row['user__locked_balance']}"
             )
 
     log_msg = f"Wallet Check | Issues: {len(issues)} | Fixes: {len(fixes)}"

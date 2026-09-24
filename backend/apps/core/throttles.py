@@ -71,3 +71,9 @@ class DashboardReadRateThrottle(UserRateThrottle):
     """Higher-throughput read throttle for mobile dashboard polling endpoints."""
 
     scope = "dashboard_read"
+
+
+class SocialAuthRateThrottle(AnonRateThrottle):
+    """Sign in with Google / Apple — per IP."""
+
+    scope = "social_auth"

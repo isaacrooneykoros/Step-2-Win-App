@@ -69,14 +69,10 @@ export const challengesService = {
    * Get my challenges
    */
   getMyChallenges: async (): Promise<ChallengeDetail[]> => {
-    try {
-      const response = await api.get<any>('/api/challenges/my-challenges/');
-      // Handle paginated response from DRF ListAPIView
-      return Array.isArray(response.data) ? response.data : (response.data.results || []);
-    } catch (error) {
-      console.error('Error fetching my challenges:', error);
-      return [];
-    }
+    // Let failures propagate so screens can show an error + retry instead of a false "no challenges".
+    const response = await api.get<any>('/api/challenges/my-challenges/');
+    // Handle paginated response from DRF ListAPIView
+    return Array.isArray(response.data) ? response.data : (response.data.results || []);
   },
 
   /**

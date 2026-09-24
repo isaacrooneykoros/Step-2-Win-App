@@ -1,360 +1,248 @@
-﻿import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import {
-  Search,
-  SlidersHorizontal,
-  Flame,
-  Clock,
-  Trophy,
-  Users,
-  TrendingUp,
-  ChevronRight,
-  Star,
-  Zap,
-} from 'lucide-react';
+import { ArrowUpDown, ChevronDown, Compass, Footprints, Search, SearchX, X } from 'lucide-react';
 import { challengesService } from '../services/api/challenges';
-import type { LobbyChallenge, LobbyFilter, MilestoneFilter } from '../types';
+import type { LobbyChallenge, LobbyFilter, LobbySort, MilestoneFilter } from '../types';
+import { ScreenHeader } from '../components/ui/ScreenHeader';
+import Input from '../components/ui/Input';
+import { EmptyState } from '../components/ui/EmptyState';
+import { ErrorState } from '../components/ui/ErrorState';
+import { ChoiceChips } from '../components/challenge/ChoiceChips';
+import { ChallengeCard, ChallengeCardSkeleton } from '../components/challenge/ChallengeCard';
+import { lobbyToCardModel, milestoneTier } from '../components/challenge/challengeUtils';
+import { formatSteps } from '../lib/format';
+import { usePollInterval } from '../hooks/useDataSaver';
 
-const THEME: Record<string, { bg: string; accent: string; badge: string }> = {
-  blue: { bg: 'hsl(var(--bg-input))', accent: '#4F9CF9', badge: 'hsl(var(--bg-elevated))' },
-  green: { bg: 'hsl(var(--bg-input))', accent: '#34D399', badge: 'hsl(var(--bg-elevated))' },
-  purple: { bg: 'hsl(var(--bg-input))', accent: '#A78BFA', badge: 'hsl(var(--bg-elevated))' },
-  orange: { bg: 'hsl(var(--bg-input))', accent: '#FB923C', badge: 'hsl(var(--bg-elevated))' },
-  pink: { bg: 'hsl(var(--bg-input))', accent: '#F472B6', badge: 'hsl(var(--bg-elevated))' },
-};
-
-const FILTERS: { key: LobbyFilter; label: string; icon: React.ReactNode }[] = [
-  { key: 'all', label: 'All', icon: <Trophy size={12} /> },
-  { key: 'joinable', label: 'Open', icon: <Zap size={12} /> },
-  { key: 'active', label: 'Active', icon: <Flame size={12} /> },
-  { key: 'ending_soon', label: 'Ending Soon', icon: <Clock size={12} /> },
+const FILTERS: { value: LobbyFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'joinable', label: 'Open to join' },
+  { value: 'active', label: 'Live now' },
+  { value: 'ending_soon', label: 'Ending soon' },
 ];
 
-const MILESTONES: { key: MilestoneFilter; label: string }[] = [
-  { key: 'all', label: 'All Levels' },
-  { key: '10000', label: '10K Starter' },
-  { key: '15000', label: '15K Warm-up' },
-  { key: '20000', label: '20K Walker' },
-  { key: '25000', label: '25K Steady' },
-  { key: '30000', label: '30K Active' },
-  { key: '40000', label: '40K Strong' },
-  { key: '50000', label: '50K Endurance' },
-  { key: '65000', label: '65K Power' },
-  { key: '80000', label: '80K Athletic' },
-  { key: '100000', label: '100K Runner' },
-  { key: '125000', label: '125K Advanced Runner' },
-  { key: '150000', label: '150K Elite' },
-  { key: '200000', label: '200K Pro' },
-  { key: '250000', label: '250K Heavyweight' },
-  { key: '300000', label: '300K Ultra' },
+const SORTS: { value: LobbySort; label: string }[] = [
+  { value: 'featured', label: 'Featured first' },
+  { value: 'pool', label: 'Largest pool' },
+  { value: 'filling', label: 'Filling fastest' },
+  { value: 'ending', label: 'Ending soonest' },
+  { value: 'newest', label: 'Newest' },
 ];
 
-interface ChallengesLobbyScreenProps {
-  embedded?: boolean;
-}
+/** Used only until /challenges/config/ loads. */
+const FALLBACK_MILESTONES = [10000, 15000, 20000, 25000, 30000, 40000, 50000, 65000, 80000, 100000, 125000, 150000, 200000, 250000, 300000];
 
-export default function ChallengesLobbyScreen({ embedded = false }: ChallengesLobbyScreenProps) {
-  const navigate = useNavigate();
-  const [filter, setFilter] = useState<LobbyFilter>('all');
-  const [milestone, setMilestone] = useState<MilestoneFilter>('all');
-  const [showFilters, setShowFilters] = useState(false);
-  const [search, setSearch] = useState('');
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['challenges', 'lobby', filter, milestone],
-    queryFn: () =>
-      challengesService.getLobby({
-        filter,
-        milestone: milestone === 'all' ? undefined : milestone,
-      }),
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: true,
-  });
-
-  const challenges: LobbyChallenge[] = (data?.challenges || []).filter((c) => !c.user_is_joined);
-
-  const filtered = search.trim()
-    ? challenges.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()))
-    : challenges;
-
-  const featured = filtered.filter((c) => c.is_featured);
-  const regular = filtered.filter((c) => !c.is_featured);
-
+function SelectField({
+  id,
+  label,
+  value,
+  onChange,
+  icon,
+  children,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <div className={embedded ? '' : 'min-h-screen pb-24'} style={{ background: embedded ? 'transparent' : 'hsl(var(--bg-page))' }}>
-      <div className="px-4 pt-6 pb-3">
-        <div className="flex items-center justify-between mb-1">
-          <div>
-            <h1 className="text-text-primary text-xl font-bold">Discover</h1>
-            <p className="text-text-muted text-xs">{challenges.length} public challenges live</p>
-          </div>
-          <button
-            onClick={() => setShowFilters((v) => !v)}
-            className="w-9 h-9 rounded-xl flex items-center justify-center relative"
-            style={{
-              background: showFilters ? 'hsl(var(--bg-input))' : 'hsl(var(--bg-elevated))',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
-              border: '1px solid hsl(var(--border-default))',
-            }}
-          >
-            <SlidersHorizontal size={16} color={showFilters ? '#4F9CF9' : 'hsl(var(--text-secondary))'} />
-          </button>
-        </div>
-      </div>
-
-      <div className="px-4 mb-3">
-        <div
-          className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
-          style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', border: '1px solid hsl(var(--border-light))' }}
-        >
-          <Search size={15} color="hsl(var(--text-muted))" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search challenges..."
-            className="flex-1 text-sm text-text-primary bg-transparent outline-none placeholder:text-text-muted"
-          />
-        </div>
-      </div>
-
-      <div className="px-4 mb-3">
-        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-          {FILTERS.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all"
-              style={{
-                background: filter === f.key ? '#4F9CF9' : 'hsl(var(--bg-elevated))',
-                color: filter === f.key ? '#FFFFFF' : 'hsl(var(--text-secondary))',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
-                border: filter === f.key ? 'none' : '1px solid hsl(var(--border-default))',
-              }}
-            >
-              {f.icon}
-              {f.label}
-              {f.key === 'ending_soon' && (data?.filters?.ending_soon || 0) > 0 && (
-                <span
-                  className="ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold"
-                  style={{
-                    background: filter === 'ending_soon' ? 'rgba(255,255,255,0.3)' : '#FEE2E2',
-                    color: filter === 'ending_soon' ? '#fff' : '#EF4444',
-                  }}
-                >
-                  {data?.filters?.ending_soon}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {showFilters && (
-        <div
-          className="mx-4 mb-4 p-4 rounded-2xl"
-          style={{ background: 'hsl(var(--bg-card))', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
-        >
-          <p className="text-text-primary text-xs font-bold mb-2">Difficulty</p>
-          <div className="flex gap-2">
-            {MILESTONES.map((m) => (
-              <button
-                key={m.key}
-                onClick={() => setMilestone(m.key)}
-                className="flex-1 py-2 rounded-xl text-xs font-semibold transition-all"
-                style={{
-                  background: milestone === m.key ? '#EFF6FF' : '#F9FAFB',
-                  color: milestone === m.key ? '#4F9CF9' : 'hsl(var(--text-secondary))',
-                  border: milestone === m.key ? '1px solid #BFDBFE' : '1px solid hsl(var(--border-light))',
-                }}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {isLoading && (
-        <div className="flex flex-col gap-3 px-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-40 rounded-2xl animate-pulse" style={{ background: '#E5E7EB' }} />
-          ))}
-        </div>
-      )}
-
-      {!isLoading && featured.length > 0 && (
-        <div className="mb-2">
-          <div className="flex items-center gap-2 px-4 mb-3">
-            <Star size={14} color="#FBBF24" fill="#FBBF24" />
-            <p className="text-text-primary text-sm font-bold">Featured</p>
-          </div>
-          <div className="px-4 flex flex-col gap-3">
-            {featured.map((c) => (
-              <LobbyCard key={c.id} challenge={c} onTap={() => navigate(`/challenges/lobby/${c.id}`)} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!isLoading && (
-        <div className="px-4 flex flex-col gap-3">
-          {regular.length > 0 && featured.length > 0 && (
-            <p className="text-text-muted text-xs font-semibold uppercase tracking-wide mt-1">All Challenges</p>
-          )}
-          {regular.map((c) => (
-            <LobbyCard key={c.id} challenge={c} onTap={() => navigate(`/challenges/lobby/${c.id}`)} />
-          ))}
-        </div>
-      )}
-
-      {!isLoading && filtered.length === 0 && (
-        <div className="flex flex-col items-center py-20 px-8 text-center">
-          <div className="w-16 h-16 rounded-3xl flex items-center justify-center mb-4 bg-tint-blue">
-            <Trophy size={28} color="#4F9CF9" />
-          </div>
-          <p className="text-text-primary font-bold text-lg mb-2">No challenges found</p>
-          <p className="text-text-muted text-sm leading-relaxed">
-            {search ? `No results for "${search}"` : 'No public challenges match your filters right now.'}
-          </p>
-        </div>
-      )}
+    <div className="relative min-w-0 flex-1">
+      <label htmlFor={id} className="sr-only">
+        {label}
+      </label>
+      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-text-muted" aria-hidden>
+        {icon}
+      </span>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-11 w-full appearance-none truncate rounded-control border border-border bg-bg-card pl-9 pr-8 text-callout font-semibold text-text-primary outline-none transition-colors duration-fast hover:bg-bg-input focus-visible:border-brand"
+      >
+        {children}
+      </select>
+      <ChevronDown size={16} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted" aria-hidden />
     </div>
   );
 }
 
-function LobbyCard({
-  challenge: c,
-  onTap,
-}: {
-  challenge: LobbyChallenge;
-  onTap: () => void;
-}) {
-  const theme = THEME[c.theme] || THEME.blue;
+export default function ChallengesLobbyScreen() {
+  const navigate = useNavigate();
+  const [filter, setFilter] = useState<LobbyFilter>('all');
+  const [milestone, setMilestone] = useState<MilestoneFilter>('all');
+  const [sort, setSort] = useState<LobbySort>('featured');
+  const [search, setSearch] = useState('');
 
-  const urgencyLabel = () => {
-    if (c.is_almost_full) return { text: `${c.spots_remaining} spots left!`, color: '#EF4444' };
-    if (c.is_starting_soon) return { text: 'Starting soon!', color: '#F59E0B' };
-    if (c.days_remaining <= 1 && c.status === 'active') return { text: 'Last 24 hours!', color: '#EF4444' };
-    if (c.days_remaining <= 2 && c.status === 'active') return { text: `${c.days_remaining}d left`, color: '#F59E0B' };
-    return null;
+  const lobbyPoll = usePollInterval(10_000);
+  const { data, isLoading, isError, refetch, isRefetching } = useQuery({
+    queryKey: ['challenges', 'lobby', filter, milestone, sort],
+    queryFn: () =>
+      challengesService.getLobby({
+        filter,
+        milestone: milestone === 'all' ? undefined : milestone,
+        sort,
+      }),
+    refetchInterval: lobbyPoll,
+    refetchOnWindowFocus: true,
+  });
+
+  const { data: config } = useQuery({
+    queryKey: ['challenges', 'config'],
+    queryFn: challengesService.getConfig,
+    staleTime: 10 * 60_000,
+  });
+
+  const milestoneOptions = useMemo(
+    () =>
+      config?.challenge_milestones?.length
+        ? config.challenge_milestones.map((m) => ({ value: m.value, tier: milestoneTier(m.label) }))
+        : FALLBACK_MILESTONES.map((value) => ({ value, tier: null as string | null })),
+    [config],
+  );
+
+  const challenges: LobbyChallenge[] = (data?.challenges || []).filter((c) => !c.user_is_joined);
+  const query = search.trim().toLowerCase();
+  const filtered = query ? challenges.filter((c) => c.name.toLowerCase().includes(query)) : challenges;
+
+  const filtersActive = filter !== 'all' || milestone !== 'all';
+  const resetFilters = () => {
+    setFilter('all');
+    setMilestone('all');
   };
 
-  const urgency = urgencyLabel();
+  const endingSoon = data?.filters?.ending_soon ?? 0;
 
   return (
-    <button
-      onClick={onTap}
-      className="w-full text-left rounded-2xl overflow-hidden active:scale-[0.98] transition-transform"
-      style={{
-        background: 'hsl(var(--bg-card))',
-        boxShadow: '0 1px 6px rgba(0,0,0,0.07)',
-        border: c.is_featured ? `1.5px solid ${theme.accent}` : '1px solid hsl(var(--border-light))',
-      }}
-    >
-      <div className="h-1.5 w-full" style={{ background: theme.accent }} />
+    <div className="pb-nav">
+      <ScreenHeader back="/challenges" title="Discover" />
 
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap mb-0.5">
-              {c.is_featured && (
-                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: '#FEF3C7', color: '#D97706' }}>
-                  <Star size={9} fill="#D97706" color="#D97706" /> Featured
-                </span>
-              )}
-              {c.is_platform_challenge && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: theme.badge, color: theme.accent }}>
-                   Official
-                </span>
-              )}
-              {urgency && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: '#FEE2E2', color: urgency.color }}>
-                   {urgency.text}
-                </span>
-              )}
-            </div>
-            <h3 className="text-text-primary text-base font-bold leading-tight truncate">{c.name}</h3>
-          </div>
-          <ChevronRight size={16} color="hsl(var(--text-muted))" className="flex-shrink-0 mt-1" />
+      <div className="space-y-4 px-5">
+        <p className="text-callout text-text-secondary">
+          Public challenges anyone can join. Reach the step goal before the end date to share the pool.
+        </p>
+
+        <Input
+          type="search"
+          aria-label="Search challenges by name"
+          placeholder="Search by name"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          leading={<Search size={18} />}
+          trailing={
+            search ? (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full text-text-muted hover:bg-bg-input"
+                aria-label="Clear search"
+              >
+                <X size={18} />
+              </button>
+            ) : undefined
+          }
+          containerClassName="!mb-0"
+        />
+
+        <ChoiceChips
+          label="Show challenges"
+          value={filter}
+          onChange={setFilter}
+          options={FILTERS.map((f) => ({ ...f, count: f.value === 'ending_soon' ? endingSoon : undefined }))}
+        />
+
+        <div className="flex gap-2">
+          <SelectField
+            id="lobby-sort"
+            label="Sort by"
+            value={sort}
+            onChange={(v) => setSort(v as LobbySort)}
+            icon={<ArrowUpDown size={16} />}
+          >
+            {SORTS.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField
+            id="lobby-goal"
+            label="Step goal"
+            value={milestone}
+            onChange={setMilestone}
+            icon={<Footprints size={16} />}
+          >
+            <option value="all">Any goal</option>
+            {milestoneOptions.map((m) => (
+              <option key={m.value} value={String(m.value)}>
+                {formatSteps(m.value)} steps{m.tier ? ` · ${m.tier}` : ''}
+              </option>
+            ))}
+          </SelectField>
         </div>
 
-        <div className="rounded-xl px-3 py-2.5 mb-3 flex items-center gap-3" style={{ background: theme.bg }}>
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: theme.accent }}>
-              Prize Pool
-            </p>
-            <p className="text-text-primary text-lg font-bold leading-tight">KES {Number(c.effective_pool_kes).toLocaleString()}</p>
-            {Number(c.platform_bonus_kes) > 0 && (
-              <p className="text-[10px]" style={{ color: theme.accent }}>
-                +KES {Number(c.platform_bonus_kes).toLocaleString()} platform bonus
-              </p>
+        <section aria-labelledby="lobby-results" aria-busy={isLoading || undefined}>
+          <div className="mb-3 flex min-h-[28px] items-center justify-between gap-3">
+            <h2 id="lobby-results" className="eyebrow" aria-live="polite">
+              {isLoading ? 'Loading challenges' : `${filtered.length} ${filtered.length === 1 ? 'challenge' : 'challenges'}`}
+            </h2>
+            {filtersActive && !isLoading && (
+              <button type="button" onClick={resetFilters} className="-my-2 min-h-touch px-1 text-callout font-semibold text-brand">
+                Reset filters
+              </button>
             )}
           </div>
-          <div className="ml-auto text-right">
-            <p className="text-[10px] text-text-muted">Entry fee</p>
-            <p className="text-text-primary text-sm font-bold">KES {Number(c.entry_fee).toLocaleString()}</p>
-          </div>
-        </div>
 
-        <div className="flex items-center gap-4 mb-3">
-          <div className="flex items-center gap-1.5">
-            <TrendingUp size={12} color="hsl(var(--text-muted))" />
-            <span className="text-text-secondary text-xs">{c.milestone_label}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Clock size={12} color="hsl(var(--text-muted))" />
-            <span className="text-text-secondary text-xs">
-              {c.status === 'active'
-                ? `${c.days_remaining}d remaining`
-                : c.is_starting_soon
-                  ? 'Starting soon'
-                  : `Starts ${new Date(c.start_date || '').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
-            </span>
-          </div>
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="flex items-center gap-1.5">
-              <Users size={12} color="hsl(var(--text-muted))" />
-              <span className="text-text-secondary text-xs">
-                {c.participant_count} / {c.max_participants} joined
-              </span>
+          {isLoading ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <ChallengeCardSkeleton variant="lobby" />
+              <ChallengeCardSkeleton variant="lobby" />
+              <ChallengeCardSkeleton variant="lobby" />
             </div>
-            <span className="text-xs font-semibold" style={{ color: c.is_almost_full ? '#EF4444' : theme.accent }}>
-              {c.spots_remaining} spots left
-            </span>
-          </div>
-          <div className="w-full h-1.5 rounded-full" style={{ background: 'hsl(var(--bg-input))' }}>
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{
-                width: `${c.fill_percentage}%`,
-                background: c.is_almost_full ? '#EF4444' : theme.accent,
-              }}
+          ) : isError && !data ? (
+            <ErrorState
+              title="Couldn't load challenges"
+              description="Check your connection and try again."
+              onRetry={() => void refetch()}
+              isRetrying={isRefetching}
             />
-          </div>
-        </div>
-
-        <div className="mt-3">
-          {c.user_is_joined ? (
-            <div className="w-full py-2.5 rounded-xl text-center text-sm font-bold bg-tint-green text-accent-green">
-               You're In
-            </div>
-          ) : c.status === 'active' && c.spots_remaining === 0 ? (
-            <div className="w-full py-2.5 rounded-xl text-center text-sm font-bold bg-bg-input text-text-muted border border-border-light">
-              Full  Watch Leaderboard 
+          ) : filtered.length === 0 ? (
+            <div className="rounded-card border border-dashed border-border">
+              {query ? (
+                <EmptyState
+                  icon={SearchX}
+                  title="No matches"
+                  description={`No open challenge is called "${search.trim()}". Try another name.`}
+                  action={{ label: 'Clear search', onClick: () => setSearch('') }}
+                />
+              ) : filtersActive ? (
+                <EmptyState
+                  icon={SearchX}
+                  title="Nothing matches these filters"
+                  description="Try a different goal or show all challenges."
+                  action={{ label: 'Reset filters', onClick: resetFilters }}
+                />
+              ) : (
+                <EmptyState
+                  icon={Compass}
+                  title="No open challenges right now"
+                  description="New public challenges appear here. You can also start one and invite friends."
+                  action={{ label: 'Create a challenge', onClick: () => navigate('/challenges', { state: { openCreate: true } }) }}
+                />
+              )}
             </div>
           ) : (
-            <div className="w-full py-2.5 rounded-xl text-center text-sm font-bold text-white" style={{ background: theme.accent, boxShadow: `0 4px 12px ${theme.accent}40` }}>
-              {c.status === 'pending' ? 'Join Challenge' : 'Join Now'}
-            </div>
+            <ul className="stagger grid gap-3 md:grid-cols-2">
+              {filtered.map((c) => (
+                <li key={c.id} className="min-w-0">
+                  <ChallengeCard variant="lobby" challenge={lobbyToCardModel(c)} to={`/challenges/lobby/${c.id}`} className="h-full" />
+                </li>
+              ))}
+            </ul>
           )}
-        </div>
+        </section>
       </div>
-    </button>
+    </div>
   );
 }
-

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the bg-page token in src/index.css so the system navigation bar blends with the app. -->
+    <color name="s2w_page">#F6F5F2</color>
+    <bool name="s2w_light_bars">true</bool>
+</resources>

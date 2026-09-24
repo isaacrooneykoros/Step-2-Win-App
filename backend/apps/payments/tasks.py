@@ -118,21 +118,42 @@ def reconcile_pending_payments():
                 logger.info(f"Reconciled withdrawal {withdrawal.id} as completed")
 
             elif status == "FAILED":
-                with db_transaction.atomic():
-                    user = User.objects.select_for_update().get(id=withdrawal.user_id)
-                    user.wallet_balance = user.wallet_balance + withdrawal.amount_kes
-                    user.save(update_fields=["wallet_balance", "updated_at"])
+                from apps.wallet.models import WalletTransaction
 
-                    withdrawal.status = "failed"
-                    withdrawal.fail_reason = first_txn.get(
-                        "failed_reason", ""
-                    ) or result.get("failed_reason", "Failed")
-                    withdrawal.save(
-                        update_fields=["status", "fail_reason", "updated_at"]
+                refunded = False
+                with db_transaction.atomic():
+                    # Re-read under lock: a payout callback may have already failed and
+                    # refunded this withdrawal while we were querying the gateway.
+                    locked = WithdrawalRequest.objects.select_for_update().get(
+                        id=withdrawal.id
                     )
-                logger.warning(
-                    f"Reconciled withdrawal {withdrawal.id} as failed — refunded"
-                )
+                    if locked.status == "processing":
+                        user = User.objects.select_for_update().get(id=locked.user_id)
+                        balance_before = user.wallet_balance
+                        user.wallet_balance = user.wallet_balance + locked.amount_kes
+                        user.save(update_fields=["wallet_balance", "updated_at"])
+
+                        locked.status = "failed"
+                        locked.fail_reason = first_txn.get(
+                            "failed_reason", ""
+                        ) or result.get("failed_reason", "Failed")
+                        locked.save(update_fields=["status", "fail_reason", "updated_at"])
+
+                        WalletTransaction.objects.create(
+                            user=user,
+                            type="refund",
+                            amount=locked.amount_kes,
+                            balance_before=balance_before,
+                            balance_after=user.wallet_balance,
+                            description=f"Withdrawal refund #{locked.id}",
+                            reference_id=str(locked.id),
+                            metadata={"source": "reconciliation", "reason": locked.fail_reason},
+                        )
+                        refunded = True
+                if refunded:
+                    logger.warning(
+                        f"Reconciled withdrawal {withdrawal.id} as failed — refunded"
+                    )
 
         except Exception as e:
             logger.error(f"Withdrawal reconciliation error | id={withdrawal.id}: {e}")
@@ -157,14 +178,32 @@ def _reconcile_deposit(txn, invoice):
 
     state = invoice.get("state", "")
     if state == "COMPLETE":
+        from apps.wallet.models import WalletTransaction
+
+        from .models import PaymentTransaction
+
         with db_transaction.atomic():
+            # Re-read under lock so a concurrent deposit callback can't credit twice.
+            txn = PaymentTransaction.objects.select_for_update().get(id=txn.id)
             user = User.objects.select_for_update().get(id=txn.user_id)
             # Only credit if not already credited (idempotency)
-            if txn.status != "completed":
+            if txn.status == "pending":
+                balance_before = user.wallet_balance
                 user.wallet_balance = user.wallet_balance + txn.amount_kes
                 user.save(update_fields=["wallet_balance", "updated_at"])
+                mpesa_ref = invoice.get("mpesa_reference", "")
+                WalletTransaction.objects.create(
+                    user=user,
+                    type="deposit",
+                    amount=txn.amount_kes,
+                    balance_before=balance_before,
+                    balance_after=user.wallet_balance,
+                    description=f"M-Pesa deposit via {mpesa_ref or 'reconciliation'}",
+                    reference_id=txn.order_id,
+                    metadata={"payment_gateway": "intasend", "mpesa_reference": mpesa_ref, "source": "reconciliation"},
+                )
                 txn.status = "completed"
-                txn.mpesa_reference = invoice.get("mpesa_reference", "")
+                txn.mpesa_reference = mpesa_ref
                 txn.callback_received_at = timezone.now()
                 txn.save(
                     update_fields=[
@@ -177,11 +216,17 @@ def _reconcile_deposit(txn, invoice):
                 logger.info(f"Reconciled deposit {txn.order_id} as completed")
 
     elif state == "FAILED":
-        txn.status = "failed"
-        txn.fail_reason = invoice.get("failed_reason", "") or invoice.get(
-            "failed_code", ""
-        )
-        txn.save(update_fields=["status", "fail_reason", "updated_at"])
+        from .models import PaymentTransaction
+
+        with db_transaction.atomic():
+            # Don't overwrite a deposit a callback completed in the meantime.
+            txn = PaymentTransaction.objects.select_for_update().get(id=txn.id)
+            if txn.status == "pending":
+                txn.status = "failed"
+                txn.fail_reason = invoice.get("failed_reason", "") or invoice.get(
+                    "failed_code", ""
+                )
+                txn.save(update_fields=["status", "fail_reason", "updated_at"])
 
 
 def _reconcile_payout(txn, result):

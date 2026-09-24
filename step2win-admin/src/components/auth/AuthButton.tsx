@@ -6,19 +6,15 @@ interface AuthButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
 }
 
-export function AuthButton({ loading, children, disabled, ...props }: AuthButtonProps) {
+/** Full-width primary submit for auth forms. */
+export function AuthButton({ loading, children, disabled, className, ...props }: AuthButtonProps) {
   return (
     <button
       {...props}
       disabled={disabled || loading}
-      className="flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-bold text-white transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-60 hover:-translate-y-px hover:opacity-95 active:translate-y-0"
-      style={{
-        fontFamily: 'Syne, sans-serif',
-        background: 'linear-gradient(135deg, #22C55E 0%, #4F9CF9 100%)',
-        boxShadow: loading ? 'none' : '0 12px 30px rgba(34,197,94,0.22)',
-        letterSpacing: 0,
-      }}>
-      {loading && <Loader2 size={15} className="animate-spin" />}
+      aria-busy={loading || undefined}
+      className={`flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand text-sm font-semibold text-brand-on transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60 ${className ?? ''}`}>
+      {loading && <Loader2 size={15} className="animate-spin" aria-hidden />}
       {children}
     </button>
   );

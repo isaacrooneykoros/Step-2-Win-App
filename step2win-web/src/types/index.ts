@@ -53,6 +53,10 @@ export interface ChallengeConfig {
   max_challenge_milestone: number;
   max_challenge_participants: number;
   challenge_milestones: ChallengeMilestoneOption[];
+  /** Typed entry range in whole KES, plus quick-pick suggestions. */
+  entry_fee_min?: number;
+  entry_fee_max?: number;
+  entry_fee_suggestions?: number[];
 }
 
 export interface Challenge {
@@ -566,7 +570,6 @@ export interface SupportTicket {
   status: SupportStatus;
   priority: SupportPriority;
   message: string;
-  admin_notes: string;
   resolved_at: string | null;
   created_at: string;
   updated_at: string;

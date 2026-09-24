@@ -19,6 +19,8 @@ DEFAULT_CHALLENGE_MILESTONES = [
     300000,
 ]
 
+SETTINGS_CACHE_KEY = "admin_api:system_settings:v1"
+
 
 class SystemSettings(models.Model):
     """Platform-wide system settings - singleton model"""
@@ -117,6 +119,23 @@ class SystemSettings(models.Model):
         blank=True, help_text="Message to display during maintenance"
     )
 
+    # Support desk: first-response targets (hours) by ticket priority
+    support_sla_urgent_hours = models.PositiveIntegerField(default=2)
+    support_sla_high_hours = models.PositiveIntegerField(default=8)
+    support_sla_medium_hours = models.PositiveIntegerField(default=24)
+    support_sla_low_hours = models.PositiveIntegerField(default=48)
+    # Auto-assignment of new tickets: off | round_robin | category
+    support_auto_assign_mode = models.CharField(max_length=20, default="off")
+    support_agent_ids = models.JSONField(
+        default=list, blank=True, help_text="Staff user ids that take new tickets"
+    )
+    support_category_assignees = models.JSONField(
+        default=dict, blank=True, help_text="Ticket category -> staff user id"
+    )
+    # Escalation of tickets waiting longer than their response target
+    support_escalation_enabled = models.BooleanField(default=True)
+    support_escalation_raise_priority = models.BooleanField(default=True)
+
     # Metadata
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(
@@ -137,6 +156,10 @@ class SystemSettings(models.Model):
         if not self.challenge_milestones:
             self.challenge_milestones = list(DEFAULT_CHALLENGE_MILESTONES)
         super().save(*args, **kwargs)
+        # Enforcement code reads a cached copy (apps/admin_api/platform.py).
+        from django.core.cache import cache
+
+        cache.delete(SETTINGS_CACHE_KEY)
 
     def delete(self, *args, **kwargs):
         """Prevent deletion"""
@@ -310,6 +333,11 @@ class SupportTicket(models.Model):
         related_name="assigned_support_tickets",
     )
     admin_notes = models.TextField(blank=True)
+    tags = models.ManyToManyField(
+        "admin_api.SupportTag", blank=True, related_name="tickets"
+    )
+    # Set when the ticket went past its response target while waiting on staff.
+    escalated_at = models.DateTimeField(null=True, blank=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -354,3 +382,47 @@ class SupportTicketMessage(models.Model):
 
     def __str__(self):
         return f"Message on ticket #{self.ticket_id} by {self.sender_username}"
+
+
+class SupportTag(models.Model):
+    """Free-form label staff attach to tickets (e.g. "mpesa-delay", "bug")."""
+
+    name = models.CharField(max_length=40, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class SupportReplyTemplate(models.Model):
+    """Saved reply staff can insert into the composer.
+
+    Body supports {username}, {ticket_id}, {subject} and {agent} placeholders,
+    filled in by the console when inserted.
+    """
+
+    title = models.CharField(max_length=120)
+    body = models.TextField()
+    # Blank = offered for every category.
+    category = models.CharField(
+        max_length=50, blank=True, choices=SupportTicket.CATEGORY_CHOICES
+    )
+    created_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="support_reply_templates",
+    )
+    usage_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["title"]
+
+    def __str__(self):
+        return self.title

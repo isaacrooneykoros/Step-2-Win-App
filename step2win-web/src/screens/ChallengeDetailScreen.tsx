@@ -1,534 +1,643 @@
-﻿import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, Copy, Trophy, Download, Lock, Globe } from 'lucide-react';
-import QR from 'qrcode';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+  CalendarRange,
+  CheckCircle2,
+  Globe,
+  Lock,
+  LogOut,
+  Radio,
+  RefreshCw,
+  RotateCcw,
+  Scale,
+  Target,
+  UserPlus,
+  type LucideIcon,
+} from 'lucide-react';
 import { challengesService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { useToast } from '../components/ui/Toast';
-import { CelebrationModal } from '../components/ui/CelebrationModal';
+import { CelebrationModal, type CelebrationData } from '../components/ui/CelebrationModal';
 import GroupChat from '../components/GroupChat';
 import { ChallengeSocialBadges } from '../components/ui/ChallengeSocialBadges';
-import type { Challenge, ChallengeDetail, Participant } from '../types';
+import { ScreenHeader, IconButton } from '../components/ui/ScreenHeader';
+import Pill from '../components/ui/Pill';
+import Card from '../components/ui/Card';
+import Button from '../components/ui/Button';
+import { ListGroup, ListRow } from '../components/ui/ListRow';
+import ProgressBar from '../components/ui/ProgressBar';
+import { ProgressRing } from '../components/ui/ProgressRing';
+import AnimatedNumber from '../components/ui/AnimatedNumber';
+import { Sheet } from '../components/ui/Sheet';
+import { ErrorInline, LoadError, NotFoundError } from '../components/ui/ErrorState';
+import { EmptyState } from '../components/ui/EmptyState';
+import { LeaderboardList, LeaderboardRow, LeaderboardSkeleton } from '../components/challenge-detail/Leaderboard';
+import { InviteSheet } from '../components/challenge-detail/InviteSheet';
+import { StickyFooter } from '../components/challenge-detail/StickyFooter';
+import { ChallengeDetailSkeleton } from '../components/challenge-detail/Skeletons';
+import {
+  apiErrorMessage,
+  challengeStatusMeta,
+  formatCalendarDay,
+  timeLeftLabel,
+  toNumber,
+  winConditionRule,
+} from '../components/challenge-detail/meta';
+import type { ChallengeDetail, Participant } from '../types';
 import { formatKES } from '../utils/currency';
+import { challengeDayProgress, formatSteps } from '../lib/format';
+import { usePollInterval } from '../hooks/useDataSaver';
 
-export default function ChallengeDetailScreen() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const user = useAuthStore((state) => state.user);
-  const { showToast } = useToast();
-  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [showCelebration, setShowCelebration] = useState(false);
+function localToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
-  const { data: challenge, isLoading } = useQuery<ChallengeDetail>({
-    queryKey: ['challenges', id],
-    queryFn: () => challengesService.getDetail(parseInt(id!)),
-    enabled: !!id,
-  });
-
-  const { data: leaderboard } = useQuery<Participant[]>({
-    queryKey: ['challenges', id, 'leaderboard'],
-    queryFn: () => challengesService.getLeaderboard(parseInt(id!)),
-    enabled: !!id,
-  });
-
-  const { data: stats } = useQuery({
-    queryKey: ['challenges', id, 'stats'],
-    queryFn: () => challengesService.getStats(parseInt(id!)),
-    enabled: !!id,
-  });
-
-  const rematchMutation = useMutation({
-    mutationFn: () => challengesService.rematch(parseInt(id!)),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['challenges'] });
-      showToast({ message: 'Rematch created!', type: 'success' });
-      navigate(`/challenges/${data.challenge.id}`);
-    },
-    onError: (error: any) => {
-      showToast({ message: error.response?.data?.error || 'Failed to create rematch', type: 'error' });
-    },
-  });
-
-  // Theme-based colors for universal challenge support
-  const THEME_COLORS = {
-    blue: { color: '#4F9CF9', bg: '#EFF6FF' },
-    green: { color: '#34D399', bg: '#ECFDF5' },
-    purple: { color: '#A78BFA', bg: '#F5F3FF' },
-    orange: { color: '#F59E0B', bg: '#FEF3C7' },
-    pink: { color: '#EC4899', bg: '#FCE7F3' },
-  };
-
-  const getThemeMeta = (challenge: Challenge) => {
-    const theme = challenge.theme || 'blue';
-    const themeColors = THEME_COLORS[theme];
-    const milestoneK = challenge.milestone / 1000;
-    const emoji = challenge.theme_emoji || '';
-    
-    return {
-      name: `${emoji} ${milestoneK}K`,
-      color: themeColors.color,
-      bg: themeColors.bg,
-    };
-  };
-
-  const copyInviteCode = () => {
-    if (challenge?.invite_code) {
-      navigator.clipboard.writeText(challenge.invite_code);
-      showToast({ message: 'Invite code copied!', type: 'success' });
-    }
-  };
-
-  // Generate QR code
-  useEffect(() => {
-    if (challenge?.invite_code && qrCanvasRef.current) {
-      QR.toCanvas(qrCanvasRef.current, challenge.invite_code, {
-        errorCorrectionLevel: 'H',
-        margin: 2,
-        width: 220,
-        color: {
-          dark: '#000000',
-          light: '#FFFFFF',
-        },
-      }).catch((error) => {
-        console.error('QR code generation error:', error);
-      });
-    }
-  }, [challenge?.invite_code]);
-
-  const downloadQRCode = () => {
-    if (qrCanvasRef.current) {
-      const link = document.createElement('a');
-      link.href = qrCanvasRef.current.toDataURL('image/png');
-      link.download = `challenge-${challenge?.invite_code}.png`;
-      link.click();
-      showToast({ message: 'QR code downloaded!', type: 'success' });
-    }
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-    });
-  };
-
-  const userParticipant =
-    challenge?.my_participation ||
-    leaderboard?.find((p: Participant) => p.user === user?.id);
-  const isQualified = (userParticipant?.steps || 0) >= (challenge?.milestone || 0);
-
-  const celebrationData = useMemo(() => {
-    if (!challenge || !userParticipant) return null;
-    return {
-      challengeName: challenge.name,
-      xpEarned: userParticipant.qualified ? 50 : 10,
-      prizeEarned: Number.parseFloat(userParticipant.payout || '0') || 0,
-      rank: (userParticipant.rank || 0) <= 1 ? 'Gold' : (userParticipant.rank || 0) <= 3 ? 'Silver' : 'Bronze',
-      rankEmoji: (userParticipant.rank || 0) <= 1 ? '' : (userParticipant.rank || 0) <= 3 ? '' : '',
-      position: userParticipant.rank || undefined,
-      totalParticipants: leaderboard?.length || challenge.current_participants || 0,
-      levelUp: false,
-      newLevel: undefined,
-    };
-  }, [challenge, leaderboard, userParticipant]);
-
-  useEffect(() => {
-    if (!challenge || !userParticipant || !id || !user?.id) return;
-
-    const isCompletedQualified = challenge.status === 'completed' && userParticipant.qualified;
-    if (!isCompletedQualified) return;
-
-    const storageKey = `celebration_shown_${user.id}_${id}`;
-    const hasShown = localStorage.getItem(storageKey) === 'true';
-    if (!hasShown) {
-      setShowCelebration(true);
-      localStorage.setItem(storageKey, 'true');
-    }
-  }, [challenge, id, user?.id, userParticipant]);
-
-  if (isLoading) {
-    return (
-      <div className="p-4 space-y-4 pb-nav">
-        <div className="skeleton h-12 rounded-2xl" />
-        <div className="skeleton h-32 rounded-3xl" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="skeleton h-24 rounded-3xl" />
-          <div className="skeleton h-24 rounded-3xl" />
-        </div>
-        <div className="skeleton h-64 rounded-3xl" />
-      </div>
-    );
-  }
-
-  if (!challenge) {
-    return (
-      <div className="p-6 text-center pt-20">
-        <div className="text-6xl mb-3 animate-float"></div>
-        <p className="text-text-muted text-lg mb-6">Challenge not found</p>
-        <button onClick={() => navigate(-1)} className="btn-primary px-6 py-3 rounded-2xl">
-          Go Back
-        </button>
-      </div>
-    );
-  }
-
-  const meta = getThemeMeta(challenge);
-
+function Metric({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: string; tone?: 'reward' }) {
   return (
-    <div className="screen-enter pb-nav bg-bg-page">
-      {/*  HEADER  */}
-      <div className="pt-safe px-4 pt-4 pb-4">
-        <button
-          onClick={() => navigate(-1)}
-          className="card px-4 py-2 rounded-2xl flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors mb-4 card-press"
-        >
-          <ChevronLeft size={18} strokeWidth={2.5} />
-          <span className="text-sm font-semibold">Back</span>
-        </button>
-
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex-1">
-            {/* Milestone badge */}
-            <div
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold mb-3"
-              style={{ 
-                background: meta.bg, 
-                color: meta.color
-              }}
-            >
-              {meta.name}
-            </div>
-            
-            <h1 className="text-[28px] font-black text-text-primary mb-2 leading-tight">
-              {challenge.theme_emoji ? `${challenge.theme_emoji} ` : ''}{challenge.name}
-            </h1>
-          </div>
-        </div>
-
-        {/* Status pill */}
-        <div className="flex items-center gap-2">
-          {challenge.status === 'active' && (
-            <span className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full font-bold" style={{
-              background: '#ECFDF5',
-              color: '#34D399'
-            }}>
-              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#34D399' }} />
-              Live
-            </span>
-          )}
-          {challenge.status === 'completed' && (
-            <span className="text-xs px-3 py-1.5 rounded-full font-bold" style={{
-              background: '#F5F3FF',
-              color: '#A78BFA'
-            }}>
-              Completed
-            </span>
-          )}
-          {challenge.status === 'pending' && (
-            <span className="text-xs px-3 py-1.5 rounded-full font-bold" style={{
-              background: '#FEF3C7',
-              color: '#F59E0B'
-            }}>
-              Pending
-            </span>
-          )}
-          
-          {/* Visibility indicator */}
-          {challenge.is_private ? (
-            <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-bold" style={{
-              background: '#FEE2E2',
-              color: '#991B1B'
-            }}>
-              <Lock size={12} />
-              Private
-            </span>
-          ) : (
-            <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-bold" style={{
-              background: '#DBEAFE',
-              color: '#1E40AF'
-            }}>
-              <Globe size={12} />
-              Public
-            </span>
-          )}
-        </div>
-
-        {challenge.is_private && challenge.win_condition && (
-          <div className="mt-3">
-            <span className="text-xs px-3 py-1.5 rounded-full font-bold" style={{
-              background: '#EFF6FF',
-              color: '#1E40AF'
-            }}>
-              {challenge.win_condition_display || challenge.win_condition}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/*  STATS BENTO GRID  */}
-      <div className="px-4 pb-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="card rounded-3xl p-4">
-            <div className="text-[10px] font-bold text-text-muted mb-1">PRIZE POOL</div>
-            <div className="text-2xl font-black font-mono text-text-primary">
-              {formatKES(stats?.total_pool || challenge.total_pool || '0.00')}
-            </div>
-          </div>
-          <div className="card rounded-3xl p-4">
-            <div className="text-[10px] font-bold text-text-muted mb-1">ENTRY FEE</div>
-            <div className="text-2xl font-black font-mono text-text-primary">
-              {formatKES(challenge.entry_fee)}
-            </div>
-          </div>
-          <div className="card rounded-3xl p-4">
-            <div className="text-[10px] font-bold text-text-muted mb-1">START DATE</div>
-            <div className="text-lg font-bold text-text-primary">
-              {formatDate(challenge.start_date)}
-            </div>
-          </div>
-          <div className="card rounded-3xl p-4">
-            <div className="text-[10px] font-bold text-text-muted mb-1">END DATE</div>
-            <div className="text-lg font-bold text-text-primary">
-              {formatDate(challenge.end_date)}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/*  YOUR PROGRESS CARD  */}
-      {userParticipant && (
-        <div className="px-4 pb-4">
-          <div className="card rounded-4xl p-5">
-            <h3 className="text-sm font-bold text-text-muted mb-4">YOUR PROGRESS</h3>
-            
-            <div className="flex items-end justify-between mb-4">
-              <div>
-                <div className="text-4xl font-black font-display text-text-primary mb-1">
-                  {(userParticipant.steps || 0).toLocaleString()}
-                </div>
-                <div className="text-sm text-text-secondary">
-                  / {challenge.milestone.toLocaleString()} steps
-                </div>
-              </div>
-              <span
-                className="text-xs px-3 py-1.5 rounded-xl font-bold"
-                style={{
-                  background: isQualified ? '#ECFDF5' : '#FEF3C7',
-                  color: isQualified ? '#34D399' : '#F59E0B'
-                }}
-              >
-                {isQualified ? ' QUALIFIED' : 'NOT QUALIFIED'}
-              </span>
-            </div>
-
-            {/* Progress bar */}
-            <div className="h-2 bg-gray-200 rounded-full overflow-hidden mb-4">
-              <div
-                className="h-full rounded-full transition-all duration-700"
-                style={{
-                  width: `${Math.min(
-                    100,
-                    ((userParticipant.steps || 0) / challenge.milestone) * 100
-                  )}%`,
-                  background: meta.color
-                }}
-              />
-            </div>
-
-            {isQualified && challenge.status === 'active' && (
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary">Estimated payout</span>
-                <span className="text-lg font-bold font-mono text-text-primary">
-                  {formatKES((userParticipant?.payout ? parseFloat(userParticipant.payout) : 0) || 0)}
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/*  LEADERBOARD  */}
-      <div className="px-4 pb-4">
-        <div className="card rounded-4xl p-5">
-          <h3 className="text-lg font-black text-text-primary mb-4 flex items-center gap-2">
-            <Trophy className="w-5 h-5 text-amber-500" />
-            Leaderboard
-          </h3>
-          
-          <div className="space-y-2">
-            {leaderboard && leaderboard.length > 0 ? (
-              leaderboard.map((participant: Participant, index: number) => {
-                const isCurrentUser = participant.user === user?.id;
-                const qualified = participant.steps >= challenge.milestone;
-
-                return (
-                  <div
-                    key={participant.user}
-                    className="bg-gray-50 rounded-2xl p-3 flex items-center gap-3 hover:bg-gray-100 transition-colors"
-                  >
-                    {/* Rank */}
-                    <div className="w-10 h-10 flex items-center justify-center flex-shrink-0">
-                      {index === 0 ? (
-                        <div className="text-2xl animate-float"></div>
-                      ) : index === 1 ? (
-                        <div className="text-2xl animate-float"></div>
-                      ) : index === 2 ? (
-                        <div className="text-2xl animate-float"></div>
-                      ) : (
-                        <span className="text-lg font-black text-text-muted">
-                          {index + 1}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Username & Steps */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-bold text-text-primary truncate">
-                          {participant.username}
-                        </p>
-                        {isCurrentUser && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{
-                            background: meta.bg,
-                            color: meta.color
-                          }}>
-                            YOU
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs font-mono text-text-secondary">
-                        {participant.steps.toLocaleString()} steps
-                      </p>
-                    </div>
-
-                    {/* Status & Payout */}
-                    <div className="text-right">
-                      {qualified ? (
-                        <>
-                          <span className="inline-block text-[10px] px-2 py-1 rounded-full font-bold mb-1" style={{
-                            background: '#ECFDF5',
-                            color: '#34D399'
-                          }}>
-                             QUAL
-                          </span>
-                          {participant.payout && (
-                            <div className="text-sm font-bold font-mono text-text-primary">
-                              {formatKES(parseFloat(participant.payout))}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-xs text-text-muted"></span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="text-center py-10">
-                <div className="text-5xl mb-3 animate-float"></div>
-                <p className="text-text-secondary text-sm">No participants yet</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/*  PARTICIPANT FEATURES  */}
-      {userParticipant && challenge.is_private && (
-        <>
-          {/* Social Badges */}
-          <div className="px-4 pb-4">
-            <ChallengeSocialBadges challengeId={challenge.id} />
-          </div>
-
-          {/* Group Chat */}
-          <div className="px-4 pb-4">
-            <GroupChat challengeId={challenge.id} />
-          </div>
-        </>
-      )}
-
-      {/*  INVITE CODE  */}
-      {challenge.invite_code && (
-        <div className="px-4 pb-4">
-          <div className="card rounded-4xl p-5">
-            <h3 className="text-sm font-bold text-text-muted mb-4">INVITE CODE</h3>
-            <div className="flex items-center gap-3 mb-6">
-              <div className="flex-1 bg-bg-input rounded-2xl p-4 text-center">
-                <div className="text-3xl font-black font-mono text-text-primary tracking-widest">
-                  {challenge.invite_code}
-                </div>
-              </div>
-              <button
-                onClick={copyInviteCode}
-                className="bg-white border-2 border-gray-300 hover:border-gray-400 px-4 py-4 rounded-2xl flex-shrink-0 transition-colors"
-              >
-                <Copy size={20} strokeWidth={2.5} className="text-text-primary" />
-              </button>
-            </div>
-            <p className="text-xs text-text-secondary text-center mb-6">
-              Share this code with friends to invite them
-            </p>
-
-            {/* QR Code Display */}
-            <div className="flex flex-col items-center gap-4 pt-6 border-t border-border">
-              <p className="text-xs font-bold text-text-muted">OR SCAN QR CODE</p>
-              <div className="bg-white p-3 rounded-2xl inline-block">
-                <canvas
-                  ref={qrCanvasRef}
-                  style={{ display: 'block', margin: '0 auto' }}
-                />
-              </div>
-              <button
-                onClick={downloadQRCode}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-tint-blue text-accent-blue font-semibold hover:opacity-80 transition-opacity"
-              >
-                <Download size={16} />
-                Download QR
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {challenge.status === 'completed' && userParticipant?.qualified && (
-        <div className="px-4 pb-4">
-          <button
-            onClick={() => setShowCelebration(true)}
-            className="w-full py-3 rounded-2xl font-bold text-white shadow-lg transition-all"
-            style={{ background: meta.color }}
-          >
-            View Celebration
-          </button>
-        </div>
-      )}
-
-      {challenge.status === 'completed' && challenge.is_private && (
-        <div className="px-4 pb-4">
-          <button
-            onClick={() => rematchMutation.mutate()}
-            disabled={rematchMutation.isPending}
-            className="w-full py-3 rounded-2xl font-bold disabled:opacity-50"
-            style={{ 
-              background: meta.bg,
-              color: meta.color
-            }}
-          >
-            {rematchMutation.isPending ? 'Creating rematch...' : ' Run This Challenge Again'}
-          </button>
-        </div>
-      )}
-
-      <CelebrationModal
-        isOpen={showCelebration}
-        onClose={() => setShowCelebration(false)}
-        data={celebrationData || undefined}
-      />
+    <div className="min-w-0 px-3 first:pl-0 last:pr-0">
+      <dt className="truncate text-caption text-text-muted">{label}</dt>
+      <dd className={`num mt-0.5 truncate text-headline ${tone === 'reward' ? 'text-reward-ink' : 'text-text-primary'}`}>{value}</dd>
+      {hint && <dd className="mt-0.5 truncate text-caption text-text-muted">{hint}</dd>}
     </div>
   );
 }
 
+function RuleItem({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children: ReactNode }) {
+  return (
+    <li className="flex gap-3 px-4 py-3.5">
+      <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-bg-input text-text-secondary" aria-hidden>
+        <Icon size={16} />
+      </span>
+      <div className="min-w-0">
+        <p className="text-callout font-semibold text-text-primary">{title}</p>
+        <p className="mt-0.5 text-callout text-text-secondary">{children}</p>
+      </div>
+    </li>
+  );
+}
 
+export default function ChallengeDetailScreen() {
+  const { id } = useParams<{ id: string }>();
+  const challengeId = Number(id);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
+  const { showToast } = useToast();
+
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [rematchOpen, setRematchOpen] = useState(false);
+
+  const {
+    data: challenge,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isRefetching,
+  } = useQuery<ChallengeDetail>({
+    queryKey: ['challenges', id],
+    queryFn: () => challengesService.getDetail(challengeId),
+    enabled: !!id,
+  });
+
+  const isActive = challenge?.status === 'active';
+
+  // Live challenges refresh quietly (paused while data saver is on).
+  const livePoll = usePollInterval(isActive ? 60_000 : false);
+
+  const leaderboardQuery = useQuery<Participant[]>({
+    queryKey: ['challenges', id, 'leaderboard'],
+    queryFn: () => challengesService.getLeaderboard(challengeId),
+    enabled: !!id,
+    // Live challenges refresh quietly so rank changes appear without a pull.
+    refetchInterval: livePoll,
+  });
+
+  const { data: stats } = useQuery({
+    queryKey: ['challenges', id, 'stats'],
+    queryFn: () => challengesService.getStats(challengeId),
+    enabled: !!id,
+  });
+
+  const leaderboard = leaderboardQuery.data ?? challenge?.participants ?? [];
+  const userParticipant = challenge?.my_participation || leaderboard.find((p) => p.user === user?.id);
+
+  // Estimated payouts are only published on the public live board.
+  const spectateQuery = useQuery({
+    queryKey: ['challenges', 'spectate', id],
+    queryFn: () => challengesService.getSpectatorLeaderboard(challengeId),
+    enabled: !!challenge && isActive && !challenge.is_private && !!userParticipant,
+    retry: false,
+    refetchInterval: livePoll,
+  });
+
+  const rematchMutation = useMutation({
+    mutationFn: () => challengesService.rematch(challengeId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['challenges'] });
+      queryClient.invalidateQueries({ queryKey: ['wallet'] });
+      setRematchOpen(false);
+      showToast({ message: 'Rematch started. Invite the group to join.', type: 'success' });
+      navigate(`/challenges/${data.challenge.id}`);
+    },
+    onError: (err: unknown) => {
+      showToast({ message: apiErrorMessage(err, 'Couldn’t start the rematch. Try again.'), type: 'error' });
+    },
+  });
+
+  const leaveMutation = useMutation({
+    mutationFn: () => challengesService.leave(challengeId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['challenges'] });
+      queryClient.invalidateQueries({ queryKey: ['wallet'] });
+      setLeaveOpen(false);
+      showToast({
+        message: `You left the challenge. ${formatKES(challenge?.entry_fee)} is back in your wallet.`,
+        type: 'success',
+      });
+      navigate('/challenges');
+    },
+    onError: (err: unknown) => {
+      showToast({ message: apiErrorMessage(err, 'Couldn’t leave the challenge. Try again.'), type: 'error' });
+    },
+  });
+
+  const celebrationData = useMemo<CelebrationData | null>(() => {
+    if (!challenge || !userParticipant) return null;
+    return {
+      challengeName: challenge.name,
+      payout: toNumber(userParticipant.payout),
+      position: userParticipant.rank,
+      totalParticipants: leaderboard.length || challenge.current_participants || undefined,
+      steps: userParticipant.steps,
+      milestone: challenge.milestone,
+    };
+  }, [challenge, leaderboard.length, userParticipant]);
+
+  useEffect(() => {
+    if (!challenge || !userParticipant || !id || !user?.id) return;
+    if (!(challenge.status === 'completed' && userParticipant.qualified)) return;
+    const storageKey = `celebration_shown_${user.id}_${id}`;
+    if (localStorage.getItem(storageKey) === 'true') return;
+    setShowCelebration(true);
+    localStorage.setItem(storageKey, 'true');
+  }, [challenge, id, user?.id, userParticipant]);
+
+  if (isLoading) {
+    return (
+      <div className="pb-nav">
+        <ScreenHeader title="Challenge" back="/challenges" />
+        <ChallengeDetailSkeleton />
+      </div>
+    );
+  }
+
+  if (isError || !challenge) {
+    const status = (error as { response?: { status?: number } } | null)?.response?.status;
+    return (
+      <div className="pb-nav">
+        <ScreenHeader title="Challenge" back="/challenges" />
+        {status === 404 || (!isError && !challenge) ? (
+          <NotFoundError message="This challenge doesn’t exist or is no longer available." onGoBack={() => navigate('/challenges')} className="pt-16" />
+        ) : (
+          <LoadError resource="this challenge" onRetry={() => refetch()} isRetrying={isRefetching} className="pt-16" />
+        )}
+      </div>
+    );
+  }
+
+  const status = challenge.status;
+  const statusMeta = challengeStatusMeta(status);
+  const isCompleted = status === 'completed';
+  const isOpen = status === 'active' || status === 'pending';
+  const milestone = challenge.milestone;
+  const day = challengeDayProgress(challenge.start_date, challenge.end_date);
+  const totalParticipants = leaderboard.length || challenge.current_participants;
+  const qualifiedCount = stats?.qualified_count ?? leaderboard.filter((p) => p.qualified || p.steps >= milestone).length;
+
+  const mySteps = userParticipant?.steps ?? 0;
+  const myQualified = userParticipant ? (isCompleted ? userParticipant.qualified : userParticipant.qualified || mySteps >= milestone) : false;
+  const myPct = milestone > 0 ? Math.min(100, Math.round((mySteps / milestone) * 100)) : 0;
+  const toGo = Math.max(0, milestone - mySteps);
+  const daysIncludingToday = Math.max(1, (challenge.days_remaining ?? 0) + 1);
+  const myPayout = toNumber(userParticipant?.payout);
+  const myIndex = userParticipant ? leaderboard.findIndex((p) => p.user === userParticipant.user) : -1;
+  const myRank = userParticipant?.rank ?? (!isCompleted && myIndex >= 0 ? myIndex + 1 : null);
+
+  const spectatorMe = spectateQuery.data?.leaderboard.find((p) => p.username === user?.username);
+  const estimatedPayout = userParticipant?.estimated_payout != null
+    ? toNumber(userParticipant.estimated_payout)
+    : spectatorMe?.estimated_payout ?? null;
+
+  const totalPool = toNumber(stats?.total_pool ?? challenge.total_pool);
+  const platformFee = toNumber(stats?.platform_fee ?? challenge.platform_fee);
+  const netPool = toNumber(stats?.net_pool ?? challenge.net_pool);
+  const feePct = totalPool > 0 ? Math.round((platformFee / totalPool) * 100) : null;
+  const rule = winConditionRule(challenge.win_condition, milestone);
+
+  const canLeave = !!userParticipant && (status === 'pending' || (status === 'active' && localToday() <= challenge.start_date));
+  const canInvite = !!challenge.invite_code && isOpen && !challenge.is_full;
+  const canRematch = isCompleted && challenge.is_private && !!userParticipant;
+  const showJoin = !userParticipant && isOpen && !challenge.is_full;
+
+  return (
+    <div className="pb-nav">
+      <ScreenHeader
+        title="Challenge"
+        back="/challenges"
+        actions={
+          canInvite ? (
+            <IconButton label="Invite friends" onClick={() => setInviteOpen(true)}>
+              <UserPlus size={20} aria-hidden />
+            </IconButton>
+          ) : undefined
+        }
+      />
+
+      <div className="space-y-8 px-5 pt-1">
+        {/* ── Overview ─────────────────────────────────────────── */}
+        <section aria-labelledby="challenge-title">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Pill tone={statusMeta.tone} dot={statusMeta.live ? 'live' : undefined} icon={statusMeta.icon}>
+              {statusMeta.label}
+            </Pill>
+            <Pill icon={challenge.is_private ? Lock : Globe}>{challenge.is_private ? 'Private' : 'Public'}</Pill>
+            <Pill icon={Target}>{formatSteps(milestone)} steps</Pill>
+          </div>
+          <h1 id="challenge-title" className="mt-3 text-title-lg text-text-primary [overflow-wrap:anywhere]">
+            {challenge.name}
+          </h1>
+          {challenge.description && <p className="mt-1.5 text-callout text-text-secondary">{challenge.description}</p>}
+
+          <div className="mt-5">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-callout font-semibold text-text-primary">
+                {status === 'active' ? (
+                  <span className="num">
+                    Day {day.currentDay} of {day.totalDays}
+                  </span>
+                ) : status === 'pending' ? (
+                  <span className="num">{day.totalDays}-day challenge</span>
+                ) : (
+                  <span className="num">Finished · {day.totalDays} days</span>
+                )}
+              </p>
+              <p className="text-callout text-text-secondary">
+                {timeLeftLabel(status, challenge.days_remaining, challenge.start_date, challenge.end_date)}
+              </p>
+            </div>
+            <ProgressBar
+              className="mt-2"
+              height="sm"
+              color="brand"
+              progress={status === 'pending' ? 0 : isCompleted ? 100 : day.fraction * 100}
+              label="Challenge timeline"
+            />
+            <div className="mt-1.5 flex justify-between text-caption text-text-muted">
+              <span>{formatCalendarDay(challenge.start_date)}</span>
+              <span>{formatCalendarDay(challenge.end_date)}</span>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Your performance ─────────────────────────────────── */}
+        {userParticipant && (
+          <section aria-labelledby="perf-title">
+            <h2 id="perf-title" className="mb-3 text-headline text-text-primary">
+              {isCompleted ? 'Your result' : 'Your performance'}
+            </h2>
+            <Card padding="lg">
+              <div className="flex items-center gap-5">
+                <ProgressRing
+                  value={mySteps}
+                  goal={milestone}
+                  size={112}
+                  strokeWidth={10}
+                  sweep={1}
+                  label={`${formatSteps(mySteps)} of ${formatSteps(milestone)} steps`}
+                >
+                  <span className="num text-title text-text-primary">{myPct}%</span>
+                  <span className="text-micro text-text-muted">of goal</span>
+                </ProgressRing>
+                <div className="min-w-0 flex-1">
+                  <AnimatedNumber value={mySteps} className="block text-title-lg text-text-primary" startFromValue />
+                  <p className="text-callout text-text-secondary">of {formatSteps(milestone)} steps</p>
+                  <div className="mt-3">
+                    {myQualified ? (
+                      <Pill tone="success" icon={CheckCircle2} size="md">
+                        Qualified
+                      </Pill>
+                    ) : isCompleted ? (
+                      <Pill tone="neutral" size="md">
+                        Not qualified
+                      </Pill>
+                    ) : (
+                      <Pill tone="neutral" size="md">
+                        <span className="num">{formatSteps(toGo)}</span> to qualify
+                      </Pill>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <dl className="mt-5 grid grid-cols-2 divide-x divide-border-light border-t border-border-light pt-4 min-[380px]:grid-cols-3">
+                <Metric
+                  label={isCompleted ? 'Final rank' : 'Rank'}
+                  value={
+                    myRank ? (
+                      <>
+                        {myRank}
+                        <span className="text-callout font-normal text-text-muted"> of {totalParticipants}</span>
+                      </>
+                    ) : (
+                      '–'
+                    )
+                  }
+                />
+                {isCompleted ? (
+                  <Metric label="Payout" value={myPayout > 0 ? formatKES(myPayout) : '–'} tone={myPayout > 0 ? 'reward' : undefined} />
+                ) : myQualified ? (
+                  <Metric label="Over goal" value={`+${formatSteps(mySteps - milestone)}`} />
+                ) : status === 'active' ? (
+                  <Metric
+                    label="Daily target"
+                    value={formatSteps(Math.ceil(toGo / daysIncludingToday))}
+                    hint={`for ${daysIncludingToday} ${daysIncludingToday === 1 ? 'day' : 'days'}`}
+                  />
+                ) : (
+                  <Metric label="To qualify" value={formatSteps(toGo)} />
+                )}
+                <div className="hidden min-[380px]:block">
+                  {estimatedPayout != null && !isCompleted ? (
+                    <Metric label="Est. payout" value={formatKES(estimatedPayout)} tone="reward" hint="if it ended now" />
+                  ) : (
+                    <Metric label="Qualified" value={`${qualifiedCount} of ${totalParticipants}`} />
+                  )}
+                </div>
+              </dl>
+              {estimatedPayout != null && !isCompleted && (
+                <p className="mt-3 text-caption text-text-muted min-[380px]:hidden">
+                  Estimated payout if it ended now: <span className="num font-semibold text-reward-ink">{formatKES(estimatedPayout)}</span>
+                </p>
+              )}
+            </Card>
+          </section>
+        )}
+
+        {/* ── Leaderboard ──────────────────────────────────────── */}
+        <section aria-labelledby="board-title">
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div className="min-w-0">
+              <h2 id="board-title" className="text-headline text-text-primary">
+                {isCompleted ? 'Final standings' : 'Leaderboard'}
+              </h2>
+              <p className="mt-0.5 text-caption text-text-muted">
+                <span className="num">
+                  {qualifiedCount} of {totalParticipants}
+                </span>{' '}
+                qualified{isActive ? ' · refreshes every minute' : ''}
+              </p>
+            </div>
+            {isActive && !challenge.is_private && (
+              <Button variant="ghost" size="sm" className="-mr-2 min-h-touch text-brand" leftIcon={<Radio size={16} aria-hidden />} onClick={() => navigate(`/challenges/${challenge.id}/spectate`)}>
+                Live view
+              </Button>
+            )}
+          </div>
+
+          {leaderboardQuery.isLoading && !challenge.participants?.length ? (
+            <LeaderboardSkeleton rows={Math.min(6, challenge.current_participants || 4)} />
+          ) : leaderboard.length === 0 ? (
+            <Card padding="none">
+              <EmptyState title="No participants yet" description="Invite friends — the leaderboard fills in as people join." />
+            </Card>
+          ) : (
+            <LeaderboardList label={`${challenge.name} leaderboard`}>
+              {leaderboard.map((p, index) => (
+                <LeaderboardRow
+                  key={p.user}
+                  id={p.user}
+                  rank={isCompleted ? p.rank : p.rank ?? index + 1}
+                  name={p.username}
+                  steps={p.steps}
+                  progress={milestone > 0 ? (p.steps / milestone) * 100 : 0}
+                  qualified={isCompleted ? p.qualified : p.qualified || p.steps >= milestone}
+                  isYou={p.user === user?.id}
+                  trailing={
+                    isCompleted && toNumber(p.payout) > 0 ? (
+                      <span className="num font-semibold text-reward-ink">{formatKES(p.payout)}</span>
+                    ) : undefined
+                  }
+                />
+              ))}
+            </LeaderboardList>
+          )}
+          {leaderboardQuery.isError && (
+            <ErrorInline className="mt-3" message="Couldn’t refresh the leaderboard." onRetry={() => leaderboardQuery.refetch()} />
+          )}
+        </section>
+
+        {/* ── Pool & rewards ───────────────────────────────────── */}
+        <ListGroup
+          title="Pool & rewards"
+          footer={
+            isCompleted
+              ? 'Payouts were credited to winners’ wallets when the challenge closed.'
+              : 'Payouts are credited to wallets automatically when the challenge closes.'
+          }
+        >
+          <ListRow title="Entry contribution" trailing={<span className="num text-callout font-semibold text-text-primary">{formatKES(challenge.entry_fee)}</span>} />
+          <ListRow
+            title="Total pool"
+            subtitle={`From ${totalParticipants} ${totalParticipants === 1 ? 'participant' : 'participants'}`}
+            trailing={<span className="num text-callout font-semibold text-text-primary">{formatKES(totalPool)}</span>}
+          />
+          <ListRow
+            title="Platform fee"
+            subtitle={feePct != null ? `${feePct}% of the pool` : undefined}
+            trailing={<span className="num text-callout text-text-secondary">− {formatKES(platformFee)}</span>}
+          />
+          <ListRow
+            title="Net pool"
+            subtitle="Shared by qualified finishers"
+            trailing={<span className="num text-headline text-reward-ink">{formatKES(netPool)}</span>}
+          />
+          {isCompleted && userParticipant && myPayout > 0 && (
+            <ListRow
+              title="Your payout"
+              trailing={<span className="num text-headline text-reward-ink">{formatKES(myPayout)}</span>}
+            />
+          )}
+          {!isCompleted && estimatedPayout != null && (
+            <ListRow
+              title="Your estimated payout"
+              subtitle="If the challenge ended now"
+              trailing={<span className="num text-headline text-reward-ink">{formatKES(estimatedPayout)}</span>}
+            />
+          )}
+        </ListGroup>
+
+        {/* ── How it works ─────────────────────────────────────── */}
+        <section aria-labelledby="rules-title">
+          <h2 id="rules-title" className="eyebrow mb-2 px-1">
+            How it works
+          </h2>
+          <ul className="divide-y divide-border-light overflow-hidden rounded-card border border-border-light bg-bg-card shadow-card">
+            <RuleItem icon={Target} title="Reach the goal">
+              Walk at least <span className="num font-semibold text-text-primary">{formatSteps(milestone)}</span> steps between{' '}
+              {formatCalendarDay(challenge.start_date)} and {formatCalendarDay(challenge.end_date)}.
+            </RuleItem>
+            <RuleItem icon={Scale} title={rule.title}>
+              {rule.body}
+            </RuleItem>
+            <RuleItem icon={RotateCcw} title="Nobody qualifies?">
+              Every entry contribution is refunded in full.
+            </RuleItem>
+            {isOpen && (
+              <RuleItem icon={CalendarRange} title="Changing your mind">
+                You can leave until the end of the first day and your entry contribution returns to your wallet.
+              </RuleItem>
+              )}
+          </ul>
+        </section>
+
+        {/* ── Private group features ───────────────────────────── */}
+        {userParticipant && challenge.is_private && (
+          <>
+            <ChallengeSocialBadges challengeId={challenge.id} />
+            <GroupChat challengeId={challenge.id} />
+          </>
+        )}
+
+        {/* ── Details ──────────────────────────────────────────── */}
+        <ListGroup title="Details">
+          <ListRow title="Created by" trailing={<span className="text-callout text-text-secondary">{challenge.creator_username}</span>} />
+          <ListRow
+            title="Participants"
+            trailing={
+              <span className="num text-callout text-text-secondary">
+                {challenge.current_participants} of {challenge.max_participants}
+              </span>
+            }
+          />
+          <ListRow
+            title="Visibility"
+            trailing={<span className="text-callout text-text-secondary">{challenge.is_private ? 'Private · invite only' : 'Public'}</span>}
+          />
+          {canInvite && (
+            <ListRow
+              title="Invite code"
+              onClick={() => setInviteOpen(true)}
+              trailing={<span className="num text-callout tracking-widest text-text-secondary">{challenge.invite_code}</span>}
+            />
+          )}
+        </ListGroup>
+
+        {canLeave && (
+          <div className="flex justify-center">
+            <Button variant="ghost" className="text-danger" leftIcon={<LogOut size={18} aria-hidden />} onClick={() => setLeaveOpen(true)}>
+              Leave challenge
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Sticky actions ─────────────────────────────────────── */}
+      {isCompleted && (
+        <StickyFooter>
+          <div className="flex gap-2">
+            {canRematch && (
+              <Button variant="secondary" size="lg" className="flex-1" leftIcon={<RefreshCw size={18} aria-hidden />} onClick={() => setRematchOpen(true)}>
+                Rematch
+              </Button>
+            )}
+            <Button size="lg" className="flex-1" onClick={() => navigate(`/challenges/${challenge.id}/results`)}>
+              View results
+            </Button>
+          </div>
+        </StickyFooter>
+      )}
+      {showJoin && (
+        <StickyFooter>
+          <Button fullWidth size="lg" onClick={() => navigate(`/challenges/lobby/${challenge.id}`)}>
+            Join for {formatKES(challenge.entry_fee)}
+          </Button>
+        </StickyFooter>
+      )}
+
+      {challenge.invite_code && (
+        <InviteSheet open={inviteOpen} onClose={() => setInviteOpen(false)} inviteCode={challenge.invite_code} challengeName={challenge.name} />
+      )}
+
+      <Sheet
+        open={leaveOpen}
+        onClose={() => setLeaveOpen(false)}
+        dismissible={!leaveMutation.isPending}
+        title="Leave this challenge?"
+        description={`Your ${formatKES(challenge.entry_fee)} entry contribution goes back to your wallet and you’ll be removed from the leaderboard.`}
+        size="sm"
+        footer={
+          <div className="flex flex-col gap-2">
+            <Button variant="danger" size="lg" fullWidth isLoading={leaveMutation.isPending} loadingText="Leaving…" onClick={() => leaveMutation.mutate()}>
+              Leave and refund {formatKES(challenge.entry_fee)}
+            </Button>
+            <Button variant="ghost" fullWidth disabled={leaveMutation.isPending} onClick={() => setLeaveOpen(false)}>
+              Stay in
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-callout text-text-secondary">You can rejoin later only if the challenge still has open spots and hasn’t started.</p>
+      </Sheet>
+
+      <Sheet
+        open={rematchOpen}
+        onClose={() => setRematchOpen(false)}
+        dismissible={!rematchMutation.isPending}
+        title="Start a rematch?"
+        description="A new private challenge starts today with the same goal, length and entry contribution."
+        size="sm"
+        footer={
+          <div className="flex flex-col gap-2">
+            <Button size="lg" fullWidth isLoading={rematchMutation.isPending} loadingText="Starting rematch…" onClick={() => rematchMutation.mutate()}>
+              Pay {formatKES(challenge.entry_fee)} and start
+            </Button>
+            <Button variant="ghost" fullWidth disabled={rematchMutation.isPending} onClick={() => setRematchOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        }
+      >
+        <dl className="divide-y divide-border-light rounded-card border border-border-light">
+          <div className="flex justify-between gap-3 px-4 py-3">
+            <dt className="text-callout text-text-secondary">Goal</dt>
+            <dd className="num text-callout font-semibold text-text-primary">{formatSteps(milestone)} steps</dd>
+          </div>
+          <div className="flex justify-between gap-3 px-4 py-3">
+            <dt className="text-callout text-text-secondary">Length</dt>
+            <dd className="num text-callout font-semibold text-text-primary">{day.totalDays} days</dd>
+          </div>
+          <div className="flex justify-between gap-3 px-4 py-3">
+            <dt className="text-callout text-text-secondary">Entry contribution</dt>
+            <dd className="num text-callout font-semibold text-text-primary">{formatKES(challenge.entry_fee)}</dd>
+          </div>
+        </dl>
+        <p className="mt-3 text-caption text-text-muted">Paid from your wallet balance. You’ll get an invite code to share with the group.</p>
+      </Sheet>
+
+      <CelebrationModal
+        isOpen={showCelebration}
+        onClose={() => setShowCelebration(false)}
+        data={celebrationData}
+        onPrimary={() => {
+          setShowCelebration(false);
+          navigate(`/challenges/${challenge.id}/results`);
+        }}
+      />
+    </div>
+  );
+}

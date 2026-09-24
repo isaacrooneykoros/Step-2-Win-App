@@ -1,226 +1,238 @@
-﻿import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Smartphone, Monitor, AlertTriangle } from 'lucide-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import api from '../services/api/client';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Globe, LogOut, Monitor, ShieldAlert, Smartphone, type LucideIcon } from 'lucide-react';
+import { authService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
+import { formatRelativeTime, formatShortDate } from '../lib/format';
+import { ScreenHeader } from '../components/ui/ScreenHeader';
+import { ListGroup } from '../components/ui/ListRow';
+import { IconTile, Pill } from '../components/ui/Pill';
+import Button from '../components/ui/Button';
+import { Sheet } from '../components/ui/Sheet';
+import { Skeleton } from '../components/ui/Skeleton';
+import { EmptyState } from '../components/ui/EmptyState';
+import { LoadError } from '../components/ui/ErrorState';
+import { useToast } from '../components/ui/Toast';
+import { apiErrorMessage } from '../components/settings/apiError';
 
 interface DeviceSession {
   id: string;
   device_name: string;
   device_type: 'android' | 'ios' | 'web' | 'unknown';
-  ip_address: string;
+  ip_address: string | null;
   last_active_at: string;
   created_at: string;
   is_current: boolean;
 }
 
+const deviceIcon: Record<string, LucideIcon> = {
+  android: Smartphone,
+  ios: Smartphone,
+  web: Monitor,
+  unknown: Globe,
+};
+
+function deviceLabel(session: DeviceSession) {
+  if (session.device_name && session.device_name !== 'Unknown') return session.device_name;
+  if (session.device_type === 'android') return 'Android phone';
+  if (session.device_type === 'ios') return 'iPhone';
+  if (session.device_type === 'web') return 'Web browser';
+  return 'Unknown device';
+}
+
+const PREVIEW_COUNT = 8;
+
+type Confirm = { kind: 'one'; session: DeviceSession } | { kind: 'all'; count: number } | null;
+
 export default function ActiveSessionsScreen() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const sessionId = useAuthStore((state) => state.sessionId);
   const getRefreshToken = useAuthStore((state) => state.getRefreshToken);
-  const [revoking, setRevoking] = useState<string | null>(null);
-  const [revokingAll, setRevokingAll] = useState(false);
+  const [confirm, setConfirmState] = useState<Confirm>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  // Keep the last target while the sheet animates out so its copy doesn't flicker.
+  const setConfirm = (next: Confirm) => {
+    if (next) setConfirmState(next);
+    setConfirmOpen(next !== null);
+  };
 
-  // Fetch active sessions
-  const { data: sessions, isLoading } = useQuery<DeviceSession[]>({
+  const sessionsQuery = useQuery<DeviceSession[]>({
     queryKey: ['sessions'],
-    queryFn: async () => {
-      const response = await api.get('/api/users/sessions/');
-      return response.data;
-    },
+    queryFn: authService.getActiveSessions,
   });
 
-  // Revoke single session mutation
   const revokeMutation = useMutation({
-    mutationFn: async (sessionIdToRevoke: string) => {
-      await api.post(`/api/users/sessions/${sessionIdToRevoke}/revoke/`);
-    },
-    onSuccess: () => {
+    mutationFn: (id: string) => authService.revokeSession(id),
+    onSuccess: (_data, id) => {
+      const session = sessionsQuery.data?.find((s) => s.id === id);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      setRevoking(null);
+      setConfirm(null);
+      showToast({ message: `${session ? deviceLabel(session) : 'Device'} has been signed out.`, type: 'success' });
     },
-    onError: (error: any) => {
-      alert(error.response?.data?.error || 'Failed to revoke session');
-      setRevoking(null);
+    onError: (error: unknown) => {
+      showToast({ message: apiErrorMessage(error, 'We couldn’t sign out that device. Please try again.'), type: 'error' });
     },
   });
 
-  // Revoke all sessions mutation
   const revokeAllMutation = useMutation({
-    mutationFn: async () => {
-      const refreshToken = await getRefreshToken();
-      await api.post('/api/users/sessions/revoke-all/', {
-        current_refresh: refreshToken,
-      });
-    },
+    mutationFn: async () => authService.revokeAllSessions((await getRefreshToken()) ?? undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      setRevokingAll(false);
+      setConfirm(null);
+      showToast({ message: 'All other devices have been signed out.', type: 'success' });
     },
-    onError: (error: any) => {
-      alert(error.response?.data?.error || 'Failed to revoke sessions');
-      setRevokingAll(false);
+    onError: (error: unknown) => {
+      showToast({ message: apiErrorMessage(error, 'We couldn’t sign out your other devices. Please try again.'), type: 'error' });
     },
   });
 
-  const handleRevoke = (sessionIdToRevoke: string, deviceName: string) => {
-    if (confirm(`Log out "${deviceName}"?`)) {
-      setRevoking(sessionIdToRevoke);
-      revokeMutation.mutate(sessionIdToRevoke);
-    }
-  };
-
-  const handleRevokeAll = () => {
-    const otherSessionsCount = sessions?.filter((s) => s.id !== sessionId).length || 0;
-    if (otherSessionsCount === 0) {
-      alert('No other devices to log out');
-      return;
-    }
-    if (
-      confirm(
-        `Log out all ${otherSessionsCount} other device${otherSessionsCount > 1 ? 's' : ''}? This cannot be undone.`
-      )
-    ) {
-      setRevokingAll(true);
-      revokeAllMutation.mutate();
-    }
-  };
-
-  const deviceIcons = {
-    android: <Smartphone size={20} className="text-gray-500" />,
-    ios: <Smartphone size={20} className="text-gray-500" />,
-    web: <Monitor size={20} className="text-gray-500" />,
-    unknown: <Smartphone size={20} className="text-gray-500" />,
-  };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins} min ago`;
-    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-    return date.toLocaleDateString();
-  };
+  const sessions = sessionsQuery.data ?? [];
+  const isCurrent = (s: DeviceSession) => s.is_current || (!!sessionId && s.id === sessionId);
+  const current = sessions.find(isCurrent);
+  const others = sessions.filter((s) => !isCurrent(s));
+  const visibleOthers = showAll ? others : others.slice(0, PREVIEW_COUNT);
+  const hiddenCount = others.length - visibleOthers.length;
+  const pending = revokeMutation.isPending || revokeAllMutation.isPending;
 
   return (
-    <div className="min-h-screen bg-bg-page">
-      {/* Header */}
-      <div className="bg-bg-elevated border-b border-border-default px-4 py-4 flex items-center gap-3 sticky top-0 z-10">
-        <button
-          onClick={() => navigate(-1)}
-          className="w-10 h-10 rounded-xl bg-bg-input flex items-center justify-center hover:opacity-90 transition-colors"
-        >
-          <ArrowLeft size={20} className="text-text-primary" />
-        </button>
-        <div>
-          <h1 className="text-text-primary text-lg font-bold">Active Devices</h1>
-          <p className="text-text-muted text-xs">Manage your logged-in devices</p>
-        </div>
-      </div>
+    <div className="pb-nav">
+      <ScreenHeader title="Active sessions" back />
 
-      {/* Content */}
-      <div className="p-4">
-        {/* Info banner */}
-        <div className="mb-4 p-4 rounded-xl bg-tint-blue border border-border flex gap-3">
-          <AlertTriangle size={20} className="text-blue-500 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-text-primary text-sm font-semibold mb-1">Security Tip</p>
-            <p className="text-text-secondary text-xs leading-relaxed">
-              If you see a device you don't recognize, log it out immediately and change your
-              password.
-            </p>
-          </div>
+      <div className="mx-auto w-full max-w-2xl space-y-6 px-5 pb-8 pt-2">
+        <div className="flex gap-3 rounded-card bg-bg-sunken p-4">
+          <IconTile icon={ShieldAlert} tone="info" size="sm" />
+          <p className="text-callout text-text-secondary">
+            These are the devices signed in to your account. If you don’t recognise one, sign it out and change your password.
+          </p>
         </div>
 
-        {/* Revoke all button */}
-        {sessions && sessions.length > 1 && (
-          <button
-            onClick={handleRevokeAll}
-            disabled={revokingAll}
-            className="mb-4 w-full py-3 rounded-xl text-error text-sm font-bold border border-error/30 bg-error/10 hover:bg-error/15 transition-colors disabled:opacity-50"
-          >
-            {revokingAll ? 'Logging out...' : 'Log Out All Other Devices'}
-          </button>
-        )}
-
-        {/* Loading state */}
-        {isLoading && (
-          <div className="text-center py-12">
-          <div className="inline-block w-8 h-8 border-4 border-border-default border-t-accent-blue rounded-full animate-spin"></div>
-          <p className="text-text-muted text-sm mt-3">Loading sessions...</p>
+        {sessionsQuery.isLoading ? (
+          <div className="overflow-hidden rounded-card border border-border-light bg-bg-card" aria-busy="true" aria-label="Loading sessions">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex items-center gap-3 border-b border-border-light px-4 py-4 last:border-b-0">
+                <Skeleton className="h-10 w-10 rounded-xl" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32 rounded" />
+                  <Skeleton className="h-3 w-44 rounded" />
+                </div>
+              </div>
+            ))}
           </div>
-        )}
-
-        {/* Sessions list */}
-        {!isLoading && sessions && (
-          <div className="rounded-2xl overflow-hidden bg-bg-card border border-border shadow-sm">
-            {sessions.map((session, i) => {
-              const isCurrent = session.id === sessionId;
-
-              return (
-                <div
-                  key={session.id}
-                  className={`flex items-center gap-3 px-4 py-4 ${
-                    i > 0 ? 'border-t border-border-light' : ''
-                  }`}
-                >
-                  {/* Icon */}
-                  <div className="w-10 h-10 rounded-xl bg-bg-input flex items-center justify-center flex-shrink-0">
-                    {deviceIcons[session.device_type]}
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
+        ) : sessionsQuery.isError ? (
+          <LoadError resource="your sessions" onRetry={() => sessionsQuery.refetch()} isRetrying={sessionsQuery.isFetching} />
+        ) : sessions.length === 0 ? (
+          <EmptyState icon={Smartphone} title="No active sessions" description="Devices you sign in on will appear here." />
+        ) : (
+          <>
+            {current && (
+              <section aria-labelledby="this-device" className="rounded-card border border-border-light bg-bg-card p-4 shadow-card">
+                <div className="flex items-center gap-3">
+                  <IconTile icon={deviceIcon[current.device_type] ?? Globe} tone="brand" size="lg" />
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <p className="text-text-primary text-sm font-bold truncate">
-                        {session.device_name}
-                      </p>
-                      {isCurrent && (
-                        <span
-                          className="text-xs px-2 py-0.5 rounded-full font-bold bg-tint-blue text-accent-blue"
-                        >
-                          This device
-                        </span>
-                      )}
+                      <h2 id="this-device" className="truncate text-headline text-text-primary">
+                        {deviceLabel(current)}
+                      </h2>
+                      <Pill tone="brand" dot="live">
+                        This device
+                      </Pill>
                     </div>
-                    <p className="text-text-muted text-xs mt-0.5">
-                      {session.ip_address}  {formatDate(session.last_active_at)}
+                    <p className="mt-0.5 text-caption text-text-muted">
+                      Active now{current.ip_address ? ` · ${current.ip_address}` : ''} · signed in {formatShortDate(current.created_at)}
                     </p>
                   </div>
-
-                  {/* Revoke button - not shown for current device */}
-                  {!isCurrent && (
-                    <button
-                      onClick={() => handleRevoke(session.id, session.device_name)}
-                      disabled={revoking === session.id}
-                      className="text-red-400 text-xs font-bold flex-shrink-0 hover:text-red-600 transition-colors disabled:opacity-50"
-                    >
-                      {revoking === session.id ? 'Logging out...' : 'Log out'}
-                    </button>
-                  )}
                 </div>
-              );
-            })}
-          </div>
-        )}
+              </section>
+            )}
 
-        {/* Empty state */}
-        {!isLoading && sessions && sessions.length === 0 && (
-          <div className="text-center py-12">
-            <Smartphone size={48} className="text-text-muted mx-auto mb-3" />
-            <p className="text-text-muted text-sm">No active sessions</p>
-          </div>
+            {others.length > 0 ? (
+              <ListGroup
+                title={`Other devices · ${others.length}`}
+                footer={
+                  hiddenCount > 0 ? (
+                    <button type="button" onClick={() => setShowAll(true)} className="inline-flex min-h-[44px] items-center font-semibold text-brand">
+                      Show {hiddenCount} more
+                    </button>
+                  ) : (
+                    'Last active is when each device last reached Step2Win.'
+                  )
+                }
+              >
+                {visibleOthers.map((session) => (
+                  <div key={session.id} className="flex min-h-[64px] items-center gap-3 px-4 py-3">
+                    <IconTile icon={deviceIcon[session.device_type] ?? Globe} tone="neutral" size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-body font-medium text-text-primary">{deviceLabel(session)}</p>
+                      <p className="mt-0.5 truncate text-caption text-text-muted">
+                        Active {formatRelativeTime(session.last_active_at)}
+                        {session.ip_address ? ` · ${session.ip_address}` : ''}
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="!h-11 shrink-0 !text-danger"
+                      onClick={() => setConfirm({ kind: 'one', session })}
+                      aria-label={`Sign out ${deviceLabel(session)}, active ${formatRelativeTime(session.last_active_at)}`}
+                    >
+                      Sign out
+                    </Button>
+                  </div>
+                ))}
+              </ListGroup>
+            ) : (
+              <p className="px-1 text-callout text-text-secondary">You’re not signed in anywhere else.</p>
+            )}
+
+            {others.length > 0 && (
+              <Button variant="danger-soft" size="lg" fullWidth leftIcon={<LogOut size={18} aria-hidden />} onClick={() => setConfirm({ kind: 'all', count: others.length })}>
+                Sign out all other devices
+              </Button>
+            )}
+          </>
         )}
       </div>
+
+      <Sheet
+        open={confirmOpen}
+        onClose={() => setConfirm(null)}
+        dismissible={!pending}
+        size="sm"
+        title={confirm?.kind === 'all' ? `Sign out ${confirm.count} other ${confirm.count === 1 ? 'device' : 'devices'}?` : 'Sign out this device?'}
+        description={
+          confirm?.kind === 'one'
+            ? `${deviceLabel(confirm.session)} will need to sign in again to use your account.`
+            : 'Every device except this one will need to sign in again. This can’t be undone.'
+        }
+        footer={
+          <div className="flex gap-3 pb-3">
+            <Button variant="secondary" fullWidth onClick={() => setConfirm(null)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              fullWidth
+              isLoading={pending}
+              loadingText="Signing out"
+              onClick={() => {
+                if (confirm?.kind === 'one') revokeMutation.mutate(confirm.session.id);
+                else if (confirm?.kind === 'all') revokeAllMutation.mutate();
+              }}
+            >
+              Sign out
+            </Button>
+          </div>
+        }
+      >
+        {confirm?.kind === 'one' ? (
+          <p className="text-caption text-text-muted">
+            Last active {formatRelativeTime(confirm.session.last_active_at)}
+            {confirm.session.ip_address ? ` from ${confirm.session.ip_address}` : ''}.
+          </p>
+        ) : null}
+      </Sheet>
     </div>
   );
 }
-

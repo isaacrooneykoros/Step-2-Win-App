@@ -1,103 +1,253 @@
 @import 'tailwindcss';
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @config '../tailwind.config.js';
 
-*, *::before, *::after { box-sizing: border-box; }
+/* ───────────────────────────────────────────────────────────────────────────
+   Tokens. Light is the default; dark applies with data-theme="dark", or with
+   data-theme="system" when the OS prefers dark. Contrast figures (WCAG) are
+   documented in DESIGN_SYSTEM.md — every text token is >= 4.5:1 on every
+   surface token of its theme.
+   ─────────────────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
 
-body {
-  font-family: 'DM Sans', -apple-system, sans-serif;
-  background-color: #0E1016;
-  color: #F0F2F8;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  margin: 0;
-  min-width: 320px;
+  /* Surfaces */
+  --surface-base:     #F6F7F9;
+  --surface-card:     #FFFFFF;
+  --surface-elevated: #EFF1F4;
+  --surface-sunken:   #EEF0F3;
+  --surface-input:    #FFFFFF;
+  --surface-overlay:  #FFFFFF;
+  --border:           #E3E6EA;
+  --border-strong:    #CDD2D9;
+  --scrim:            rgba(16, 19, 24, 0.44);
+
+  /* Sidebar */
+  --sidebar-bg:     #FAFBFC;
+  --sidebar-hover:  #EFF1F4;
+  --sidebar-active: #E6F3EE;
+  --sidebar-border: #E3E6EA;
+  --sidebar-text:   #434B57;
+
+  /* Ink */
+  --ink-1:        #101318;  /* 18.6:1 on card */
+  --ink-2:        #434B57;  /*  8.8:1 on card, 7.8:1 on elevated */
+  --ink-3:        #5B6472;  /*  6.0:1 on card, 5.3:1 on elevated */
+  --ink-disabled: #8A93A0;  /* non-text / disabled only */
+  --ink-inverse:  #FFFFFF;
+
+  /* Brand — Step2Win pine green, hsl(158 74% 29%) */
+  --brand:       #138159;
+  --brand-hover: #10704D;
+  --brand-soft:  #E6F3EE;
+  --brand-text:  #0E6E4C;   /* 6.3:1 on card — links, active nav */
+  --on-brand:    #FFFFFF;   /* 4.9:1 on --brand */
+
+  /* Status (text-safe on card, elevated and their own -soft) */
+  --success:      #137A4C;
+  --success-soft: #E7F4EC;
+  --success-line: #A9D8BD;
+  --danger:       #BF2F2A;
+  --danger-soft:  #FBEAE9;
+  --danger-line:  #F0B9B6;
+  --danger-fill:  #B42D28;  /* destructive button background, white text 6.3:1 */
+  --warning:      #955800;
+  --warning-soft: #FBF1DF;
+  --warning-line: #EBCB94;
+  --info:         #1D62C4;
+  --info-soft:    #E8F0FC;
+  --info-line:    #B3CBF1;
+  --violet:       #6B4FBB;
+  --violet-soft:  #F0ECFA;
+  --neutral-soft: #EEF0F3;
+
+  /* Charts — categorical order is fixed (validated: CVD adjacent dE >= 12) */
+  --chart-1: #1A8A61; /* brand green */
+  --chart-2: #2A78D6; /* blue */
+  --chart-3: #E0692F; /* orange */
+  --chart-4: #7B5CD6; /* violet */
+  --chart-5: #D4508A; /* magenta */
+  --chart-6: #A87C00; /* ochre */
+  --chart-grid: #E9EBEF;
+  --chart-axis: #CDD2D9;
+  --chart-cursor: rgba(16, 19, 24, 0.05);
+
+  /* Elevation */
+  --shadow-card:  0 1px 2px rgba(16, 19, 24, 0.04);
+  --shadow-float: 0 4px 16px rgba(16, 19, 24, 0.08), 0 1px 3px rgba(16, 19, 24, 0.06);
+  --shadow-pop:   0 12px 32px rgba(16, 19, 24, 0.14), 0 2px 6px rgba(16, 19, 24, 0.06);
+
+  --focus-ring: #138159;
 }
 
-.font-syne { font-family: 'Syne', sans-serif; }
-.font-dm { font-family: 'DM Sans', sans-serif; }
+/* Dark tokens — shared by the explicit and the system-driven scope. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --surface-base:     #0F1114;
+  --surface-card:     #16191D;
+  --surface-elevated: #1D2126;
+  --surface-sunken:   #0C0E11;
+  --surface-input:    #121519;
+  --surface-overlay:  #1A1D22;
+  --border:           #2A2F36;
+  --border-strong:    #3A4048;
+  --scrim:            rgba(0, 0, 0, 0.6);
 
-#root {
-  min-height: 100vh;
+  --sidebar-bg:     #0C0E11;
+  --sidebar-hover:  #171A1E;
+  --sidebar-active: #13261F;
+  --sidebar-border: #22262C;
+  --sidebar-text:   #B4BBC5;
+
+  --ink-1:        #ECEEF1;  /* 15.2:1 on card */
+  --ink-2:        #B4BBC5;  /*  9.1:1 on card */
+  --ink-3:        #949DA9;  /*  6.4:1 on card, 5.9:1 on elevated */
+  --ink-disabled: #626B77;
+  --ink-inverse:  #101318;
+
+  /* Brand — hsl(156 56% 47%) */
+  --brand:       #35BB85;
+  --brand-hover: #43C791;
+  --brand-soft:  #13261F;
+  --brand-text:  #43C38B;
+  --on-brand:    #06140E;   /* dark text on the bright brand fill, 7.7:1 */
+
+  --success:      #43C38B;
+  --success-soft: #15291F;
+  --success-line: #245A40;
+  --danger:       #F2736E;
+  --danger-soft:  #2E1A1A;
+  --danger-line:  #6B2E2B;
+  --danger-fill:  #B42D28;
+  --warning:      #E3A53C;
+  --warning-soft: #2D2415;
+  --warning-line: #634A1E;
+  --info:         #6EA8F5;
+  --info-soft:    #172336;
+  --info-line:    #284A78;
+  --violet:       #A695F0;
+  --violet-soft:  #221D35;
+  --neutral-soft: #23282E;
+
+  --chart-1: #2A9F70;
+  --chart-2: #3F86E0;
+  --chart-3: #D0692F;
+  --chart-4: #8A74E6;
+  --chart-5: #CF5589;
+  --chart-6: #B8871A;
+  --chart-grid: #252A30;
+  --chart-axis: #3A4048;
+  --chart-cursor: rgba(255, 255, 255, 0.05);
+
+  --shadow-card:  0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-float: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-pop:   0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+
+  --focus-ring: #43C38B;
 }
 
-/* Monospace financial numbers */
-.mono { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
-
-/* Scrollbar */
-::-webkit-scrollbar        { width: 6px; height: 6px; }
-::-webkit-scrollbar-track  { background: transparent; }
-::-webkit-scrollbar-thumb  { background: #21263A; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #2E3450; }
-
-/* Transitions */
-.sidebar-transition { transition: width 280ms cubic-bezier(0.4,0,0.2,1); }
-.fade-in { animation: fadeIn 200ms ease; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
-
-/* Legacy classes for backward compatibility */
-.error {
-  color: #ff7b8b;
-}
-
-.auth-shell {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-
-.auth-card {
-  width: 100%;
-  max-width: 420px;
-  background: #0d1929;
-  border: 1px solid rgba(59, 139, 255, 0.18);
-  border-radius: 14px;
-  padding: 20px;
-  display: grid;
-  gap: 10px;
-}
-
-.auth-card h1 {
-  margin: 0;
-}
-
-.auth-card > p {
-  margin: 0 0 6px;
-  color: #8ba3c7;
-  font-size: 0.92rem;
-}
-
-.auth-card label {
-  font-size: 0.85rem;
-  color: #8ba3c7;
-}
-
-.auth-card input {
-  width: 100%;
-  border-radius: 8px;
-  border: 1px solid rgba(59, 139, 255, 0.2);
-  background: #111f35;
-  color: #f0f6ff;
-  padding: 10px 12px;
-}
-
-.auth-switch {
-  margin-top: 4px;
-  font-size: 0.9rem;
-  color: #8ba3c7;
-}
-
-.auth-switch a {
-  color: #00f5e9;
-  text-decoration: none;
-}
-
-@media (max-width: 980px) {
-  .app-shell {
-    grid-template-columns: 1fr;
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='system'] {
+    color-scheme: dark;
+    --surface-base: #0F1114; --surface-card: #16191D; --surface-elevated: #1D2126;
+    --surface-sunken: #0C0E11; --surface-input: #121519; --surface-overlay: #1A1D22;
+    --border: #2A2F36; --border-strong: #3A4048; --scrim: rgba(0, 0, 0, 0.6);
+    --sidebar-bg: #0C0E11; --sidebar-hover: #171A1E; --sidebar-active: #13261F;
+    --sidebar-border: #22262C; --sidebar-text: #B4BBC5;
+    --ink-1: #ECEEF1; --ink-2: #B4BBC5; --ink-3: #949DA9; --ink-disabled: #626B77; --ink-inverse: #101318;
+    --brand: #35BB85; --brand-hover: #43C791; --brand-soft: #13261F; --brand-text: #43C38B; --on-brand: #06140E;
+    --success: #43C38B; --success-soft: #15291F; --success-line: #245A40;
+    --danger: #F2736E; --danger-soft: #2E1A1A; --danger-line: #6B2E2B; --danger-fill: #B42D28;
+    --warning: #E3A53C; --warning-soft: #2D2415; --warning-line: #634A1E;
+    --info: #6EA8F5; --info-soft: #172336; --info-line: #284A78;
+    --violet: #A695F0; --violet-soft: #221D35; --neutral-soft: #23282E;
+    --chart-1: #2A9F70; --chart-2: #3F86E0; --chart-3: #D0692F;
+    --chart-4: #8A74E6; --chart-5: #CF5589; --chart-6: #B8871A;
+    --chart-grid: #252A30; --chart-axis: #3A4048; --chart-cursor: rgba(255, 255, 255, 0.05);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-float: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+    --focus-ring: #43C38B;
   }
 }
+
+@layer base {
+  /* ── Base ───────────────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; }
+  
+  html { -webkit-text-size-adjust: 100%; }
+  
+  body {
+    font-family: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    font-feature-settings: 'cv11', 'ss01';
+    background-color: var(--surface-base);
+    color: var(--ink-1);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    min-width: 320px;
+  }
+  
+  #root { min-height: 100vh; }
+  
+  ::selection { background: var(--brand-soft); color: var(--ink-1); }
+  
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 0; }
+  
+  }
+
+@layer components {
+/* Compat: Syne and DM Sans are no longer loaded. Old class names keep their
+   intent (display headings / body) using Inter. */
+.font-syne { font-family: 'Inter Variable', Inter, system-ui, sans-serif; font-weight: 600; letter-spacing: -0.01em; }
+.font-dm   { font-family: 'Inter Variable', Inter, system-ui, sans-serif; }
+
+/* Numbers. `.mono` = IDs, references, amounts in tables. `.num` = aligned
+   proportional-font figures (tabular) for columns and counters. */
+.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; font-feature-settings: normal; }
+.num  { font-variant-numeric: tabular-nums lining-nums; }
+}
+
+@layer base {
+/* Scrollbar */
+* { scrollbar-color: var(--border-strong) transparent; scrollbar-width: thin; }
+::-webkit-scrollbar        { width: 8px; height: 8px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--border-strong); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-disabled); background-clip: padding-box; }
+}
+
+/* Motion — short, functional, and off for reduced-motion users */
+.sidebar-transition { transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1), margin-left 200ms cubic-bezier(0.4, 0, 0.2, 1); }
+.fade-in { animation: fadeIn 160ms ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+@layer components {
+.skeleton {
+  background: var(--surface-elevated);
+  border-radius: 4px;
+  animation: skeletonPulse 1.4s ease-in-out infinite;
+}
+}
+@keyframes skeletonPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Recharts: keep focus outlines off the SVG surface (keyboard focus is shown
+   via the tooltip) and make text inherit the UI font. */
+.recharts-wrapper, .recharts-surface { outline: none; }
+.recharts-text { font-family: inherit; }
+
+/* Legacy class used by a few pages for error copy */
+.error { color: var(--danger); }

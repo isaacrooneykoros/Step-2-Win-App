@@ -25,6 +25,9 @@ from django.contrib.auth import get_user_model
 from drf_spectacular.utils import (OpenApiTypes, extend_schema,
                                    inline_serializer)
 
+from apps.admin_api.console import (AdminPageNumberPagination, filter_users,
+                                    step_daily_totals, step_distribution,
+                                    step_flag_reasons, user_overview)
 from apps.admin_api.serializers import (AdminBadgeSerializer,
                                         AdminChallengeSerializer,
                                         AdminNotificationSerializer,
@@ -173,7 +176,7 @@ def admin_notifications(request):
             {
                 "type": "withdrawal",
                 "title": f"Withdrawal #{withdrawal.id} needs review",
-                "message": f"KES {withdrawal.amount} pending {withdrawal.method} approval",
+                "message": f"KES {withdrawal.amount_kes} pending {withdrawal.method} approval",
                 "created_at": withdrawal.created_at,
                 "action_url": "/withdrawals",
                 "severity": "high",
@@ -423,13 +426,60 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
     search_fields = ["username", "email"]
     filterset_fields = ["is_active", "is_staff"]
+    pagination_class = AdminPageNumberPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.action == "list":
+            return filter_users(qs, self.request.query_params)
+        return qs
+
+    def _audit(self, request, user, action_name, description, changes=None):
+        from apps.admin_api.models import AuditLog
+
+        reason = str(request.data.get("reason") or "").strip()[:500]
+        payload = dict(changes or {})
+        if reason:
+            payload["reason"] = reason
+        AuditLog.log_action(
+            admin=request.user,
+            action=action_name,
+            resource_type="user",
+            resource_id=user.id,
+            resource_name=user.username,
+            description=description,
+            changes=payload or None,
+            request=request,
+        )
+
+    def _superuser_only(self, request):
+        if not request.user.is_superuser:
+            return Response(
+                {"error": "Only superusers can change staff access or delete accounts"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    @action(detail=True, methods=["get"])
+    def overview(self, request, pk=None):
+        """Account, activity, money, trust, support and audit data for one user."""
+        user = self.get_object()
+        data = user_overview(user)
+        data["user"] = AdminUserSerializer(user).data
+        return Response(data)
 
     @action(detail=True, methods=["post"])
     def ban_user(self, request, pk=None):
         """Ban a specific user"""
         user = self.get_object()
+        if user.id == request.user.id:
+            return Response(
+                {"error": "You cannot ban your own account"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         user.is_active = False
         user.save()
+        self._audit(request, user, "ban", f"Banned {user.username}", {"is_active": {"old": True, "new": False}})
         return Response({"status": f"User {user.username} has been banned"})
 
     @action(detail=True, methods=["post"])
@@ -438,22 +488,36 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         user = self.get_object()
         user.is_active = True
         user.save()
+        self._audit(request, user, "unban", f"Unbanned {user.username}", {"is_active": {"old": False, "new": True}})
         return Response({"status": f"User {user.username} has been unbanned"})
 
     @action(detail=True, methods=["post"])
     def make_staff(self, request, pk=None):
         """Promote user to staff"""
+        denied = self._superuser_only(request)
+        if denied:
+            return denied
         user = self.get_object()
         user.is_staff = True
         user.save()
+        self._audit(request, user, "promote", f"Granted staff access to {user.username}", {"is_staff": {"old": False, "new": True}})
         return Response({"status": f"User {user.username} is now staff"})
 
     @action(detail=True, methods=["post"])
     def remove_staff(self, request, pk=None):
         """Remove staff status from a user"""
+        denied = self._superuser_only(request)
+        if denied:
+            return denied
         user = self.get_object()
+        if user.id == request.user.id:
+            return Response(
+                {"error": "You cannot remove your own staff access"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         user.is_staff = False
         user.save()
+        self._audit(request, user, "demote", f"Removed staff access from {user.username}", {"is_staff": {"old": True, "new": False}})
         return Response({"status": f"User {user.username} is no longer staff"})
 
     @action(detail=True, methods=["post"])
@@ -472,6 +536,7 @@ class AdminUserViewSet(viewsets.ModelViewSet):
             validate_password(new_password, user)
             user.set_password(new_password)
             user.save()
+            self._audit(request, user, "reset_password", f"Reset password for {user.username}")
             return Response(
                 {"status": f"Password reset successful for {user.username}"}
             )
@@ -482,6 +547,11 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     def update_user(self, request, pk=None):
         """Update user details - phone_number, email, and username are required fields"""
         user = self.get_object()
+        before = {
+            "username": user.username,
+            "email": user.email,
+            "phone_number": user.phone_number,
+        }
 
         # Update allowed fields
         username = request.data.get("username")
@@ -528,6 +598,13 @@ class AdminUserViewSet(viewsets.ModelViewSet):
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
         user.save()
+        changed = {
+            key: {"old": old, "new": getattr(user, key)}
+            for key, old in before.items()
+            if getattr(user, key) != old
+        }
+        if changed:
+            self._audit(request, user, "update", f"Updated contact details for {user.username}", changed)
         serializer = AdminUserSerializer(user)
         return Response(serializer.data)
 
@@ -599,7 +676,19 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["delete"])
     def delete_user(self, request, pk=None):
         """Delete user (hard delete)"""
+        denied = self._superuser_only(request)
+        if denied:
+            return denied
         user = self.get_object()
+
+        # Never destroy an account that still holds or has committed money.
+        if (user.wallet_balance or 0) != 0 or (user.locked_balance or 0) != 0:
+            return Response(
+                {
+                    "error": "Cannot delete an account with a wallet or locked balance. Ban it instead."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Prevent deleting self
         if user.id == request.user.id:
@@ -616,7 +705,30 @@ class AdminUserViewSet(viewsets.ModelViewSet):
             )
 
         username = user.username
-        user.delete()
+        user_id = user.id
+        from django.db.models import ProtectedError
+
+        try:
+            user.delete()
+        except ProtectedError:
+            return Response(
+                {
+                    "error": "This account has withdrawal records that must be kept. Ban it instead."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=request.user,
+            action="delete",
+            resource_type="user",
+            resource_id=user_id,
+            resource_name=username,
+            description=f"Permanently deleted {username}",
+            changes={"reason": str(request.data.get("reason") or "").strip()[:500]} if request.data.get("reason") else None,
+            request=request,
+        )
         return Response({"status": f"User {username} has been permanently deleted"})
 
     @action(detail=False, methods=["get"])
@@ -630,6 +742,13 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         new_users_24h = User.objects.filter(
             created_at__gte=timezone.now() - timedelta(hours=24)
         ).count()
+        new_users_7d = User.objects.filter(
+            created_at__gte=timezone.now() - timedelta(days=7)
+        ).count()
+        flagged_users = (
+            User.objects.filter(fraud_flags__reviewed=False).distinct().count()
+        )
+        low_trust_users = User.objects.filter(trust_score__score__lte=40).count()
 
         return Response(
             {
@@ -638,6 +757,9 @@ class AdminUserViewSet(viewsets.ModelViewSet):
                 "banned_users": banned_users,
                 "staff_users": staff_users,
                 "new_users_24h": new_users_24h,
+                "new_users_7d": new_users_7d,
+                "flagged_users": flagged_users,
+                "low_trust_users": low_trust_users,
             }
         )
 
@@ -668,6 +790,51 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
     serializer_class = AdminChallengeSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
     filterset_fields = ["status", "creator"]
+    pagination_class = AdminPageNumberPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related("creator")
+        if self.action != "list":
+            return qs
+        params = self.request.query_params
+        status_param = params.get("status")
+        if status_param in {"pending", "active", "completed", "cancelled"}:
+            qs = qs.filter(status=status_param)
+        search = (params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(name__icontains=search)
+                | Q(creator__username__icontains=search)
+                | Q(invite_code__iexact=search)
+            )
+        if params.get("featured") == "true":
+            qs = qs.filter(is_featured=True)
+        ordering = params.get("ordering") or "-created_at"
+        if ordering.lstrip("-") not in {
+            "created_at",
+            "start_date",
+            "end_date",
+            "total_pool",
+            "entry_fee",
+            "name",
+            "milestone",
+        }:
+            ordering = "-created_at"
+        return qs.order_by(ordering, "-id")
+
+    def _audit(self, request, challenge, action_name, description, changes=None):
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=request.user,
+            action=action_name,
+            resource_type="challenge",
+            resource_id=challenge.id,
+            resource_name=challenge.name,
+            description=description,
+            changes=changes,
+            request=request,
+        )
 
     @action(detail=True, methods=["post"])
     def approve_challenge(self, request, pk=None):
@@ -680,15 +847,22 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
             )
         challenge.status = "active"
         challenge.save()
+        self._audit(request, challenge, "approve", f"Approved challenge {challenge.name}", {"status": {"old": "pending", "new": "active"}})
         return Response({"status": "Challenge approved"})
 
     @action(detail=True, methods=["post"])
     def reject_challenge(self, request, pk=None):
         """Reject a pending challenge"""
         challenge = self.get_object()
-        reason = request.data.get("reason", "No reason provided")
+        if challenge.status != "pending":
+            return Response(
+                {"error": "Only pending challenges can be rejected"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        reason = str(request.data.get("reason") or "").strip()[:500] or "No reason provided"
         challenge.status = "cancelled"
         challenge.save()
+        self._audit(request, challenge, "reject", f"Rejected challenge {challenge.name}", {"status": {"old": "pending", "new": "cancelled"}, "reason": reason})
         return Response({"status": f"Challenge rejected (cancelled). Reason: {reason}"})
 
     @action(detail=True, methods=["post"])
@@ -700,9 +874,42 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
                 {"error": "Can only cancel pending or active challenges"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        old_status = challenge.status
         challenge.status = "cancelled"
         challenge.save()
+        reason = str(request.data.get("reason") or "").strip()[:500]
+        self._audit(
+            request,
+            challenge,
+            "cancel",
+            f"Cancelled challenge {challenge.name}",
+            {"status": {"old": old_status, "new": "cancelled"}, **({"reason": reason} if reason else {})},
+        )
         return Response({"status": "Challenge cancelled"})
+
+    @action(detail=True, methods=["post"])
+    def set_featured(self, request, pk=None):
+        """Feature or unfeature a public challenge in discovery."""
+        challenge = self.get_object()
+        featured = bool(request.data.get("featured"))
+        if featured and (challenge.is_private or challenge.status not in ["pending", "active"]):
+            return Response(
+                {"error": "Only public pending or active challenges can be featured"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        old = challenge.is_featured
+        challenge.is_featured = featured
+        if not featured:
+            challenge.featured_until = None
+        challenge.save(update_fields=["is_featured", "featured_until", "updated_at"])
+        self._audit(
+            request,
+            challenge,
+            "update",
+            f"{'Featured' if featured else 'Unfeatured'} challenge {challenge.name}",
+            {"is_featured": {"old": old, "new": featured}},
+        )
+        return Response(AdminChallengeSerializer(challenge).data)
 
     @action(detail=True, methods=["patch"])
     def update_challenge(self, request, pk=None):
@@ -800,11 +1007,22 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
             "total_pool__sum"
         ] or Decimal("0.00")
 
+        by_status = {
+            row["status"]: row
+            for row in Challenge.objects.order_by()
+            .values("status")
+            .annotate(n=Count("id"), pool=Sum("total_pool"))
+        }
+
         return Response(
             {
                 "total_challenges": total_challenges,
                 "live_challenges": live_challenges,
                 "completed_challenges": completed_challenges,
+                "pending_challenges": by_status.get("pending", {}).get("n", 0),
+                "cancelled_challenges": by_status.get("cancelled", {}).get("n", 0),
+                "live_pool": str(by_status.get("active", {}).get("pool") or Decimal("0.00")),
+                "pending_pool": str(by_status.get("pending", {}).get("pool") or Decimal("0.00")),
                 "total_entries": total_entries,
                 "total_prize_pool": str(total_prize_pool),
             }
@@ -813,9 +1031,13 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"])
     def results(self, request, pk=None):
         """Get challenge results and leaderboard"""
+        from apps.admin_api.models import AuditLog
+
         challenge = self.get_object()
-        results = Participant.objects.filter(challenge=challenge).order_by(
-            "-steps", "joined_at"
+        results = (
+            Participant.objects.filter(challenge=challenge)
+            .select_related("user")
+            .order_by("-steps", "joined_at")
         )
 
         data = {
@@ -824,12 +1046,27 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
                 {
                     "position": index + 1,
                     "user": r.user.username,
+                    "user_id": r.user_id,
                     "steps": r.steps,
                     "qualified": r.qualified,
+                    "rank": r.rank,
                     "payout": str(r.payout),
                     "joined_at": r.joined_at,
                 }
                 for index, r in enumerate(results)
+            ],
+            "audit": [
+                {
+                    "id": a.id,
+                    "admin_username": a.admin_username,
+                    "action": a.action,
+                    "description": a.description,
+                    "changes": a.changes,
+                    "created_at": a.created_at,
+                }
+                for a in AuditLog.objects.filter(
+                    resource_type="challenge", resource_id=challenge.id
+                )[:30]
             ],
         }
         return Response(data)
@@ -962,6 +1199,38 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
     queryset = Badge.objects.all()
     serializer_class = AdminBadgeSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    pagination_class = AdminPageNumberPagination
+
+    def _audit(self, badge, action_name, description, changes=None):
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=self.request.user,
+            action=action_name,
+            resource_type="badge",
+            resource_id=badge.id,
+            resource_name=badge.name,
+            description=description,
+            changes=changes,
+            request=self.request,
+        )
+
+    def perform_create(self, serializer):
+        badge = serializer.save()
+        self._audit(badge, "create", f"Created badge {badge.name}")
+
+    def perform_update(self, serializer):
+        badge = serializer.save()
+        self._audit(
+            badge,
+            "update",
+            f"Updated badge {badge.name}",
+            {k: str(v) for k, v in serializer.validated_data.items()},
+        )
+
+    def perform_destroy(self, instance):
+        self._audit(instance, "delete", f"Deleted badge {instance.name}")
+        instance.delete()
 
     @action(detail=True, methods=["post"])
     def award_to_user(self, request, pk=None):
@@ -1095,13 +1364,17 @@ class AdminDashboardViewSet(viewsets.ViewSet):
             type="deposit", created_at__gte=prev_start, created_at__lt=start
         ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
 
-        fees_current = WalletTransaction.objects.filter(
-            type="fee", created_at__gte=start
-        ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        # Platform fees are recorded in payments.PlatformRevenue when a
+        # challenge is finalised (no WalletTransaction type="fee" is written).
+        from apps.payments.models import PlatformRevenue
 
-        fees_previous = WalletTransaction.objects.filter(
-            type="fee", created_at__gte=prev_start, created_at__lt=start
-        ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        fees_current = PlatformRevenue.objects.filter(
+            collected_at__gte=start
+        ).aggregate(total=Sum("amount_kes"))["total"] or Decimal("0.00")
+
+        fees_previous = PlatformRevenue.objects.filter(
+            collected_at__gte=prev_start, collected_at__lt=start
+        ).aggregate(total=Sum("amount_kes"))["total"] or Decimal("0.00")
 
         revenue_growth_pct = percent_change(float(fees_current), float(fees_previous))
 
@@ -1144,10 +1417,14 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         # ═══════════════════════════════════════════════════════════════════
         # WITHDRAWAL METRICS
         # ═══════════════════════════════════════════════════════════════════
-        pending_withdrawals_qs = Withdrawal.objects.filter(status="pending")
+        # Live model is payments.WithdrawalRequest (wallet.Withdrawal is legacy
+        # and no longer written), so the overview matches the review queue.
+        pending_withdrawals_qs = WithdrawalRequest.objects.filter(
+            status="pending_review"
+        ).select_related("user")
         pending_withdrawals_count = pending_withdrawals_qs.count()
         pending_withdrawals_amount = pending_withdrawals_qs.aggregate(
-            total=Sum("amount")
+            total=Sum("amount_kes")
         )["total"] or Decimal("0.00")
 
         # Pending withdrawals list (top 5 for dashboard)
@@ -1155,10 +1432,10 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         for w in pending_withdrawals_qs.order_by("-created_at")[:5]:
             pending_list.append(
                 {
-                    "id": w.id,
+                    "id": str(w.id),
                     "username": w.user.username,
-                    "amount": float(w.amount),
-                    "phone": w.account_details,  # Adjust field name as needed
+                    "amount": float(w.amount_kes),
+                    "phone": w.destination_display,
                     "created_at": (
                         w.created_at.strftime("%b %d, %H:%M") if w.created_at else "N/A"
                     ),
@@ -1449,6 +1726,21 @@ def get_audit_logs(request):
     if admin_username:
         logs = logs.filter(admin_username__icontains=admin_username)
 
+    if request.query_params.get("exclude_auth") == "true":
+        logs = logs.exclude(action__in=["login", "logout"])
+
+    resource_id = request.query_params.get("resource_id")
+    if resource_id and resource_id.isdigit():
+        logs = logs.filter(resource_id=int(resource_id))
+
+    search = (request.query_params.get("search") or "").strip()
+    if search:
+        logs = logs.filter(
+            Q(description__icontains=search)
+            | Q(resource_name__icontains=search)
+            | Q(admin_username__icontains=search)
+        )
+
     # Date filtering
     from_date = request.query_params.get("from_date")
     if from_date:
@@ -1459,8 +1751,14 @@ def get_audit_logs(request):
         logs = logs.filter(created_at__lte=to_date)
 
     # Pagination
-    limit = int(request.query_params.get("limit", 100))
-    offset = int(request.query_params.get("offset", 0))
+    try:
+        limit = max(1, min(1000, int(request.query_params.get("limit", 100))))
+        offset = max(0, int(request.query_params.get("offset", 0)))
+    except ValueError:
+        return Response(
+            {"error": "Invalid pagination parameters"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     total = logs.count()
     logs = logs[offset : offset + limit]
@@ -1471,6 +1769,11 @@ def get_audit_logs(request):
         {
             "total": total,
             "results": serializer.data,
+            "admins": list(
+                AuditLog.objects.order_by()
+                .values_list("admin_username", flat=True)
+                .distinct()[:100]
+            ),
         }
     )
 
@@ -1501,8 +1804,26 @@ def get_steps_logs(request):
     if suspicious in {"true", "false"}:
         logs = logs.filter(is_suspicious=(suspicious == "true"))
 
+    user_id = request.query_params.get("user_id")
+    if user_id and user_id.isdigit():
+        logs = logs.filter(user_id=int(user_id))
+
+    source = request.query_params.get("source")
+    if source in {choice for choice, _ in HealthRecord.SOURCE_CHOICES}:
+        logs = logs.filter(source=source)
+
+    min_steps = request.query_params.get("min_steps")
+    if min_steps and min_steps.isdigit():
+        logs = logs.filter(steps__gte=int(min_steps))
+
+    filtered_logs = logs
     order = request.query_params.get("order", "asc").lower()
-    if order == "desc":
+    sort = request.query_params.get("sort", "date")
+    if sort == "steps":
+        logs = logs.order_by(
+            "-steps" if order == "desc" else "steps", "-date", "-id"
+        )
+    elif order == "desc":
         logs = logs.order_by("-date", "-synced_at", "-id")
     else:
         logs = logs.order_by("date", "synced_at", "id")
@@ -1524,7 +1845,8 @@ def get_steps_logs(request):
         last_log_at=Max("date"),
     )
 
-    paged_logs = logs[offset : offset + limit]
+    paged_logs = list(logs[offset : offset + limit])
+    reasons = step_flag_reasons(paged_logs)
     results = []
     for row in paged_logs:
         results.append(
@@ -1541,6 +1863,7 @@ def get_steps_logs(request):
                 "calories_active": row.calories_active,
                 "active_minutes": row.active_minutes,
                 "is_suspicious": row.is_suspicious,
+                "reasons": reasons.get((row.user_id, row.date), []),
             }
         )
 
@@ -1553,6 +1876,9 @@ def get_steps_logs(request):
                 "users_with_logs": int(aggregate.get("users_with_logs") or 0),
                 "first_log_at": aggregate.get("first_log_at"),
                 "last_log_at": aggregate.get("last_log_at"),
+                "suspicious_count": filtered_logs.filter(is_suspicious=True).count(),
+                "distribution": step_distribution(filtered_logs),
+                "daily": step_daily_totals(filtered_logs),
             },
         }
     )
@@ -1974,9 +2300,10 @@ def get_support_admins(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def get_revenue_report(request):
     """Get revenue breakdown by category and time period"""
+    # Defense in depth: permission class already enforces is_staff
     if not request.user.is_staff:
         return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
 
@@ -2053,9 +2380,10 @@ def get_revenue_report(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def get_user_retention(request):
     """Get user retention metrics and cohort analysis"""
+    # Defense in depth: permission class already enforces is_staff
     if not request.user.is_staff:
         return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
 
@@ -2129,9 +2457,10 @@ def get_user_retention(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def get_challenge_analytics(request):
     """Get challenge success rates and analytics"""
+    # Defense in depth: permission class already enforces is_staff
     if not request.user.is_staff:
         return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
 
@@ -2216,9 +2545,10 @@ def get_challenge_analytics(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, IsAdminUser])
 def get_transaction_trends(request):
     """Get transaction volume trends over time"""
+    # Defense in depth: permission class already enforces is_staff
     if not request.user.is_staff:
         return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
 

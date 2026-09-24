@@ -1,218 +1,221 @@
-﻿import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Footprints, Smartphone, Apple, PenLine, MapPin, Flame, Zap, AlertTriangle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronRight, Footprints } from 'lucide-react';
 import { stepsService } from '../services/api';
-import type { HealthRecord, StepsPeriod } from '../types';
+import { ScreenHeader } from '../components/ui/ScreenHeader';
+import { Segmented } from '../components/ui/Segmented';
+import Card, { SectionHeader } from '../components/ui/Card';
+import { StatTile } from '../components/ui/StatTile';
+import { ListGroup, ListRow } from '../components/ui/ListRow';
+import { Skeleton } from '../components/ui/Skeleton';
+import { EmptyState } from '../components/ui/EmptyState';
+import { LoadError } from '../components/ui/ErrorState';
+import { StepBarChart, type StepBar } from '../components/steps/StepBarChart';
+import { addDays, dateKey, dayLabel, parseDateKey, relativeDayLabel, useDailyGoal, weekdayShort } from '../components/steps/stepUtils';
+import { formatSteps } from '../lib/format';
+import type { HealthRecord } from '../types';
 
-// Time filter options
-const PERIODS: { key: StepsPeriod; label: string }[] = [
-  { key: '1d', label: '1D' },
-  { key: '1w', label: '1W' },
-  { key: '1m', label: '1M' },
-  { key: '3m', label: '3M' },
-  { key: '1y', label: '1Y' },
-  { key: 'all', label: 'All' },
+type Period = '1w' | '1m' | '3m';
+
+const PERIODS: { value: Period; label: string; days: number; noun: string }[] = [
+  { value: '1w', label: 'Week', days: 7, noun: '7 days' },
+  { value: '1m', label: 'Month', days: 30, noun: '30 days' },
+  { value: '3m', label: '3 months', days: 90, noun: '90 days' },
 ];
 
-export default function StepsHistoryScreen() {
-  const navigate = useNavigate();
-  const [period, setPeriod] = useState<StepsPeriod>('1w');
+function axisLabelFor(period: Period, key: string, indexFromEnd: number): string | undefined {
+  if (period === '1w') return indexFromEnd === 0 ? 'Today' : weekdayShort(key);
+  const every = period === '1m' ? 7 : 21;
+  if (indexFromEnd % every !== 0) return undefined;
+  if (indexFromEnd === 0) return 'Today';
+  return parseDateKey(key).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
 
-  // Fetch history
-  const { data: history, isLoading } = useQuery({
+export default function StepsHistoryScreen() {
+  const [period, setPeriod] = useState<Period>('1w');
+  const [selected, setSelected] = useState<string | null>(null);
+  const { goal } = useDailyGoal();
+  const config = PERIODS.find((p) => p.value === period)!;
+
+  const history = useQuery({
     queryKey: ['health', 'history', period],
     queryFn: () => stepsService.getHistory(period),
+    // Keep the previous period on screen while the next one loads (no layout jump).
+    placeholderData: (prev) => prev,
   });
 
-  // Group records by date
-  const groupedByDate = groupByDate(history || []);
+  // Build the calendar range ending today; days without a record stay null (not zero).
+  const byDate = new Map<string, HealthRecord>();
+  for (const r of history.data ?? []) {
+    const prev = byDate.get(r.date);
+    if (!prev || r.steps > prev.steps) byDate.set(r.date, r);
+  }
+  const todayDate = parseDateKey(dateKey());
+  const range = Array.from({ length: config.days }, (_, i) => dateKey(addDays(todayDate, i - (config.days - 1))));
+  const records = range.map((key) => byDate.get(key)).filter((r): r is HealthRecord => Boolean(r));
+
+  const total = records.reduce((sum, r) => sum + r.steps, 0);
+  const avg = records.length ? Math.round(total / records.length) : 0;
+  const metCount = records.filter((r) => r.steps >= goal).length;
+  const best = records.reduce<HealthRecord | null>((b, r) => (!b || r.steps > b.steps ? r : b), null);
+
+  const bars: StepBar[] = range.map((key, i) => {
+    const rec = byDate.get(key);
+    const indexFromEnd = range.length - 1 - i;
+    return {
+      key,
+      value: rec ? rec.steps : null,
+      axisLabel: axisLabelFor(period, key, indexFromEnd),
+      emphasis: indexFromEnd === 0,
+      description: rec
+        ? `${dayLabel(key)}: ${formatSteps(rec.steps)} steps, ${rec.steps >= goal ? 'goal met' : 'below goal'}`
+        : `${dayLabel(key)}: no data`,
+    };
+  });
+
+  const activeKey = selected && range.includes(selected) ? selected : range[range.length - 1];
+  const activeRecord = byDate.get(activeKey);
+  const summaryLabel = `Daily steps for the last ${config.noun}. ${records.length} days recorded, total ${formatSteps(total)}, ${metCount} days met the ${formatSteps(goal)} step goal.`;
+  const listed = [...records].reverse();
 
   return (
-    <div className="min-h-screen bg-bg-page pb-8">
-      {/*  HEADER  */}
-      <div className="flex items-center gap-3 px-5 pt-6 pb-4">
-        <button
-          onClick={() => navigate(-1)}
-          className="w-9 h-9 rounded-xl bg-bg-input flex items-center justify-center"
-        >
-          <ChevronLeft size={20} className="text-text-primary" />
-        </button>
-        <div>
-          <h1 className="text-text-primary text-xl font-bold">Steps History</h1>
-          <p className="text-text-muted text-xs">All your recorded step logs</p>
-        </div>
-      </div>
+    <div className="pb-nav">
+      <ScreenHeader title="Step history" back />
 
-      {/*  FILTER BAR  */}
-      <div className="px-4 mb-4">
-        <div className="bg-bg-input rounded-2xl p-1 flex gap-1">
-          {PERIODS.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setPeriod(key)}
-              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all
-                ${
-                  period === key
-                    ? 'bg-white text-text-primary shadow-card'
-                    : 'text-text-muted'
-                }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <div className="space-y-6 px-5 pt-1">
+        <Segmented<Period>
+          label="History period"
+          value={period}
+          onChange={(p) => {
+            setPeriod(p);
+            setSelected(null);
+          }}
+          options={PERIODS.map((p) => ({ value: p.value, label: p.label }))}
+        />
 
-      {/*  LOADING STATE  */}
-      {isLoading && (
-        <div className="px-4">
-          <div className="card p-4">
-            <div className="skeleton h-16 rounded-xl mb-2" />
-            <div className="skeleton h-16 rounded-xl mb-2" />
-            <div className="skeleton h-16 rounded-xl" />
-          </div>
-        </div>
-      )}
-
-      {/*  GROUPED HISTORY LIST  */}
-      {!isLoading &&
-        Object.keys(groupedByDate).length > 0 &&
-        Object.entries(groupedByDate).map(([date, records]) => (
-          <div key={date} className="mb-4">
-            {/* Date header */}
-            <div className="flex items-center justify-between px-4 mb-2">
-              <span className="text-text-secondary text-sm font-bold">
-                {formatDateHeader(date)}
-              </span>
-              <span className="text-text-muted text-xs">
-                {records.reduce((sum, r) => sum + r.steps, 0).toLocaleString()} total
-              </span>
-            </div>
-
-            {/* Records for this date */}
-            <div className="mx-4 card overflow-hidden">
-              {records.map((record, i) => {
-                const goalForDate = 10000;
-
-                return (
-                  <button
-                    key={record.id}
-                    onClick={() => navigate(`/steps/history/${record.date}`)}
-                    className={`w-full flex items-center gap-3 px-4 py-4 text-left
-                      active:bg-bg-input transition-colors
-                      ${i === records.length - 1 ? 'border-b-0' : 'border-b border-border-light'}`}
+        {history.isError ? (
+          <LoadError resource="your step history" onRetry={() => history.refetch()} isRetrying={history.isFetching} />
+        ) : history.isLoading ? (
+          <HistorySkeleton />
+        ) : records.length === 0 ? (
+          <EmptyState
+            icon={Footprints}
+            title="No steps recorded yet"
+            description={`Nothing synced in the last ${config.noun}. Steps sync automatically once health permissions are on.`}
+          />
+        ) : (
+          <>
+            {/* Chart */}
+            <Card padding="lg" className={`transition-opacity duration-fast ${history.isPlaceholderData ? 'opacity-60' : ''}`} aria-busy={history.isPlaceholderData || undefined}>
+              <div className="flex h-5 items-center justify-between gap-2 text-callout" aria-live="polite">
+                <span className="truncate text-text-secondary">{relativeDayLabel(activeKey)}</span>
+                {activeRecord ? (
+                  <Link
+                    to={`/steps/history/${activeKey}`}
+                    className="-my-3 inline-flex min-h-touch shrink-0 items-center gap-1.5"
                   >
-                    {/* Source icon */}
-                    <div className="w-10 h-10 rounded-xl bg-tint-blue flex items-center justify-center flex-shrink-0">
-                      {record.source === 'google_fit' || record.source === 'health_connect' || record.source === 'device_sensor'
-                        ? <Smartphone className="w-5 h-5 text-text-muted" />
-                        : record.source === 'apple_health'
-                          ? <Apple className="w-5 h-5 text-text-muted" />
-                          : <PenLine className="w-5 h-5 text-text-muted" />}
-                    </div>
+                    {activeRecord.steps >= goal && <CheckCircle2 size={15} className="text-brand" aria-label="Goal met" />}
+                    <span className="num font-semibold text-text-primary">{formatSteps(activeRecord.steps)}</span>
+                    <span className="text-text-muted">steps</span>
+                    <ChevronRight size={15} className="text-text-muted" aria-hidden />
+                  </Link>
+                ) : (
+                  <span className="text-text-muted">No data</span>
+                )}
+              </div>
+              <StepBarChart
+                className="mt-3"
+                bars={bars}
+                goal={goal}
+                height={156}
+                label={summaryLabel}
+                selectedKey={activeKey}
+                onSelect={setSelected}
+              />
+            </Card>
 
-                    {/* Main info */}
-                    <div className="flex-1 min-w-0">
-                      {/* Step count  bold and prominent */}
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-text-primary text-base font-bold">
-                          {record.steps.toLocaleString()}
+            {/* Summary */}
+            <section>
+              <SectionHeader title="Summary" subtitle={`Last ${config.noun}`} />
+              <Card padding="lg">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-5">
+                  <StatTile label="Total steps" value={formatSteps(total)} />
+                  <StatTile label="Daily average" value={formatSteps(avg)} hint={`over ${records.length} recorded days`} />
+                  <StatTile label="Goal met" value={`${metCount} of ${records.length} days`} hint={`Goal ${formatSteps(goal)} a day`} />
+                  <StatTile label="Best day" value={best ? formatSteps(best.steps) : '—'} hint={best ? dayLabel(best.date) : undefined} />
+                </div>
+              </Card>
+            </section>
+
+            {/* Days */}
+            <section>
+              <SectionHeader title="Days" />
+              <ListGroup>
+                {listed.map((r) => {
+                  const met = r.steps >= goal;
+                  const details = [
+                    r.distance_km != null && r.distance_km > 0 ? `${r.distance_km.toFixed(1)} km` : null,
+                    r.active_minutes != null && r.active_minutes > 0 ? `${r.active_minutes} min active` : null,
+                  ].filter(Boolean);
+                  return (
+                    <ListRow
+                      key={r.date}
+                      to={`/steps/history/${r.date}`}
+                      title={relativeDayLabel(r.date)}
+                      subtitle={
+                        r.is_suspicious ? (
+                          <span className="inline-flex items-center gap-1 text-warning">
+                            <AlertTriangle size={12} aria-hidden /> Under review
+                          </span>
+                        ) : (
+                          details.join(' · ') || undefined
+                        )
+                      }
+                      trailing={
+                        <span className="flex items-center gap-1.5">
+                          {met ? (
+                            <CheckCircle2 size={16} className="text-brand" aria-label="Goal met" />
+                          ) : (
+                            <span className="sr-only">Below goal</span>
+                          )}
+                          <span className="num text-callout font-semibold text-text-primary">{formatSteps(r.steps)}</span>
                         </span>
-                        <span className="text-text-muted text-xs">steps</span>
-                        {record.is_suspicious && (
-                          <span className="text-xs text-amber-500 ml-1 flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" /> flagged
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2 mt-0.5">
-                        {record.distance_km && (
-                          <span className="text-text-muted text-xs flex items-center gap-1">
-                            <MapPin className="w-3 h-3" /> {record.distance_km.toFixed(1)} km
-                          </span>
-                        )}
-                        {record.calories_active && (
-                          <span className="text-text-muted text-xs flex items-center gap-1">
-                            <Flame className="w-3 h-3" /> {record.calories_active} kcal
-                          </span>
-                        )}
-                        {record.active_minutes && (
-                          <span className="text-text-muted text-xs flex items-center gap-1">
-                            <Zap className="w-3 h-3" /> {record.active_minutes} min
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs font-medium text-accent-blue">
-                          {record.steps >= goalForDate
-                            ? ' Goal reached!'
-                            : `${(goalForDate - record.steps).toLocaleString()} steps to goal`}
-                        </span>
-                        <span className="text-text-muted text-xs"></span>
-                        <span className="text-text-muted text-xs">
-                          {new Date(record.synced_at).toLocaleTimeString('en-US', {
-                            hour: 'numeric',
-                            minute: '2-digit',
-                            hour12: true,
-                          })}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Chevron */}
-                    <ChevronRight size={16} className="text-text-muted flex-shrink-0" />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-
-      {/*  EMPTY STATE  */}
-      {!isLoading && Object.keys(groupedByDate).length === 0 && (
-        <div className="flex flex-col items-center py-20 px-8">
-          <div className="w-16 h-16 rounded-3xl bg-tint-blue flex items-center justify-center mb-4">
-            <Footprints size={28} className="text-accent-blue" />
-          </div>
-          <h3 className="text-text-primary font-bold text-lg mb-2">No Steps Yet</h3>
-          <p className="text-text-secondary text-sm text-center leading-relaxed">
-            Steps are synced automatically once device health permissions are enabled.
-          </p>
-        </div>
-      )}
+                      }
+                    />
+                  );
+                })}
+              </ListGroup>
+            </section>
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
-// Helper: Group records by date
-function groupByDate(records: HealthRecord[]) {
-  return records.reduce(
-    (groups, record) => {
-      const date = record.date;
-      if (!groups[date]) groups[date] = [];
-      groups[date].push(record);
-      return groups;
-    },
-    {} as Record<string, HealthRecord[]>
+function HistorySkeleton() {
+  return (
+    <div className="space-y-6" aria-hidden>
+      <div className="rounded-card border border-border-light bg-bg-card p-5 shadow-card">
+        <Skeleton className="h-5 w-full rounded" />
+        <div className="mt-3 flex h-[156px] items-end gap-1.5 pr-9">
+          {[50, 64, 40, 72, 55, 88, 46].map((h, i) => (
+            <Skeleton key={i} className="flex-1 rounded-t" style={{ height: `${h}%` }} />
+          ))}
+        </div>
+        <div className="mt-2 h-4" />
+      </div>
+      <div className="rounded-card border border-border-light bg-bg-card p-5 shadow-card">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-5">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i}>
+              <Skeleton className="h-3 w-16 rounded" />
+              <Skeleton className="mt-1.5 h-5 w-24 rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
-
-// Helper: Format date header
-function formatDateHeader(dateStr: string): string {
-  const date = new Date(dateStr);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-
-  if (dateStr === today.toISOString().split('T')[0]) return 'Today';
-  if (dateStr === yesterday.toISOString().split('T')[0]) return 'Yesterday';
-  return date.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-  });
-}
-

@@ -3,6 +3,7 @@ Security utilities for session management, replay detection, and token handling.
 """
 
 import hashlib
+import hmac
 import json
 import secrets
 from datetime import datetime, timedelta
@@ -23,8 +24,14 @@ def hash_session_token(token: str) -> str:
 
 
 def verify_session_token(raw_token: str, stored_hash: str) -> bool:
-    """Verify a raw token against its stored hash."""
-    return hash_session_token(raw_token) == stored_hash
+    """
+    Verify a raw token against its stored hash.
+
+    Uses hmac.compare_digest for constant-time comparison
+    to prevent timing attacks.
+    """
+    computed_hash = hash_session_token(raw_token)
+    return hmac.compare_digest(computed_hash, stored_hash)
 
 
 def compute_payload_hash(payload: dict) -> str:

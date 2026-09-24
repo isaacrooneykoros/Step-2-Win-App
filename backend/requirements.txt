@@ -29,3 +29,6 @@ PyPDF2==3.0.1
 bleach==6.1.0
 django-axes==6.4.0
 django-auditlog==3.0.0
+# ── Sign in with Google / Apple: ID-token verification (JWKS, RS256) ──
+PyJWT==2.14.0
+cryptography==50.0.1

@@ -1,31 +1,37 @@
+import { useEffect, useState } from 'react';
+import { Spinner } from './Spinner';
+import { BrandMark } from '../brand/BrandMark';
+
 interface LoadingSpinnerProps {
   size?: 'sm' | 'md' | 'lg';
   className?: string;
 }
 
-export default function LoadingSpinner({ size = 'md', className = '' }: LoadingSpinnerProps) {
-  const sizeClasses = {
-    sm: 'w-4 h-4 border-2',
-    md: 'w-8 h-8 border-2',
-    lg: 'w-12 h-12 border-3',
-  };
+const px = { sm: 16, md: 24, lg: 32 };
 
-  return (
-    <div
-      className={`${sizeClasses[size]} border-primary border-t-transparent rounded-full animate-spin ${className}`}
-      role="status"
-      aria-label="Loading"
-    />
-  );
+export default function LoadingSpinner({ size = 'md', className = '' }: LoadingSpinnerProps) {
+  return <Spinner size={px[size]} className={`text-brand ${className}`} label="Loading" />;
 }
 
+/**
+ * Full-page loading. Renders nothing for the first 250ms so fast loads (cached chunks,
+ * restored sessions) don't flash a loader; after that shows a quiet brand mark.
+ */
 export function PageLoader() {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setShow(true), 250);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   return (
-    <div className="min-h-screen bg-bg-primary flex items-center justify-center">
-      <div className="text-center">
-        <LoadingSpinner size="lg" />
-        <p className="mt-4 text-muted">Loading...</p>
-      </div>
+    <div className="flex min-h-[60dvh] items-center justify-center bg-bg-page" aria-busy="true">
+      {show && (
+        <div className="fade-in flex flex-col items-center gap-4" role="status" aria-label="Loading">
+          <BrandMark size={44} />
+          <Spinner size={18} className="text-text-muted" />
+        </div>
+      )}
     </div>
   );
 }

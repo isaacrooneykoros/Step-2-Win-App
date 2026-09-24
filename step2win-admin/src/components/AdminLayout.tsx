@@ -1,99 +1,131 @@
-import { useState, useEffect } from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Banknote, Bell, FileText, Menu, MessageSquare, Search } from 'lucide-react'
 import Sidebar from './Sidebar'
 import CommandPalette from './CommandPalette'
-import { Search, Bell, ChevronDown, MessageSquare, Banknote, FileText, ArrowRight } from 'lucide-react'
+import { ThemeToggle } from './ThemeToggle'
+import { IconButton } from './ui/Button'
 import { adminApi } from '../services/adminApi'
-import type { AdminNotificationItem, AdminProfile } from '../types/admin'
+import type { AdminNotificationItem } from '../types/admin'
+import { routeLabel, SIDEBAR_WIDTH } from '../lib/nav'
+import { formatRelative } from '../lib/format'
+import { cn } from '../lib/cn'
 
-// Keyboard shortcut: Cmd/Ctrl + K
-function useCmdK(callback: () => void) {
+/** Queue counts refresh every minute. Query keys are shared with the dashboard, so requests are cached once. */
+const LAYOUT_REFRESH_MS = 60_000
+
+const SECTION_META: Record<AdminNotificationItem['type'], { label: string; icon: typeof Bell; to: string }> = {
+  support_ticket: { label: 'Support', icon: MessageSquare, to: '/support' },
+  withdrawal: { label: 'Withdrawals', icon: Banknote, to: '/withdrawals' },
+  audit_log: { label: 'Audit events', icon: FileText, to: '/activity' },
+}
+
+const SEVERITY_DOT: Record<NonNullable<AdminNotificationItem['severity']>, string> = {
+  high: 'bg-danger',
+  medium: 'bg-warning',
+  low: 'bg-ink-muted',
+}
+
+function useIsDesktop() {
+  const query = '(min-width: 1024px)'
+  const [desktop, setDesktop] = useState(() => (typeof window === 'undefined' ? true : window.matchMedia(query).matches))
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const onChange = () => setDesktop(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return desktop
+}
+
+/**
+ * App shell: grouped sidebar (rail on desktop, drawer on mobile), top bar with
+ * command palette, theme toggle, notifications and account.
+ */
+export function AdminLayout() {
+  const [cmdOpen, setCmdOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === 'true')
+  const [mobileNav, setMobileNav] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const isDesktop = useIsDesktop()
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const bellRef = useRef<HTMLButtonElement>(null)
+
+  // Ctrl/Cmd + K
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        callback()
+        setCmdOpen(true)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [callback])
-}
+  }, [])
 
-function groupNotifications(items: AdminNotificationItem[]) {
-  return {
-    support_ticket: items.filter((item) => item.type === 'support_ticket'),
-    withdrawal: items.filter((item) => item.type === 'withdrawal'),
-    audit_log: items.filter((item) => item.type === 'audit_log'),
-  }
-}
-
-function sectionTone(type: AdminNotificationItem['type']) {
-  switch (type) {
-    case 'support_ticket':
-      return { accent: '#4F9CF9', background: 'rgba(79,156,249,0.12)', border: 'rgba(79,156,249,0.22)' }
-    case 'withdrawal':
-      return { accent: '#F5A623', background: 'rgba(245,166,35,0.12)', border: 'rgba(245,166,35,0.22)' }
-    default:
-      return { accent: '#22C55E', background: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.22)' }
-  }
-}
-
-function sectionMeta(type: AdminNotificationItem['type']) {
-  switch (type) {
-    case 'support_ticket':
-      return { label: 'Support', icon: MessageSquare, actionUrl: '/support' }
-    case 'withdrawal':
-      return { label: 'Withdrawals', icon: Banknote, actionUrl: '/withdrawals' }
-    default:
-      return { label: 'Audit events', icon: FileText, actionUrl: '/activity' }
-  }
-}
-
-export function AdminLayout() {
-  const [cmdOpen,    setCmdOpen]    = useState(false)
-  const [sidebarW,   setSidebarW]   = useState(240)
-  const [badges,     setBadges]     = useState<Record<string, number>>({})
-  const [profile,    setProfile]    = useState<AdminProfile | null>(null)
-  const [notifications, setNotifications] = useState<AdminNotificationItem[]>([])
-  const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [collapsedSections, setCollapsedSections] = useState<Record<AdminNotificationItem['type'], boolean>>({
-    support_ticket: false,
-    withdrawal: false,
-    audit_log: false,
-  })
-  const navigate                    = useNavigate()
-  const groupedNotifications = groupNotifications(notifications)
-
-  useCmdK(() => setCmdOpen(true))
-
-  // Watch sidebar collapse state to shift content
+  // Document title follows the route.
   useEffect(() => {
-    const update = () => {
-      const saved = localStorage.getItem('sidebar-collapsed')
-      setSidebarW(saved === 'true' ? 72 : 240)
+    document.title = `${routeLabel(location.pathname)} · Step2Win Admin`
+  }, [location.pathname])
+
+  // Close the notifications popover on outside click / Escape.
+  useEffect(() => {
+    if (!notificationsOpen) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (!popoverRef.current?.contains(t) && !bellRef.current?.contains(t)) setNotificationsOpen(false)
     }
-    update()
-    // Poll — simple approach, or use a context/event
-    const interval = setInterval(update, 300)
-    return () => clearInterval(interval)
-  }, [])
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setNotificationsOpen(false)
+        bellRef.current?.focus()
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [notificationsOpen])
 
-  // Fetch pending withdrawals for badge
-  useEffect(() => {
-    adminApi.getWithdrawalStats().then((stats) => {
-      setBadges({ pendingWithdrawals: stats.pending_count || 0 })
-    }).catch(() => {})
+  const { data: withdrawalStats } = useQuery({
+    queryKey: ['admin', 'withdrawal-stats'],
+    queryFn: () => adminApi.getWithdrawalStats(),
+    refetchInterval: LAYOUT_REFRESH_MS,
+  })
+  const { data: notifications } = useQuery({
+    queryKey: ['admin', 'notifications'],
+    queryFn: () => adminApi.getNotifications(),
+    refetchInterval: LAYOUT_REFRESH_MS,
+  })
+  const { data: fraud } = useQuery({
+    queryKey: ['admin', 'fraud-overview'],
+    queryFn: () => adminApi.getFraudOverview(),
+    refetchInterval: LAYOUT_REFRESH_MS,
+  })
+  const { data: ops } = useQuery({
+    queryKey: ['admin', 'ops-monitoring'],
+    queryFn: () => adminApi.getOpsMonitoring(),
+    refetchInterval: LAYOUT_REFRESH_MS,
+  })
+  const { data: profile } = useQuery({
+    queryKey: ['admin', 'profile'],
+    queryFn: () => adminApi.getMyProfile(),
+    staleTime: 5 * 60_000,
+  })
 
-    adminApi.getMyProfile().then(setProfile).catch(() => {})
-    adminApi.getNotifications().then((payload) => {
-      setNotifications(payload.items || [])
-      setBadges((current) => ({
-        ...current,
-        notifications: payload.summary.total || 0,
-      }))
-    }).catch(() => {})
-  }, [])
+  const badges: Record<string, number> = {
+    pendingWithdrawals: withdrawalStats?.pending_count ?? 0,
+    openFraudFlags: fraud?.open_flags ?? 0,
+    openSupport: notifications?.summary.open_support_tickets ?? 0,
+    opsBreaches: (ops?.breaches?.length ?? 0) + (ops?.anti_cheat_drift?.breaches?.length ?? 0),
+  }
+  const items = notifications?.items ?? []
+  const unread = notifications?.summary.total ?? 0
 
   const adminUser = profile ?? adminApi.getCurrentAdmin()
 
@@ -102,222 +134,169 @@ export function AdminLayout() {
     navigate('/login')
   }
 
-  const openProfile = () => {
-    navigate('/settings#profile')
-  }
+  const openProfile = () => navigate('/settings#profile')
 
-  const toggleSection = (type: AdminNotificationItem['type']) => {
-    setCollapsedSections((current) => ({
-      ...current,
-      [type]: !current[type],
-    }))
-  }
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((v) => {
+      localStorage.setItem('sidebar-collapsed', String(!v))
+      return !v
+    })
+  }, [])
+
+  const offset = isDesktop ? (collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded) : 0
 
   return (
-    <div className="min-h-screen" style={{ background: '#0E1016' }}>
+    <div className="min-h-screen bg-surface-base">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-200 focus:rounded-md focus:bg-surface-card focus:px-3 focus:py-2 focus:text-sm focus:shadow-pop"
+      >
+        Skip to content
+      </a>
 
-      {/* Sidebar */}
       <Sidebar
         badges={badges}
         adminUser={adminUser}
         onLogout={handleLogout}
         onOpenProfile={openProfile}
+        collapsed={collapsed}
+        onToggleCollapsed={toggleCollapsed}
+        mobileOpen={!isDesktop && mobileNav}
+        onCloseMobile={() => setMobileNav(false)}
       />
 
-      {/* Command palette */}
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
 
-      {/* Main content — shifts right by sidebar width */}
-      <div
-        className="sidebar-transition flex flex-col min-h-screen"
-        style={{ marginLeft: sidebarW }}>
+      <div className="sidebar-transition flex min-h-screen flex-col" style={{ marginLeft: offset }}>
+        <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-surface-border bg-surface-card px-3 sm:px-5">
+          {!isDesktop && (
+            <IconButton label="Open navigation" onClick={() => setMobileNav(true)}>
+              <Menu size={18} />
+            </IconButton>
+          )}
 
-        {/* ── Global top bar ── */}
-        <header
-          className="sticky top-0 z-20 flex items-center justify-between px-6"
-          style={{
-            height: 64,
-            background: 'rgba(10,12,18,0.92)',
-            borderBottom: '1px solid #21263A',
-            backdropFilter: 'blur(12px)',
-          }}>
-
-          {/* Search / Command bar */}
           <button
+            type="button"
             onClick={() => setCmdOpen(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm
-                       text-ink-muted hover:text-ink-secondary transition-colors"
-            style={{ background: '#0C0F17', border: '1px solid #1B2232', width: 250 }}>
-            <Search size={13} />
-            <span className="flex-1 text-left text-xs">Search anything...</span>
-            <div className="flex items-center gap-0.5">
-              <kbd className="text-[10px] px-1 py-0.5 rounded font-mono"
-                style={{ background: '#21263A' }}>
-                ⌘K
-              </kbd>
-            </div>
+            className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-surface-border bg-surface-base px-3 text-left text-sm text-ink-muted transition-colors hover:border-surface-strong sm:max-w-80"
+            aria-label="Open command palette (Ctrl+K)"
+          >
+            <Search size={14} className="shrink-0" aria-hidden />
+            <span className="flex-1 truncate">Go to…</span>
+            <kbd className="hidden rounded border border-surface-border bg-surface-card px-1.5 font-mono text-2xs text-ink-muted sm:inline">Ctrl K</kbd>
           </button>
 
-          {/* Right: notifications + avatar */}
-          <div className="flex items-center gap-3 relative">
-            <button
-              type="button"
-              onClick={() => setNotificationsOpen((value) => !value)}
-              className="relative w-9 h-9 rounded-xl flex items-center justify-center
-                         transition-colors hover:bg-surface-elevated"
-              style={{ border: '1px solid #21263A' }}>
-              <Bell size={16} color="#7B82A0" />
-              {/* Notification dot */}
-              {(badges.notifications || badges.pendingWithdrawals || 0) > 0 && (
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
-                  style={{ background: '#22C55E', boxShadow: '0 0 6px #22C55E' }} />
-              )}
-            </button>
+          <div className="ml-auto flex items-center gap-1">
+            <ThemeToggle />
 
-            {notificationsOpen && (
-              <div className="absolute right-12 top-12 z-30 w-96 max-w-[calc(100vw-2rem)] rounded-2xl border border-[#21263A] bg-[#0C0F17] shadow-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-[#1B2232]">
-                  <div>
-                    <p className="text-white text-sm font-semibold">Notifications</p>
-                    <p className="text-ink-muted text-xs">{notifications.length} recent items</p>
+            <div className="relative">
+              <IconButton
+                ref={bellRef}
+                label={unread > 0 ? `Notifications, ${unread} new` : 'Notifications'}
+                onClick={() => setNotificationsOpen((v) => !v)}
+                aria-expanded={notificationsOpen}
+                aria-haspopup="dialog"
+              >
+                <Bell size={16} />
+                {unread > 0 && (
+                  <span aria-hidden className="num absolute right-0.5 top-0.5 min-w-4 rounded-full bg-danger-fill px-1 text-center text-[10px] font-semibold leading-4 text-white">
+                    {unread > 9 ? '9+' : unread}
+                  </span>
+                )}
+              </IconButton>
+
+              {notificationsOpen && (
+                <div
+                  ref={popoverRef}
+                  role="dialog"
+                  aria-label="Notifications"
+                  className="fade-in absolute right-0 top-11 z-30 w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-surface-border bg-surface-overlay shadow-pop"
+                >
+                  <div className="flex items-center justify-between border-b border-surface-border px-4 py-2.5">
+                    <p className="text-sm font-semibold text-ink-primary">Notifications</p>
+                    <p className="num text-xs text-ink-muted">{items.length} recent</p>
                   </div>
-                  <button className="text-xs text-info hover:underline" onClick={() => navigate('/support')}>
-                    View all
-                  </button>
-                </div>
-                <div className="max-h-128 overflow-auto">
-                  {notifications.length > 0 ? (
-                    <div className="p-3 space-y-3">
-                      {(['support_ticket', 'withdrawal', 'audit_log'] as const).map((type) => {
-                        const items = groupedNotifications[type]
-                        const meta = sectionMeta(type)
-                        const tone = sectionTone(type)
+                  <div className="max-h-[26rem] overflow-y-auto">
+                    {items.length === 0 ? (
+                      <p className="px-4 py-8 text-center text-sm text-ink-muted">No new notifications</p>
+                    ) : (
+                      (['withdrawal', 'support_ticket', 'audit_log'] as const).map((type) => {
+                        const group = items.filter((i) => i.type === type)
+                        if (group.length === 0) return null
+                        const meta = SECTION_META[type]
                         const Icon = meta.icon
-
                         return (
-                          <section
-                            key={type}
-                            className="rounded-2xl border overflow-hidden"
-                            style={{ background: tone.background, borderColor: tone.border }}>
-                            <div className="flex items-center justify-between px-4 py-3 border-b"
-                              style={{ borderColor: tone.border }}>
-                              <button
-                                type="button"
-                                onClick={() => toggleSection(type)}
-                                className="flex items-center gap-2 text-left min-w-0 flex-1">
-                                <span className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-                                  style={{ background: 'rgba(255,255,255,0.08)' }}>
-                                  <Icon size={15} color={tone.accent} />
-                                </span>
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-white text-sm font-semibold leading-none flex items-center gap-2">
-                                    {meta.label}
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full"
-                                      style={{ background: 'rgba(255,255,255,0.08)', color: '#D8DEE9' }}>
-                                      {items.length}
-                                    </span>
-                                  </p>
-                                  <p className="text-ink-muted text-[11px] mt-1">
-                                    {collapsedSections[type] ? 'Collapsed' : 'Tap to collapse this section'}
-                                  </p>
-                                </div>
-                              </button>
-                              <div className="flex items-center gap-2">
-                                {!collapsedSections[type] && (
+                          <section key={type} className="border-b border-surface-border last:border-b-0">
+                            <div className="flex items-center justify-between px-4 pb-1 pt-2.5">
+                              <p className="flex items-center gap-1.5 text-2xs font-medium uppercase tracking-[0.06em] text-ink-muted">
+                                <Icon size={12} aria-hidden /> {meta.label}
+                                <span className="num">({group.length})</span>
+                              </p>
+                              <Link
+                                to={meta.to}
+                                onClick={() => setNotificationsOpen(false)}
+                                className="text-xs font-medium text-brand-text hover:underline"
+                              >
+                                Open
+                              </Link>
+                            </div>
+                            <ul>
+                              {group.slice(0, 4).map((item, index) => (
+                                <li key={`${item.type}-${item.created_at}-${index}`}>
                                   <button
                                     type="button"
                                     onClick={() => {
                                       setNotificationsOpen(false)
-                                      navigate(meta.actionUrl)
+                                      navigate(item.action_url || meta.to)
                                     }}
-                                    className="inline-flex items-center gap-1 text-xs font-medium text-white/80 hover:text-white">
-                                    Open
-                                    <ArrowRight size={12} />
+                                    className="flex w-full items-start gap-2.5 px-4 py-2 text-left hover:bg-surface-elevated"
+                                  >
+                                    <span
+                                      aria-hidden
+                                      className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', SEVERITY_DOT[item.severity ?? 'low'])}
+                                    />
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-sm font-medium text-ink-primary">{item.title}</span>
+                                      <span className="line-clamp-2 block text-xs text-ink-secondary">{item.message}</span>
+                                    </span>
+                                    <span className="shrink-0 text-2xs text-ink-muted">{formatRelative(item.created_at)}</span>
                                   </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => toggleSection(type)}
-                                  className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/5 transition-colors"
-                                  aria-label={collapsedSections[type] ? `Expand ${meta.label}` : `Collapse ${meta.label}`}>
-                                  <ChevronDown
-                                    size={14}
-                                    color={tone.accent}
-                                    className={`transition-transform duration-200 ${collapsedSections[type] ? '-rotate-90' : 'rotate-0'}`}
-                                  />
-                                </button>
-                              </div>
-                            </div>
-
-                            {!collapsedSections[type] && (
-                              <div>
-                                {items.length > 0 ? items.slice(0, 3).map((item, index) => (
-                                  <button
-                                    key={`${item.type}-${item.created_at}-${index}`}
-                                    onClick={() => {
-                                      setNotificationsOpen(false)
-                                      if (item.action_url) navigate(item.action_url)
-                                    }}
-                                    className="w-full text-left px-4 py-3 hover:bg-white/5 border-b border-white/5 last:border-b-0">
-                                    <div className="flex items-start gap-3">
-                                      <span className="mt-1 w-2.5 h-2.5 rounded-full shrink-0"
-                                        style={{ background: item.severity === 'high' ? '#F06060' : item.severity === 'medium' ? '#F5A623' : '#22C55E' }} />
-                                      <div className="min-w-0 flex-1">
-                                        <p className="text-white text-sm font-medium truncate">{item.title}</p>
-                                        <p className="text-ink-muted text-xs mt-1 line-clamp-2">{item.message}</p>
-                                      </div>
-                                    </div>
-                                  </button>
-                                )) : (
-                                  <div className="px-4 py-5 text-center text-ink-muted text-sm">
-                                    No {meta.label.toLowerCase()} right now
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                                </li>
+                              ))}
+                            </ul>
                           </section>
                         )
-                      })}
-                    </div>
-                  ) : (
-                    <div className="px-4 py-8 text-center text-ink-muted text-sm">No new notifications</div>
-                  )}
+                      })
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
-            {/* Admin avatar */}
             <button
               type="button"
               onClick={openProfile}
-              className="flex items-center gap-2.5 pl-3 text-left"
-              style={{ borderLeft: '1px solid #21263A' }}>
+              className="ml-1 flex items-center gap-2 rounded-md py-1 pl-1 pr-2 text-left hover:bg-surface-elevated"
+              aria-label={`Account: ${adminUser?.username ?? 'Admin'}`}
+            >
               {profile?.profile_picture_url ? (
-                <img
-                  src={profile.profile_picture_url}
-                  alt={profile.username}
-                  className="w-8 h-8 rounded-full object-cover shrink-0"
-                />
+                <img src={profile.profile_picture_url} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />
               ) : (
-                <div className="w-8 h-8 rounded-full flex items-center justify-center
-                                text-xs font-bold text-white"
-                  style={{ background: 'linear-gradient(135deg, #22C55E, #16A34A)', flexShrink: 0 }}>
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-soft text-2xs font-semibold text-brand-text">
                   {adminUser?.username?.slice(0, 2).toUpperCase() ?? 'AD'}
-                </div>
+                </span>
               )}
-              <div className="hidden lg:block">
-                <p className="text-ink-primary text-xs font-semibold leading-none">
-                  {adminUser?.username ?? 'Admin'}
-                </p>
-                <p className="text-ink-muted text-[10px] mt-0.5">Administrator</p>
-              </div>
-              <ChevronDown size={12} color="#7B82A0" className="hidden lg:block ml-1" />
+              <span className="hidden text-left leading-tight md:block">
+                <span className="block text-xs font-medium text-ink-primary">{adminUser?.username ?? 'Admin'}</span>
+                <span className="block text-2xs text-ink-muted">
+                  {(adminUser as { is_superuser?: boolean } | null)?.is_superuser ? 'Superuser' : 'Staff'}
+                </span>
+              </span>
             </button>
           </div>
         </header>
 
-        {/* ── Page content ── */}
-        <main className="flex-1 p-6">
+        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1600px] flex-1 px-3 py-5 focus:outline-none sm:px-5 lg:px-6">
           <Outlet />
         </main>
       </div>

@@ -236,6 +236,16 @@ def request_withdrawal(user, data: dict[str, Any]) -> WithdrawalRequest:
     max_daily = Decimal(str(getattr(settings, "MAX_DAILY_WITHDRAWAL", 0)))
     today = timezone.now().date()
 
+    # Admin-configured minimum (Settings > Withdrawals), never below the server floor.
+    from apps.admin_api.platform import minimum_withdrawal_kes
+
+    min_withdrawal = minimum_withdrawal_kes()
+    if amount < min_withdrawal:
+        raise PaymentsServiceError(
+            f"The minimum withdrawal is KES {min_withdrawal:,.2f}.",
+            status_code=400,
+        )
+
     with db_transaction.atomic():
         locked_user = user.__class__.objects.select_for_update().get(id=user.id)
 
@@ -253,9 +263,12 @@ def request_withdrawal(user, data: dict[str, Any]) -> WithdrawalRequest:
                 status_code=400,
             )
 
-        if locked_user.wallet_balance < amount:
+        # Check available balance (wallet - locked), not total wallet balance
+        # Users cannot withdraw funds locked in active challenges
+        available = locked_user.available_balance
+        if available < amount:
             raise PaymentsServiceError(
-                f"Insufficient balance. Available: KES {locked_user.wallet_balance}",
+                f"Insufficient available balance. Available: KES {available}",
                 status_code=400,
             )
 
@@ -272,6 +285,7 @@ def request_withdrawal(user, data: dict[str, Any]) -> WithdrawalRequest:
                 status_code=400,
             )
 
+        balance_before = locked_user.wallet_balance
         locked_user.wallet_balance = locked_user.wallet_balance - amount
         locked_user.save(update_fields=["wallet_balance", "updated_at"])
 
@@ -296,6 +310,19 @@ def request_withdrawal(user, data: dict[str, Any]) -> WithdrawalRequest:
 
         withdrawal = WithdrawalRequest.objects.create(**withdrawal_data)
 
+        # Ledger entry for the debit so wallet history explains the balance change.
+        # Refunds (reject / payout failure) reference the withdrawal id itself.
+        WalletTransaction.objects.create(
+            user=locked_user,
+            type="withdrawal",
+            amount=-amount,
+            balance_before=balance_before,
+            balance_after=locked_user.wallet_balance,
+            description=f"Withdrawal request #{withdrawal.id}",
+            reference_id=f"WDR-{withdrawal.id}",
+            metadata={"source": "withdrawal_request", "method": method},
+        )
+
     return withdrawal
 
 
@@ -315,10 +342,22 @@ def reject_withdrawal_request(
         locked_user = locked_withdrawal.user.__class__.objects.select_for_update().get(
             id=locked_withdrawal.user_id
         )
+        balance_before = locked_user.wallet_balance
         locked_user.wallet_balance = (
             locked_user.wallet_balance + locked_withdrawal.amount_kes
         )
         locked_user.save(update_fields=["wallet_balance", "updated_at"])
+
+        WalletTransaction.objects.create(
+            user=locked_user,
+            type="refund",
+            amount=locked_withdrawal.amount_kes,
+            balance_before=balance_before,
+            balance_after=locked_user.wallet_balance,
+            description=f"Withdrawal refund #{locked_withdrawal.id}",
+            reference_id=str(locked_withdrawal.id),
+            metadata={"source": "withdrawal_rejected", "reason": reason},
+        )
 
         locked_withdrawal.status = "rejected"
         locked_withdrawal.rejection_reason = reason
@@ -411,10 +450,22 @@ def approve_withdrawal_and_send(
                     id=locked_withdrawal.user_id
                 )
             )
+            balance_before = locked_user.wallet_balance
             locked_user.wallet_balance = (
                 locked_user.wallet_balance + locked_withdrawal.amount_kes
             )
             locked_user.save(update_fields=["wallet_balance", "updated_at"])
+
+            WalletTransaction.objects.create(
+                user=locked_user,
+                type="refund",
+                amount=locked_withdrawal.amount_kes,
+                balance_before=balance_before,
+                balance_after=locked_user.wallet_balance,
+                description=f"Withdrawal refund #{locked_withdrawal.id}",
+                reference_id=str(locked_withdrawal.id),
+                metadata={"source": "payout_send_failed", "reason": str(exc)[:200]},
+            )
 
             locked_withdrawal.status = "failed"
             locked_withdrawal.fail_reason = f"IntaSend error: {exc}"

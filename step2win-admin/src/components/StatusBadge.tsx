@@ -1,3 +1,9 @@
+import type { ReactNode } from 'react'
+import { cn } from '../lib/cn'
+import { statusTone, type BadgeTone } from '../lib/status'
+
+export type { BadgeTone } from '../lib/status'
+
 type BadgeVariant =
   | 'active' | 'inactive' | 'banned' | 'pending'
   | 'completed' | 'failed' | 'cancelled' | 'success'
@@ -5,50 +11,51 @@ type BadgeVariant =
   | 'flagged' | 'resolved' | 'reviewing'
   | 'public' | 'private'
 
-const VARIANTS: Record<BadgeVariant, { bg: string; text: string; dot: string }> = {
-  active:    { bg: 'rgba(34,211,160,0.12)',  text: '#22D3A0', dot: '#22D3A0' },
-  success:   { bg: 'rgba(34,211,160,0.12)',  text: '#22D3A0', dot: '#22D3A0' },
-  completed: { bg: 'rgba(34,211,160,0.12)',  text: '#22D3A0', dot: '#22D3A0' },
-  resolved:  { bg: 'rgba(34,211,160,0.12)',  text: '#22D3A0', dot: '#22D3A0' },
-  inactive:  { bg: 'rgba(123,130,160,0.12)', text: '#7B82A0', dot: '#7B82A0' },
-  cancelled: { bg: 'rgba(123,130,160,0.12)', text: '#7B82A0', dot: '#7B82A0' },
-  pending:   { bg: 'rgba(245,166,35,0.12)',  text: '#F5A623', dot: '#F5A623' },
-  warning:   { bg: 'rgba(245,166,35,0.12)',  text: '#F5A623', dot: '#F5A623' },
-  reviewing: { bg: 'rgba(245,166,35,0.12)',  text: '#F5A623', dot: '#F5A623' },
-  failed:    { bg: 'rgba(240,96,96,0.12)',   text: '#F06060', dot: '#F06060' },
-  banned:    { bg: 'rgba(240,96,96,0.12)',   text: '#F06060', dot: '#F06060' },
-  flagged:   { bg: 'rgba(240,96,96,0.12)',   text: '#F06060', dot: '#F06060' },
-  info:      { bg: 'rgba(79,156,249,0.12)',  text: '#4F9CF9', dot: '#4F9CF9' },
-  public:    { bg: 'rgba(79,156,249,0.12)',  text: '#4F9CF9', dot: '#4F9CF9' },
-  admin:     { bg: 'rgba(124,111,247,0.15)', text: '#7C6FF7', dot: '#7C6FF7' },
-  private:   { bg: 'rgba(124,111,247,0.12)', text: '#7C6FF7', dot: '#7C6FF7' },
-  user:      { bg: 'rgba(123,130,160,0.1)',  text: '#7B82A0', dot: '#7B82A0' },
+const TONE_CLASS: Record<BadgeTone, { box: string; dot: string }> = {
+  success: { box: 'bg-success-soft text-success', dot: 'bg-success' },
+  warning: { box: 'bg-warning-soft text-warning', dot: 'bg-warning' },
+  danger:  { box: 'bg-danger-soft text-danger',   dot: 'bg-danger' },
+  info:    { box: 'bg-notice-soft text-notice',   dot: 'bg-notice' },
+  brand:   { box: 'bg-brand-soft text-brand-text', dot: 'bg-brand' },
+  violet:  { box: 'bg-violet-soft text-violet',   dot: 'bg-violet' },
+  neutral: { box: 'bg-neutral-soft text-ink-secondary', dot: 'bg-ink-muted' },
 }
 
 interface StatusBadgeProps {
-  variant:  BadgeVariant
-  label?:   string     // override display label
-  showDot?: boolean    // show animated dot (default: true for active)
+  /** Legacy fixed variants. Prefer `status` (any backend value) or `tone`. */
+  variant?: BadgeVariant
+  /** Raw backend status (e.g. "pending_review", "in_progress"); tone and label are derived. */
+  status?:  string | null
+  /** Force a tone. */
+  tone?:    BadgeTone
+  label?:   ReactNode  // override display label
+  showDot?: boolean    // leading dot (default: only for live states)
   size?:    'sm' | 'md'
+  className?: string
 }
 
+function humanize(value: string): string {
+  const s = value.replace(/[_-]+/g, ' ').trim()
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()
+}
+
+/**
+ * Status label. Always text (colour is secondary). Tones: success, warning,
+ * danger, info, brand, violet, neutral.
+ */
 export function StatusBadge({
-  variant, label, showDot, size = 'md'
+  variant, status, tone, label, showDot, size = 'md', className,
 }: StatusBadgeProps) {
-  const v       = VARIANTS[variant] ?? VARIANTS['inactive']
-  const display = label ?? variant.charAt(0).toUpperCase() + variant.slice(1)
-  const dot     = showDot ?? variant === 'active'
-  const pad     = size === 'sm' ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-xs'
+  const key = (status ?? variant ?? 'unknown').toString()
+  const resolved = tone ?? statusTone(key)
+  const t = TONE_CLASS[resolved]
+  const display = label ?? humanize(key)
+  const dot = showDot ?? ['active', 'live', 'processing', 'in_progress'].includes(key.toLowerCase())
+  const pad = size === 'sm' ? 'h-5 px-1.5 text-2xs' : 'h-6 px-2 text-xs'
 
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full font-semibold ${pad}`}
-      style={{ background: v.bg, color: v.text }}>
-      {dot && (
-        <span
-          className="w-1.5 h-1.5 rounded-full shrink-0"
-          style={{ background: v.dot }} />
-      )}
+    <span className={cn('inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded font-medium', pad, t.box, className)}>
+      {dot && <span aria-hidden className={cn('h-1.5 w-1.5 shrink-0 rounded-full', t.dot)} />}
       {display}
     </span>
   )

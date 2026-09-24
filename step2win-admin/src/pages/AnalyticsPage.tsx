@@ -1,464 +1,218 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
-import {
-  ResponsiveContainer,
-  CartesianGrid,
-  Tooltip,
-  XAxis,
-  YAxis,
-  Radar,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  RadialBarChart,
-  RadialBar,
-  ScatterChart,
-  Scatter,
-  Treemap,
-  ComposedChart,
-  Bar,
-  Line,
-} from 'recharts'
-import { adminApi } from '../services/adminApi'
-import type {
-  AdminChallenge,
-  AdminTransaction,
-  AdminUser,
-  AdminWithdrawal,
-  DashboardOverview,
-} from '../types/admin'
-import { formatKES } from '../utils/currency'
-import { Download, RefreshCw, ArrowRight } from 'lucide-react'
+import { Activity, Footprints, RefreshCw, Trophy, UserPlus, Users, Wallet } from 'lucide-react'
+import { PageHeader } from '../components/PageHeader'
+import { StatCard } from '../components/StatCard'
+import { Panel } from '../components/ui/Card'
+import { Button } from '../components/ui/Button'
+import { EmptyState } from '../components/ui/EmptyState'
+import { ErrorState } from '../components/ui/ErrorState'
+import { Skeleton } from '../components/ui/Skeleton'
+import { ChartLegend } from '../components/charts/ChartTooltip'
+import { SERIES } from '../lib/chartTheme'
+import { formatCompact, formatKES, formatNumber, formatPercent } from '../lib/format'
+import { financeApi } from '../components/finance/api'
+import { ChartSkeleton, MeterList, TimeBarChart, TimeLineChart, bucketDaily } from '../components/finance/charts'
+import type { AnalyticsReport } from '../components/finance/types'
+import { Figure, PeriodPicker, formatPeriod, periodParams, toNum, type Period } from '../components/finance/ui'
 
-type Timeframe = 'week' | 'month' | 'all'
+const STATUS_LABEL: Record<string, string> = { pending: 'Awaiting approval', active: 'Live', completed: 'Completed', cancelled: 'Cancelled' }
 
-function transactionTypeLabel(type: string): string {
-  switch (type) {
-    case 'deposit':
-      return 'Wallet Top-ups'
-    case 'withdrawal':
-      return 'M-Pesa/Bank Withdrawals'
-    case 'challenge_entry':
-      return 'Challenge Entry Fees'
-    case 'payout':
-      return 'Challenge Payouts'
-    case 'fee':
-      return 'Platform Fees'
-    case 'refund':
-      return 'Refunds'
-    default:
-      return type.replace('_', ' ')
+/** Retention cell: single-hue sequential wash (brand green), text stays ink. */
+function CohortTable({ cohorts }: { cohorts: AnalyticsReport['cohorts'] }) {
+  const weeks = Math.max(0, ...cohorts.map((c) => c.retention_pct.length))
+  const visible = cohorts.filter((c) => c.size > 0)
+  if (visible.length === 0) {
+    return <EmptyState size="compact" icon={UserPlus} title="No signups in the last 8 weeks" description="Cohorts appear once new accounts are created." />
   }
-}
-
-function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-surface-border bg-[#0C1117] p-4">
-      <h3 className="text-sm font-semibold text-ink-primary">{title}</h3>
-      {subtitle && <p className="mt-0.5 text-[11px] text-ink-muted">{subtitle}</p>}
-      <div className="mt-3">{children}</div>
-    </section>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[34rem] border-separate border-spacing-0.5 text-xs">
+        <caption className="sr-only">Share of each weekly signup cohort that synced steps in each following week</caption>
+        <thead>
+          <tr className="text-ink-muted">
+            <th scope="col" className="px-2 py-1.5 text-left font-medium">Signup week</th>
+            <th scope="col" className="px-2 py-1.5 text-right font-medium">Users</th>
+            {Array.from({ length: weeks }).map((_, i) => (
+              <th key={i} scope="col" className="px-1 py-1.5 text-center font-medium">W{i}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {visible.map((c) => (
+            <tr key={c.week_start}>
+              <th scope="row" className="whitespace-nowrap px-2 py-1.5 text-left font-medium text-ink-primary">
+                {format(new Date(`${c.week_start}T00:00:00`), 'd MMM')}
+              </th>
+              <td className="num px-2 py-1.5 text-right text-ink-secondary">{c.size}</td>
+              {Array.from({ length: weeks }).map((_, i) => {
+                const v = c.retention_pct[i]
+                if (v === undefined || v === null) return <td key={i} className="rounded-sm bg-surface-sunken/60" aria-label="Not yet reached" />
+                return (
+                  <td
+                    key={i}
+                    className="num rounded-sm px-1 py-1.5 text-center font-medium text-ink-primary"
+                    style={{ background: `color-mix(in srgb, var(--chart-1) ${Math.round(8 + v * 0.55)}%, var(--surface-card))` }}
+                  >
+                    {Math.round(v)}%
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
 export function AnalyticsPage() {
-  const navigate = useNavigate()
-  const [overview, setOverview] = useState<DashboardOverview | null>(null)
-  const [users, setUsers] = useState<AdminUser[]>([])
-  const [challenges, setChallenges] = useState<AdminChallenge[]>([])
-  const [transactions, setTransactions] = useState<AdminTransaction[]>([])
-  const [withdrawals, setWithdrawals] = useState<AdminWithdrawal[]>([])
-  const [timeframe, setTimeframe] = useState<Timeframe>('month')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [period, setPeriod] = useState<Period>({ preset: '30', from: '', to: '' })
+  const params = periodParams(period)
+  const q = useQuery({
+    queryKey: ['admin', 'finance', 'analytics', params],
+    queryFn: () => financeApi.analytics(params),
+    placeholderData: (prev) => prev,
+  })
+  const a = q.data
+  const loading = q.isLoading
+  const keys = ['signups', 'active_users', 'steps', 'challenge_joins', 'challenges_created']
+  const { rows, unit } = bucketDaily(a?.daily ?? [], keys)
+  // Averages don't sum: for weekly buckets use per-day values averaged.
+  const avgRows = unit === 'week'
+    ? rows.map((r) => ({ ...r, active_users: Math.round((Number(r.active_users) || 0) / (Number(r.days) || 7)), avg: Number(r.active_users) ? Math.round(Number(r.steps) / Number(r.active_users)) : 0 }))
+    : (a?.daily ?? []).map((d) => ({ ...d, avg: d.avg_steps_per_active }))
 
-  const loadAnalytics = useCallback(() => {
-    setLoading(true)
-    Promise.all([
-      adminApi.getOverview(timeframe === 'week' ? 7 : timeframe === 'month' ? 30 : 90),
-      adminApi.getUsers(),
-      adminApi.getChallenges(),
-      adminApi.getTransactions(),
-      adminApi.getWithdrawals(),
-    ])
-      .then(([overviewData, usersData, challengesData, transactionsData, withdrawalsData]) => {
-        setError('')
-        setOverview(overviewData)
-        setUsers(usersData)
-        setChallenges(challengesData)
-        setTransactions(transactionsData)
-        setWithdrawals(withdrawalsData)
-      })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false))
-  }, [timeframe])
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      loadAnalytics()
-    })
-  }, [loadAnalytics])
-
-  const days = timeframe === 'week' ? 7 : timeframe === 'month' ? 30 : 90
-
-  const filteredTransactions = useMemo(() => {
-    const cutoff = new Date()
-    cutoff.setDate(cutoff.getDate() - days)
-    return transactions.filter((tx) => new Date(tx.created_at) >= cutoff)
-  }, [transactions, days])
-
-  const filteredWithdrawals = useMemo(() => {
-    const cutoff = new Date()
-    cutoff.setDate(cutoff.getDate() - days)
-    return withdrawals.filter((w) => new Date(w.created_at) >= cutoff)
-  }, [withdrawals, days])
-
-  const summary = useMemo(() => {
-    const deposits = filteredTransactions
-      .filter((tx) => tx.type === 'deposit')
-      .reduce((sum, tx) => sum + Number(tx.amount), 0)
-    const payouts = filteredTransactions
-      .filter((tx) => tx.type === 'payout')
-      .reduce((sum, tx) => sum + Number(tx.amount), 0)
-    const withdrawalAmount = filteredWithdrawals.reduce((sum, w) => sum + Number(w.amount), 0)
-
-    const totalOrders = filteredTransactions.length + filteredWithdrawals.length
-    const successRate = filteredWithdrawals.length
-      ? Math.round((filteredWithdrawals.filter((w) => w.status === 'approved' || w.status === 'processing').length / filteredWithdrawals.length) * 100)
-      : 100
-
-    const activeUsers = overview?.users?.active_week ?? users.filter((u) => u.is_active).length
-    const completedChallenges = overview?.challenges?.completed_month ?? challenges.filter((c) => c.status === 'completed').length
-
-    return {
-      deposits,
-      payouts,
-      withdrawalAmount,
-      revenue: Math.max(0, deposits - payouts),
-      totalOrders,
-      successRate,
-      activeUsers,
-      completedChallenges,
-    }
-  }, [challenges, filteredTransactions, filteredWithdrawals, overview?.challenges?.completed_month, overview?.users?.active_week, users])
-
-  const radarData = useMemo(() => {
-    const totalUsers = Math.max(overview?.users?.total ?? users.length, 1)
-    const totalChallengesFromOverview =
-      (overview?.challenges_active ?? 0) +
-      (overview?.challenges_pending ?? 0) +
-      (overview?.challenges_completed ?? 0)
-    const totalChallenges = Math.max(totalChallengesFromOverview || challenges.length, 1)
-    const approvedOrProcessed = filteredWithdrawals.filter(
-      (w) => w.status === 'approved' || w.status === 'processing'
-    ).length
-    const withdrawalApprovalRate = filteredWithdrawals.length
-      ? (approvedOrProcessed / filteredWithdrawals.length) * 100
-      : 0
-    const marginRate = summary.deposits > 0
-      ? (summary.revenue / summary.deposits) * 100
-      : 0
-    const payoutCoverage = (summary.payouts + summary.withdrawalAmount) > 0
-      ? (summary.deposits / (summary.payouts + summary.withdrawalAmount)) * 100
-      : 0
-
-    return [
-      { metric: 'Active Users', value: Math.max(0, Math.min(100, Math.round((summary.activeUsers / totalUsers) * 100))) },
-      { metric: 'New User Share', value: Math.max(0, Math.min(100, Math.round(((overview?.users?.new_week ?? 0) / totalUsers) * 100))) },
-      { metric: 'Challenge Ops', value: Math.max(0, Math.min(100, Math.round((summary.completedChallenges / totalChallenges) * 100))) },
-      { metric: 'Withdrawal Approval', value: Math.max(0, Math.min(100, Math.round(withdrawalApprovalRate))) },
-      { metric: 'Margin Rate', value: Math.max(0, Math.min(100, Math.round(marginRate))) },
-      { metric: 'Payout Coverage', value: Math.max(0, Math.min(100, Math.round(payoutCoverage))) },
-    ]
-  }, [challenges.length, filteredWithdrawals, overview?.challenges_active, overview?.challenges_completed, overview?.challenges_pending, overview?.users?.new_week, overview?.users?.total, summary.activeUsers, summary.completedChallenges, summary.deposits, summary.payouts, summary.revenue, summary.withdrawalAmount, users.length])
-
-  const transactionMixData = useMemo(() => {
-    const totals = filteredTransactions.reduce<Record<string, number>>((acc, tx) => {
-      const key = tx.type
-      acc[key] = (acc[key] ?? 0) + Number(tx.amount)
-      return acc
-    }, {})
-    const totalAmount = Object.values(totals).reduce((sum, value) => sum + value, 0)
-    const palette = ['#22C55E', '#06B6D4', '#F59E0B', '#EF4444', '#8B5CF6', '#818CF8']
-
-    return Object.entries(totals)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([name, value], index) => ({
-        name: transactionTypeLabel(name),
-        value: totalAmount > 0 ? Number(((value / totalAmount) * 100).toFixed(1)) : 0,
-        fill: palette[index % palette.length],
-      }))
-  }, [filteredTransactions])
-
-  const scatterData = useMemo(() => {
-    const points = filteredTransactions.slice(-18).map((tx, idx) => {
-      const amount = Number(tx.amount)
-      return {
-        x: idx + 1,
-        y: Number((amount / 1000).toFixed(2)),
-        z: tx.type === 'deposit' ? 180 : 120,
-      }
-    })
-    return points.length ? points : [{ x: 1, y: 0.1, z: 120 }]
-  }, [filteredTransactions])
-
-  const allocationTree = useMemo(() => {
-    const challengeEntry = filteredTransactions
-      .filter((tx) => tx.type === 'challenge_entry')
-      .reduce((sum, tx) => sum + Number(tx.amount), 0)
-    const fee = filteredTransactions
-      .filter((tx) => tx.type === 'fee')
-      .reduce((sum, tx) => sum + Number(tx.amount), 0)
-
-    return [
-      { name: 'Wallet Top-ups', size: Math.max(1, Number(summary.deposits.toFixed(2))), fill: '#22C55E' },
-      { name: 'Challenge Payouts', size: Math.max(1, Number(summary.payouts.toFixed(2))), fill: '#06B6D4' },
-      { name: 'M-Pesa/Bank Withdrawals', size: Math.max(1, Number(summary.withdrawalAmount.toFixed(2))), fill: '#F59E0B' },
-      { name: 'Challenge Entry Fees', size: Math.max(1, Number(challengeEntry.toFixed(2))), fill: '#EF4444' },
-      { name: 'Platform Fees', size: Math.max(1, Number(fee.toFixed(2))), fill: '#8B5CF6' },
-    ]
-  }, [filteredTransactions, summary.deposits, summary.payouts, summary.withdrawalAmount])
-
-  const trendData = useMemo(() => {
-    const orderByDay = filteredTransactions.reduce<Record<string, number>>((acc, tx) => {
-      const key = format(new Date(tx.created_at), 'MMM dd')
-      acc[key] = (acc[key] ?? 0) + 1
-      return acc
-    }, {})
-
-    if (overview?.revenue_chart?.length) {
-      return overview.revenue_chart.map((item) => ({
-        label: item.date,
-        revenue: Math.max(0, Number(item.deposits) - Number(item.withdrawals)),
-        orders: orderByDay[item.date] ?? 0,
-      }))
-    }
-
-    const labels = Array.from({ length: days }, (_, index) => {
-      const date = new Date()
-      date.setDate(date.getDate() - (days - index - 1))
-      return format(date, 'MMM dd')
-    })
-
-    return labels.map((label) => ({ label, revenue: 0, orders: orderByDay[label] ?? 0 }))
-  }, [days, filteredTransactions, overview])
-
-  const exportSummaryCSV = () => {
-    const rows = [
-      ['section', 'metric', 'value'],
-      ['overview', 'total_users', overview?.users?.total ?? ''],
-      ['overview', 'active_week', overview?.users?.active_week ?? ''],
-      ['overview', 'new_week', overview?.users?.new_week ?? ''],
-      ['overview', 'live_challenges', overview?.challenges?.live ?? ''],
-      ['overview', 'week_deposits', overview?.finance?.week_deposits ?? ''],
-      ['overview', 'week_withdrawals', overview?.finance?.week_withdrawals ?? ''],
-      ['summary', 'revenue', summary.revenue],
-      ['summary', 'deposits', summary.deposits],
-      ['summary', 'payouts', summary.payouts],
-      ['summary', 'withdrawal_amount', summary.withdrawalAmount],
-      ['summary', 'total_orders', summary.totalOrders],
-      ['summary', 'success_rate', summary.successRate],
-    ]
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `analytics-summary-${new Date().toISOString().slice(0, 10)}.csv`
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
-  if (error) {
-    return <p className="text-down">{error}</p>
-  }
-
-  if (!overview) {
-    return <p className="text-ink-secondary">Loading analytics...</p>
-  }
+  const signups = (a?.daily ?? []).reduce((s, d) => s + d.signups, 0)
+  const joins = (a?.daily ?? []).reduce((s, d) => s + d.challenge_joins, 0)
+  const created = (a?.daily ?? []).reduce((s, d) => s + d.challenges_created, 0)
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-ink-primary">Charts</h1>
-          <p className="text-xs text-ink-muted">Operational analytics based on live Step2Win activity</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
-          <button
-            type="button"
-            onClick={() => loadAnalytics()}
-            className="inline-flex items-center gap-2 rounded-xl border border-surface-border bg-[#0C1117] px-3 py-2 text-xs font-semibold text-ink-secondary hover:text-ink-primary"
-          >
-            <RefreshCw size={14} /> Refresh
-          </button>
-          <button
-            type="button"
-            onClick={exportSummaryCSV}
-            className="inline-flex items-center gap-2 rounded-xl border border-surface-border bg-[#0C1117] px-3 py-2 text-xs font-semibold text-ink-secondary hover:text-ink-primary"
-          >
-            <Download size={14} /> Summary CSV
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/transactions')}
-            className="inline-flex items-center gap-2 rounded-xl border border-surface-border bg-[#0C1117] px-3 py-2 text-xs font-semibold text-ink-secondary hover:text-ink-primary"
-          >
-            Transactions <ArrowRight size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/withdrawals')}
-            className="inline-flex items-center gap-2 rounded-xl border border-surface-border bg-[#0C1117] px-3 py-2 text-xs font-semibold text-ink-secondary hover:text-ink-primary"
-          >
-            Withdrawals <ArrowRight size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/reports')}
-            className="inline-flex items-center gap-2 rounded-xl border border-surface-border bg-[#0C1117] px-3 py-2 text-xs font-semibold text-ink-secondary hover:text-ink-primary"
-          >
-            Reports <ArrowRight size={14} />
-          </button>
-          <div className="flex items-center gap-1 rounded-xl border border-surface-border bg-[#0C1117] p-1">
-            {([
-              { key: 'week', label: '7D' },
-              { key: 'month', label: '30D' },
-              { key: 'all', label: '90D' },
-            ] as const).map((option) => (
-              <button
-                key={option.key}
-                onClick={() => setTimeframe(option.key)}
-                className="rounded-lg px-3 py-1.5 text-xs font-semibold transition"
-                style={{
-                  background: timeframe === option.key ? '#151A25' : 'transparent',
-                  color: timeframe === option.key ? '#F0F2F8' : '#7B82A0',
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
+    <div className="space-y-5">
+      <PageHeader
+        title="Analytics"
+        description="Who walks, who comes back, and how challenges follow. Active = at least one step synced that day."
+        meta={a ? `${formatPeriod(a.period.from, a.period.to)} · ${a.period.timezone} · generated ${format(new Date(a.generated_at), 'HH:mm')}` : undefined}
+        actions={
+          <>
+            <PeriodPicker value={period} onChange={setPeriod} />
+            <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={q.isFetching} onClick={() => void q.refetch()}>
+              Refresh
+            </Button>
+          </>
+        }
+      />
+
+      {q.error && !a ? (
+        <Panel><ErrorState title="Could not load analytics" error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} /></Panel>
+      ) : (
+        <>
+          <section aria-label="Key metrics" className="grid grid-cols-2 gap-3 md:grid-cols-3 min-[87.5rem]:grid-cols-6">
+            <StatCard label="Total users" icon={Users} loading={loading} value={formatNumber(a?.users.total)} hint={a ? `${formatNumber(a.users.new)} new in period` : undefined} to="/users" />
+            <StatCard label="Active in period" icon={Activity} loading={loading} value={formatNumber(a?.users.active_in_period)}
+              hint={a && a.users.total ? `${formatPercent((a.users.active_in_period / a.users.total) * 100, { digits: 0 })} of all users` : undefined} />
+            <StatCard label="Avg daily active" icon={Activity} loading={loading} value={formatNumber(a?.users.avg_daily_active, 1)}
+              hint={a?.users.stickiness_pct !== null && a?.users.stickiness_pct !== undefined ? `${formatPercent(a.users.stickiness_pct, { digits: 0 })} of 30-day actives` : 'No 30-day actives'} />
+            <StatCard label="Active last 30 days" icon={Users} loading={loading} value={formatNumber(a?.users.active_last_30d)} hint={a ? `${formatNumber(a.users.active_last_7d)} in last 7 days` : undefined} />
+            <StatCard label="Steps per active day" icon={Footprints} loading={loading} value={formatNumber(a?.steps.avg_per_active_day)}
+              hint={a ? `${formatCompact(a.steps.total)} steps in period` : undefined} to="/steps" />
+            <StatCard label="Challenge joins" icon={Trophy} loading={loading} value={formatNumber(a?.challenges.joins)}
+              hint={a ? `${formatNumber(a.challenges.unique_joiners)} different users` : undefined} to="/challenges" />
+          </section>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Panel title="Daily active walkers" description={`Users with at least one step synced${unit === 'week' ? ' · weekly average per day' : ' per day'}`}
+              actions={a && <span className="num text-xs text-ink-muted">avg {formatNumber(a.users.avg_daily_active, 1)} per day</span>}>
+              {loading ? <ChartSkeleton height={220} /> : !a || a.users.active_in_period === 0 ? (
+                <EmptyState size="compact" icon={Activity} title="Nobody synced steps in this period" description="If users are walking, check step sync in ops monitoring." />
+              ) : (
+                <TimeLineChart rows={avgRows} unit={unit} kind="number" series={[{ key: 'active_users', label: 'Active walkers', color: SERIES[0] }]} />
+              )}
+            </Panel>
+
+            <Panel title="New signups" description={`Accounts created per ${unit}`} actions={a && <span className="num text-xs text-ink-muted">{formatNumber(signups)} total</span>}>
+              {loading ? <ChartSkeleton height={220} /> : signups === 0 ? (
+                <EmptyState size="compact" icon={UserPlus} title="No new accounts in this period" />
+              ) : (
+                <TimeBarChart rows={rows} unit={unit} kind="number" series={[{ key: 'signups', label: 'Signups', color: SERIES[0] }]} />
+              )}
+            </Panel>
           </div>
-        </div>
-      </div>
 
-      {loading && (
-        <div className="rounded-xl border border-surface-border bg-[#0C1117] px-4 py-3 text-xs text-ink-muted">
-          Refreshing analytics...
-        </div>
-      )}
+          <Panel title="Retention by signup week" description="Share of each weekly signup cohort that synced steps in week 0, 1, 2… after signing up · last 8 weeks">
+            {loading || !a ? <div className="space-y-2" aria-hidden>{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={24} />)}</div> : <CohortTable cohorts={a.cohorts} />}
+          </Panel>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <div className="xl:col-span-2">
-          <Card title="Team Skills Assessment" subtitle="Current KPI readiness across key areas">
-            <ResponsiveContainer width="100%" height={230}>
-              <RadarChart data={radarData}>
-                <PolarGrid stroke="#1F2937" />
-                <PolarAngleAxis dataKey="metric" tick={{ fill: '#7B82A0', fontSize: 11 }} />
-                <PolarRadiusAxis domain={[0, 100]} tick={{ fill: '#3D4260', fontSize: 10 }} />
-                <Radar name="Score" dataKey="value" stroke="#22C55E" fill="#22C55E" fillOpacity={0.35} />
-              </RadarChart>
-            </ResponsiveContainer>
-          </Card>
-        </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Panel title="Average steps per active walker" description={`Steps divided by active walkers, per ${unit === 'week' ? 'week (daily average)' : 'day'}`}>
+              {loading ? <ChartSkeleton height={220} /> : !a || a.steps.total === 0 ? (
+                <EmptyState size="compact" icon={Footprints} title="No steps synced in this period" />
+              ) : (
+                <TimeLineChart rows={avgRows} unit={unit} kind="number" series={[{ key: 'avg', label: 'Steps per walker', color: SERIES[0] }]} />
+              )}
+            </Panel>
 
-        <Card title="Transaction Mix" subtitle="Share by value across wallet and challenge flows">
-          <ResponsiveContainer width="100%" height={200}>
-            <RadialBarChart data={transactionMixData} innerRadius="20%" outerRadius="90%" barSize={10}>
-              <RadialBar background dataKey="value" cornerRadius={8} />
-              <Tooltip
-                contentStyle={{ background: '#191C28', border: '1px solid #21263A', borderRadius: 10 }}
-                formatter={(value: unknown, name: unknown) => [`${Number(value ?? 0)}%`, String(name ?? '')]}
-              />
-            </RadialBarChart>
-          </ResponsiveContainer>
-          <div className="mt-1 space-y-1">
-            {transactionMixData.map((entry) => (
-              <div key={entry.name} className="flex items-center justify-between text-xs">
-                <span className="flex items-center gap-2 text-ink-secondary">
-                  <span className="h-2 w-2 rounded-full" style={{ background: entry.fill }} />
-                  {entry.name}
-                </span>
-                <span className="mono text-ink-primary">{entry.value}%</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <div className="xl:col-span-2">
-          <Card title="Transaction Size Distribution" subtitle="Recent transaction amounts (KSh thousands)">
-            <ResponsiveContainer width="100%" height={200}>
-              <ScatterChart>
-                <CartesianGrid stroke="#1F2937" strokeDasharray="3 3" />
-                <XAxis dataKey="x" tick={{ fill: '#7B82A0', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis dataKey="y" tick={{ fill: '#7B82A0', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  cursor={{ strokeDasharray: '3 3' }}
-                  contentStyle={{ background: '#191C28', border: '1px solid #21263A', borderRadius: 10 }}
-                  formatter={(value: unknown) => [`KSh ${Number(value ?? 0).toFixed(2)}k`, 'Value']}
+            <Panel title="How far active users walk" description="Walker-days in the period by daily step total">
+              {loading || !a ? <div className="space-y-4" aria-hidden>{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} height={24} />)}</div> : a.steps.user_days === 0 ? (
+                <EmptyState size="compact" icon={Footprints} title="No walker-days in this period" />
+              ) : (
+                <MeterList
+                  color={SERIES[0]}
+                  format={(v) => `${formatNumber(v)} · ${formatPercent((v / a.steps.user_days) * 100, { digits: 0 })}`}
+                  rows={a.steps.distribution.map((d) => ({ key: d.label, label: `${d.label} steps`, value: d.user_days }))}
                 />
-                <Scatter data={scatterData} fill="#22C55E" />
-              </ScatterChart>
-            </ResponsiveContainer>
-          </Card>
-        </div>
+              )}
+            </Panel>
+          </div>
 
-        <Card title="Cashflow Allocation" subtitle="Breakdown of live KSh movement by category">
-          <ResponsiveContainer width="100%" height={200}>
-            <Treemap data={allocationTree} dataKey="size" stroke="#0C1117" fill="#22C55E" />
-          </ResponsiveContainer>
-          <div className="mt-1 grid grid-cols-2 gap-1">
-            {allocationTree.map((item) => (
-              <p key={item.name} className="text-[11px] text-ink-secondary">
-                {item.name}: <span className="mono text-ink-primary">{formatKES(item.size)}</span>
-              </p>
-            ))}
-          </div>
-        </Card>
-      </div>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <Panel className="xl:col-span-2" title="Challenge activity" description={`Joins and new challenges per ${unit}`}
+              actions={a && <ChartLegend items={[
+                { label: 'Joins', color: SERIES[0], value: formatNumber(joins) },
+                { label: 'Challenges created', color: SERIES[1], value: formatNumber(created) },
+              ]} />}>
+              {loading ? <ChartSkeleton height={220} /> : joins + created === 0 ? (
+                <EmptyState size="compact" icon={Trophy} title="No challenge activity in this period" />
+              ) : (
+                <TimeBarChart rows={rows} unit={unit} kind="number" series={[
+                  { key: 'challenge_joins', label: 'Joins', color: SERIES[0] },
+                  { key: 'challenges_created', label: 'Challenges created', color: SERIES[1] },
+                ]} />
+              )}
+            </Panel>
 
-      <Card title="Net Margin & Transaction Trend" subtitle="Derived from deposits, payouts, withdrawals and order volume">
-        <ResponsiveContainer width="100%" height={220}>
-          <ComposedChart data={trendData}>
-            <CartesianGrid stroke="#1F2937" strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="label" tick={{ fill: '#7B82A0', fontSize: 11 }} axisLine={false} tickLine={false} />
-            <YAxis yAxisId="left" tick={{ fill: '#7B82A0', fontSize: 11 }} axisLine={false} tickLine={false} />
-            <YAxis yAxisId="right" orientation="right" tick={{ fill: '#7B82A0', fontSize: 11 }} axisLine={false} tickLine={false} />
-            <Tooltip
-              contentStyle={{ background: '#191C28', border: '1px solid #21263A', borderRadius: 10 }}
-              formatter={(value: unknown, name: unknown) => {
-                if (name === 'revenue') return [formatKES(Number(value ?? 0)), 'Net Platform Margin']
-                return [String(value ?? 0), 'Transactions']
-              }}
-            />
-            <Bar yAxisId="right" dataKey="orders" fill="#06B6D4" radius={[4, 4, 0, 0]} />
-            <Line yAxisId="left" type="monotone" dataKey="revenue" stroke="#22C55E" strokeWidth={2.2} dot={false} />
-          </ComposedChart>
-        </ResponsiveContainer>
-        <div className="mt-2 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-          <div className="rounded-lg border border-surface-border bg-surface-base p-2">
-            <p className="text-ink-muted">Revenue</p>
-            <p className="mono font-semibold text-ink-primary">{formatKES(summary.revenue)}</p>
+            <Panel title="Challenges created in period" description="By current status">
+              {loading || !a ? <div className="space-y-4" aria-hidden>{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={24} />)}</div> : a.challenges.created === 0 ? (
+                <EmptyState size="compact" icon={Trophy} title="No challenges created in this period" />
+              ) : (
+                <MeterList color={SERIES[1]} format={(v) => formatNumber(v)}
+                  rows={Object.entries(a.challenges.status).map(([k, v]) => ({ key: k, label: STATUS_LABEL[k] ?? k, value: v }))} />
+              )}
+            </Panel>
           </div>
-          <div className="rounded-lg border border-surface-border bg-surface-base p-2">
-            <p className="text-ink-muted">Wallet Top-ups</p>
-            <p className="mono font-semibold text-up">{formatKES(summary.deposits)}</p>
-          </div>
-          <div className="rounded-lg border border-surface-border bg-surface-base p-2">
-            <p className="text-ink-muted">Total Transactions</p>
-            <p className="mono font-semibold text-ink-primary">{summary.totalOrders.toLocaleString()}</p>
-          </div>
-          <div className="rounded-lg border border-surface-border bg-surface-base p-2">
-            <p className="text-ink-muted">Withdrawal Approval Rate</p>
-            <p className="mono font-semibold text-up">{summary.successRate}%</p>
-          </div>
-        </div>
-      </Card>
+
+          <Panel title="Conversion and outcomes" description="From signing up to paying in and finishing a challenge">
+            {loading || !a ? (
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-5" aria-hidden>{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} height={40} />)}</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-x-4 gap-y-5 md:grid-cols-3 xl:grid-cols-5">
+                <Figure label="New users who joined a challenge" value={a.money.new_user_join_rate_pct === null ? '—' : formatPercent(a.money.new_user_join_rate_pct, { digits: 0 })}
+                  hint={`${formatNumber(a.money.new_users_joined_challenge)} of ${formatNumber(a.users.new)} new users`} />
+                <Figure label="Users who deposited" value={formatNumber(a.money.depositors)} hint="At least one deposit credited in period" />
+                <Figure label="Avg participants per challenge" value={formatNumber(a.challenges.avg_participants, 1)} hint={`${formatNumber(a.challenges.created)} challenges created`} />
+                <Figure label="Avg entry contribution" value={a.challenges.avg_entry_fee_kes === null ? '—' : formatKES(toNum(a.challenges.avg_entry_fee_kes))} hint="Challenges created in period" />
+                <Figure label="Qualified finishers" value={a.challenges.qualification_rate_pct === null ? '—' : formatPercent(a.challenges.qualification_rate_pct, { digits: 0 })}
+                  hint={a.challenges.finished_participants ? `${formatNumber(a.challenges.qualified_participants)} of ${formatNumber(a.challenges.finished_participants)} in finalised challenges` : 'No challenges finalised in period'} />
+              </div>
+            )}
+          </Panel>
+
+          <p className="flex items-center gap-1.5 text-xs text-ink-muted">
+            <Wallet size={12} aria-hidden /> Money totals for the same period are in Financial reports.
+          </p>
+        </>
+      )}
     </div>
   )
 }

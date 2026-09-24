@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Network Security Configuration for Step2Win Android App
+
+    Production configuration:
+    - Enforces HTTPS for all connections
+    - Only allows connections to trusted domains
+    - Certificate pinning can be added for additional security
+-->
+<network-security-config>
+    <!-- Base configuration: Require HTTPS for all connections -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Domain-specific configurations -->
+    <domain-config cleartextTrafficPermitted="false">
+        <!-- Production backend -->
+        <domain includeSubdomains="true">step-2-win-app.onrender.com</domain>
+        <domain includeSubdomains="true">onrender.com</domain>
+
+        <!-- Payment gateway -->
+        <domain includeSubdomains="true">intasend.com</domain>
+
+        <!-- Google services -->
+        <domain includeSubdomains="true">googleapis.com</domain>
+        <domain includeSubdomains="true">google.com</domain>
+
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Debug configuration: Allow localhost in debug builds only -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

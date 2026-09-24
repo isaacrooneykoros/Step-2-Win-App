@@ -157,11 +157,18 @@ def document_detail_admin(request, pk):
     uploaded_file = request.FILES.get("uploaded_file")
     data = request.data.copy()
 
+    # Edits are staged as a draft. They only reach users through publish, so
+    # saving work on a published policy never changes what users see.
+    if "content_html" in data:
+        staged = data.get("content_html")
+        del data["content_html"]
+        data["draft_html"] = staged or ""
+
     if uploaded_file:
         # Convert file to HTML automatically
         try:
             html, file_type = process_uploaded_file(uploaded_file, uploaded_file.name)
-            data["content_html"] = html
+            data["draft_html"] = html
             data["file_type"] = file_type
             # Save the original file
             doc.uploaded_file = uploaded_file
@@ -244,7 +251,8 @@ def publish_document(request, pk):
     except LegalDocument.DoesNotExist:
         return Response({"error": "Document not found"}, status=404)
 
-    if not doc.content_html.strip():
+    staged = doc.draft_html if doc.draft_html.strip() else doc.content_html
+    if not staged.strip():
         return Response(
             {"error": "Cannot publish an empty document. Add content first."},
             status=400,
@@ -252,9 +260,6 @@ def publish_document(request, pk):
 
     notify = request.data.get("notify_users", False)
     change_summary = request.data.get("change_summary", "")
-
-    doc.notify_users = notify
-    doc.change_summary = change_summary
 
     # Save historical version BEFORE incrementing
     old_version = doc.version
@@ -271,6 +276,10 @@ def publish_document(request, pk):
             },
         )
 
+    doc.notify_users = notify
+    doc.change_summary = change_summary
+    doc.content_html = staged
+    doc.draft_html = ""
     doc.publish(user=request.user)
 
     # Save new version to history
@@ -368,8 +377,9 @@ def restore_version(request, pk, version_id):
     except (LegalDocument.DoesNotExist, LegalDocumentVersion.DoesNotExist):
         return Response({"error": "Document or version not found"}, status=404)
 
-    doc.content_html = version.content_html
-    doc.status = "draft"  # requires re-publishing
+    # Restore into the draft; the live version stays online until the admin
+    # reviews and publishes it.
+    doc.draft_html = version.content_html
     doc.last_edited_by = request.user
     doc.save()
 

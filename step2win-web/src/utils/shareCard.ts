@@ -6,6 +6,21 @@ export type StepShareCardInput = {
   minutes: number;
 };
 
+// Brand palette (mirrors the light theme tokens in index.css).
+const C = {
+  page: '#F6F5F2',
+  card: '#FFFFFF',
+  ink: '#13191C',
+  secondary: '#51595D',
+  muted: '#6A7276',
+  border: '#E3E0DA',
+  brand: '#14855D',
+  brandSoft: '#E6F3EC',
+  reward: '#F5A30A',
+};
+const FONT = '"DM Sans Variable", "DM Sans", "Segoe UI", sans-serif';
+
+/** 1080×1350 (4:5) share image of today's real step data. */
 export async function buildStepShareCard(input: StepShareCardInput): Promise<Blob> {
   const width = 1080;
   const height = 1350;
@@ -18,55 +33,56 @@ export async function buildStepShareCard(input: StepShareCardInput): Promise<Blo
     throw new Error('Could not create share card');
   }
 
-  const bg = ctx.createLinearGradient(0, 0, width, height);
-  bg.addColorStop(0, '#0F172A');
-  bg.addColorStop(0.5, '#111827');
-  bg.addColorStop(1, '#1E3A8A');
-  ctx.fillStyle = bg;
+  // Make sure the self-hosted font is ready before drawing text.
+  await document.fonts?.load?.(`700 64px ${FONT}`).catch(() => null);
+
+  ctx.fillStyle = C.page;
   ctx.fillRect(0, 0, width, height);
 
-  // Atmosphere glows
-  drawGlow(ctx, 180, 200, 240, 'rgba(79, 156, 249, 0.22)');
-  drawGlow(ctx, 920, 280, 270, 'rgba(52, 211, 153, 0.18)');
-  drawGlow(ctx, 540, 1100, 340, 'rgba(167, 139, 250, 0.2)');
-
-  // Header
-  ctx.fillStyle = '#E2E8F0';
-  ctx.font = '700 56px "DM Sans", "Segoe UI", sans-serif';
-  ctx.fillText('Step2Win Daily Win', 72, 120);
-
-  ctx.fillStyle = '#93C5FD';
-  ctx.font = '500 34px "DM Sans", "Segoe UI", sans-serif';
-  ctx.fillText(input.dateLabel, 72, 172);
+  // Brand header
+  drawMark(ctx, 80, 80, 88);
+  ctx.fillStyle = C.ink;
+  ctx.font = `700 44px ${FONT}`;
+  ctx.fillText('Step', 196, 138);
+  const stepW = ctx.measureText('Step').width;
+  ctx.fillStyle = C.brand;
+  ctx.fillText('2', 196 + stepW, 138);
+  const twoW = ctx.measureText('2').width;
+  ctx.fillStyle = C.ink;
+  ctx.fillText('Win', 196 + stepW + twoW, 138);
 
   // Main card
-  roundRect(ctx, 60, 220, width - 120, 760, 36, 'rgba(15, 23, 42, 0.72)', 'rgba(148, 163, 184, 0.2)');
+  roundRect(ctx, 60, 230, width - 120, 660, 44, C.card, C.border);
 
-  ctx.fillStyle = '#F8FAFC';
-  ctx.font = '700 48px "DM Sans", "Segoe UI", sans-serif';
-  ctx.fillText('Today I walked', 100, 310);
+  ctx.fillStyle = C.muted;
+  ctx.font = `600 30px ${FONT}`;
+  ctx.fillText(input.dateLabel.toUpperCase(), 120, 320);
 
-  ctx.fillStyle = '#60A5FA';
-  ctx.font = '800 116px "DM Sans", "Segoe UI", sans-serif';
-  ctx.fillText(input.steps.toLocaleString(), 100, 430);
+  ctx.fillStyle = C.ink;
+  ctx.font = `700 168px ${FONT}`;
+  ctx.fillText(input.steps.toLocaleString('en-KE'), 112, 500);
 
-  ctx.fillStyle = '#E2E8F0';
-  ctx.font = '700 52px "DM Sans", "Segoe UI", sans-serif';
-  ctx.fillText('steps', 100, 495);
+  ctx.fillStyle = C.secondary;
+  ctx.font = `500 44px ${FONT}`;
+  ctx.fillText('steps walked', 120, 572);
 
-  drawMetric(ctx, 100, 560, 'Distance', `${input.km.toFixed(2)} km`, '#34D399');
-  drawMetric(ctx, 100, 670, 'Calories', `${input.kcal.toLocaleString()} kcal`, '#FBBF24');
-  drawMetric(ctx, 100, 780, 'Active Time', `${input.minutes} min`, '#A78BFA');
+  // Divider
+  ctx.fillStyle = C.border;
+  ctx.fillRect(120, 650, width - 240, 2);
 
-  // CTA footer
-  roundRect(ctx, 60, 1020, width - 120, 230, 30, 'rgba(30, 64, 175, 0.35)', 'rgba(96, 165, 250, 0.5)');
-  ctx.fillStyle = '#DBEAFE';
-  ctx.font = '700 44px "DM Sans", "Segoe UI", sans-serif';
-  ctx.fillText('Join me on Step2Win', 100, 1120);
+  // Metrics, three columns
+  const colW = (width - 240) / 3;
+  drawMetric(ctx, 120, 740, 'Distance', `${input.km.toFixed(1)} km`);
+  drawMetric(ctx, 120 + colW, 740, 'Active', `${input.minutes} min`);
+  drawMetric(ctx, 120 + colW * 2, 740, 'Calories', `${input.kcal.toLocaleString('en-KE')} kcal`);
 
-  ctx.fillStyle = '#BFDBFE';
-  ctx.font = '500 31px "DM Sans", "Segoe UI", sans-serif';
-  ctx.fillText('Track steps, challenge friends, and earn rewards.', 100, 1180);
+  // Footer
+  ctx.fillStyle = C.ink;
+  ctx.font = `700 46px ${FONT}`;
+  ctx.fillText('Walk with me on Step2Win', 80, 1080);
+  ctx.fillStyle = C.secondary;
+  ctx.font = `500 32px ${FONT}`;
+  ctx.fillText('Daily steps, community challenges, real rewards.', 80, 1138);
 
   return await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -79,40 +95,40 @@ export async function buildStepShareCard(input: StepShareCardInput): Promise<Blo
   });
 }
 
-function drawMetric(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  label: string,
-  value: string,
-  accent: string,
-) {
-  ctx.fillStyle = accent;
-  ctx.beginPath();
-  ctx.arc(x + 12, y - 12, 10, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = '#CBD5E1';
-  ctx.font = '500 30px "DM Sans", "Segoe UI", sans-serif';
-  ctx.fillText(label, x + 38, y);
-
-  ctx.fillStyle = '#F8FAFC';
-  ctx.font = '700 42px "DM Sans", "Segoe UI", sans-serif';
-  ctx.fillText(value, x + 38, y + 50);
+function drawMetric(ctx: CanvasRenderingContext2D, x: number, y: number, label: string, value: string) {
+  ctx.fillStyle = C.muted;
+  ctx.font = `500 30px ${FONT}`;
+  ctx.fillText(label, x, y);
+  ctx.fillStyle = C.ink;
+  ctx.font = `700 52px ${FONT}`;
+  ctx.fillText(value, x, y + 66);
 }
 
-function drawGlow(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  radius: number,
-  color: string,
-) {
-  const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
-  g.addColorStop(0, color);
-  g.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+/** Stair mark from BrandMark, drawn at (x, y) with the given size. */
+function drawMark(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
+  const s = size / 40;
+  roundRect(ctx, x, y, size, size, 11 * s, C.brand, C.brand);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 3.4;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(11, 29);
+  ctx.lineTo(17.5, 29);
+  ctx.lineTo(17.5, 22.5);
+  ctx.lineTo(24, 22.5);
+  ctx.lineTo(24, 16);
+  ctx.lineTo(30.5, 16);
+  ctx.lineTo(30.5, 9.5);
+  ctx.stroke();
+  ctx.fillStyle = C.reward;
+  ctx.beginPath();
+  ctx.arc(30.5, 9.5, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function roundRect(

@@ -2,17 +2,25 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStepsSyncStore } from '../store/stepsSyncStore';
 import { getStoredAccessToken, resolveWsBaseUrl } from '../config/network';
+import { usePreference } from '../components/settings/preferences';
 
 export function useStepsWebSocket() {
   const queryClient = useQueryClient();
   const setStepsSocketConnected = useStepsSyncStore((state) => state.setStepsSocketConnected);
   const setLastStepsUpdateAt = useStepsSyncStore((state) => state.setLastStepsUpdateAt);
   const wsBase = resolveWsBaseUrl();
+  // Data saver pauses the live socket; steps still refresh after each sync and on resume.
+  const dataSaver = usePreference('dataSaver');
 
   useEffect(() => {
     let socket: WebSocket | null = null;
     let reconnectTimer: number | undefined;
     let cancelled = false;
+
+    if (dataSaver) {
+      setStepsSocketConnected(false);
+      return;
+    }
 
     const connect = async () => {
       const token = await getStoredAccessToken();
@@ -66,5 +74,5 @@ export function useStepsWebSocket() {
       }
       socket?.close();
     };
-  }, [queryClient, setStepsSocketConnected, setLastStepsUpdateAt, wsBase]);
+  }, [dataSaver, queryClient, setStepsSocketConnected, setLastStepsUpdateAt, wsBase]);
 }

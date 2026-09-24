@@ -1,230 +1,161 @@
-import { Footprints, AlertCircle, CheckCircle2, HelpCircle } from 'lucide-react';
+import { Footprints, AlertCircle, CheckCircle2, HelpCircle, RefreshCw, type LucideIcon } from 'lucide-react';
 import { usePermissionStatus } from '../hooks/usePermissionStatus';
+import { IconTile, Pill, type Tone } from './ui/Pill';
+import Button from './ui/Button';
+import { permissionCopy } from '../utils/platform';
 
 interface Props {
   compact?: boolean;
 }
 
-/**
- * Displays current device permission status with visual indicators.
- * Shows green (granted), red (denied), or gray (unavailable/unknown).
- */
-export function PermissionStatusIndicator({ compact = true }: Props) {
-  const { permissionStatus, isAndroid, requestPermissions, isRequesting } = usePermissionStatus();
-  const state = permissionStatus.activityRecognition;
+type ActivityState = 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale' | 'unavailable' | string;
 
-  // Determine indicator styling
-  let icon = <HelpCircle size={16} />;
-  let bgColor = 'bg-gray-200';
-  let textColor = 'text-gray-700';
-  let label = 'Unknown';
-  let tooltipText = 'Permission status unknown';
-  let isGranted = false;
-  let isDenied = false;
+interface StatusCopy {
+  label: string;
+  tone: Tone;
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  action?: string;
+}
 
+/** Plain-language description of the physical-activity permission. */
+function describe(state: ActivityState): StatusCopy {
   switch (state) {
     case 'granted':
-      icon = <CheckCircle2 size={16} />;
-      bgColor = 'bg-green-100';
-      textColor = 'text-green-700';
-      label = 'Enabled';
-      tooltipText = 'Physical activity permission is enabled';
-      isGranted = true;
-      break;
+      return {
+        label: 'Allowed',
+        tone: 'success',
+        icon: CheckCircle2,
+        title: 'Step counting is on',
+        description: 'Your phone counts steps in the background and Step2Win syncs them for you.',
+      };
     case 'denied':
-      icon = <AlertCircle size={16} />;
-      bgColor = 'bg-red-100';
-      textColor = 'text-red-700';
-      label = 'Disabled';
-      tooltipText = 'Physical activity permission is disabled. Tap to enable in Settings.';
-      isDenied = true;
-      break;
-    case 'prompt':
-    case 'prompt-with-rationale':
-      icon = <HelpCircle size={16} />;
-      bgColor = 'bg-yellow-100';
-      textColor = 'text-yellow-700';
-      label = 'Not set';
-      tooltipText = 'Tap to enable physical activity permission';
-      break;
+      return {
+        label: 'Blocked',
+        tone: 'danger',
+        icon: AlertCircle,
+        title: 'Step counting is off',
+        description: `Step2Win can’t count your steps until you allow ${permissionCopy().motionName}. If nothing happens, allow it in ${permissionCopy().settingsName}.`,
+        action: `Allow ${permissionCopy().motionName}`,
+      };
     case 'unavailable':
-      icon = <AlertCircle size={16} />;
-      bgColor = 'bg-gray-100';
-      textColor = 'text-gray-600';
-      label = 'Unavailable';
-        tooltipText = 'Physical activity permission is not available on this device';
-      break;
+      return {
+        label: 'Not available',
+        tone: 'neutral',
+        icon: AlertCircle,
+        title: 'No step sensor found',
+        description: 'This phone doesn’t report steps to apps, so Step2Win can’t count them here.',
+      };
+    default:
+      return {
+        label: 'Not set',
+        tone: 'warning',
+        icon: HelpCircle,
+        title: 'Set up step counting',
+        description: `Allow ${permissionCopy().motionName} so your phone can count steps for challenges.`,
+        action: 'Set up step counting',
+      };
   }
+}
 
-  if (!isAndroid) {
-    return null;
-  }
+/**
+ * Current physical-activity permission. `compact` renders a small status pill (tap to fix);
+ * the full variant is a labelled badge with an action. Android and iOS apps only.
+ */
+export function PermissionStatusIndicator({ compact = true }: Props) {
+  const { permissionStatus, hasStepCounter, requestPermissions, isRequesting } = usePermissionStatus();
+  const state = permissionStatus.activityRecognition;
+  const copy = describe(state);
+  const needsAction = Boolean(copy.action);
 
-  // Compact dot indicator (for header)
+  if (!hasStepCounter) return null;
+
   if (compact) {
     return (
       <button
+        type="button"
         onClick={() => {
-          if (isDenied || state === 'prompt' || state === 'prompt-with-rationale') {
-            requestPermissions();
-          }
+          if (needsAction) void requestPermissions();
         }}
-        disabled={isRequesting || state === 'unavailable'}
-        className="group relative"
-        title={tooltipText}
+        disabled={isRequesting || !needsAction}
+        className="inline-flex min-h-[44px] items-center disabled:cursor-default"
+        aria-label={`Step counting: ${copy.label}${needsAction ? '. Tap to allow.' : ''}`}
+        title={copy.description}
       >
-        <div
-          className={`w-3 h-3 rounded-full ${
-            isGranted
-              ? 'bg-green-500'
-              : isDenied
-                ? 'bg-red-500'
-                : state === 'unavailable'
-                  ? 'bg-gray-400'
-                  : 'bg-yellow-500'
-          } transition-all`}
-        />
-
-        {/* Tooltip on hover */}
-        <div
-          className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50"
-        >
-          {tooltipText}
-        </div>
+        <Pill tone={copy.tone} icon={Footprints}>
+          {copy.label}
+        </Pill>
       </button>
     );
   }
 
-  // Full badge (for settings page)
   return (
-    <div
-      className={`flex items-center gap-2 px-3 py-2 rounded-xl ${bgColor} ${textColor} transition-colors`}
-    >
-      <Footprints size={16} />
-      {icon}
-      <span className="text-sm font-medium">{label}</span>
-
-      {isDenied && (
-        <button
-          onClick={() => requestPermissions()}
-          disabled={isRequesting}
-          className="ml-auto text-xs font-semibold underline hover:opacity-75 disabled:opacity-50"
-        >
-          {isRequesting ? 'Requesting...' : 'Enable'}
-        </button>
-      )}
-
-      {(state === 'prompt' || state === 'prompt-with-rationale') && (
-        <button
-          onClick={() => requestPermissions()}
-          disabled={isRequesting}
-          className="ml-auto text-xs font-semibold underline hover:opacity-75 disabled:opacity-50"
-        >
-          {isRequesting ? 'Requesting...' : 'Set up'}
-        </button>
+    <div className="flex items-center gap-3 rounded-control bg-bg-sunken px-3 py-2">
+      <IconTile icon={Footprints} tone={copy.tone} size="sm" />
+      <div className="min-w-0 flex-1">
+        <p className="text-callout font-semibold text-text-primary">Step counting</p>
+        <p className="text-caption text-text-muted">{copy.label}</p>
+      </div>
+      {needsAction && (
+        <Button size="sm" variant="secondary" onClick={() => requestPermissions()} isLoading={isRequesting} loadingText="Asking">
+          {state === 'denied' ? 'Allow' : 'Set up'}
+        </Button>
       )}
     </div>
   );
 }
 
 /**
- * Full permission status card for settings/profile pages
+ * Full physical-activity permission card for Settings.
  */
 export function PermissionStatusCard() {
-  const { permissionStatus, isAndroid, requestPermissions, isRequesting, checkPermissions } =
-    usePermissionStatus();
+  const { permissionStatus, hasStepCounter, requestPermissions, isRequesting, checkPermissions, isChecking } = usePermissionStatus();
 
-  if (!isAndroid) {
+  if (!hasStepCounter) {
     return (
-      <div className="card p-4 bg-gray-50 border border-gray-200 rounded-2xl">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
-            <AlertCircle size={20} className="text-gray-500" />
-          </div>
-          <div className="flex-1">
-            <h3 className="text-text-primary font-semibold text-sm">Device Permissions</h3>
-            <p className="text-text-secondary text-xs mt-1">
-              Step tracking is only available on Android devices. Please install the app on an Android phone.
-            </p>
-          </div>
+      <div className="flex items-start gap-3 rounded-card bg-bg-sunken p-4">
+        <IconTile icon={Footprints} tone="neutral" />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-callout font-semibold text-text-primary">Step counting needs the Step2Win app</h3>
+          <p className="mt-0.5 text-caption text-text-muted">
+            Your steps are counted by your phone’s motion sensor. Install Step2Win on your Android phone or iPhone to track them.
+          </p>
         </div>
       </div>
     );
   }
 
   const state = permissionStatus.activityRecognition;
-  let bgColor = 'bg-blue-50';
-  let borderColor = 'border-blue-200';
-  let titleColor = 'text-blue-900';
-  let descColor = 'text-blue-700';
-  let icon = <Footprints size={24} className="text-blue-600" />;
-  let statusLabel = 'Permission Status';
-  let statusDesc = '';
-  let actionButton = null;
-
-  if (state === 'granted') {
-    bgColor = 'bg-green-50';
-    borderColor = 'border-green-200';
-    titleColor = 'text-green-900';
-    descColor = 'text-green-700';
-    icon = <CheckCircle2 size={24} className="text-green-600" />;
-    statusLabel = 'Step Tracking Enabled ✓';
-    statusDesc = 'Your device is ready to track steps. Keep the app running in the background for continuous counting.';
-  } else if (state === 'denied') {
-    bgColor = 'bg-red-50';
-    borderColor = 'border-red-200';
-    titleColor = 'text-red-900';
-    descColor = 'text-red-700';
-    icon = <AlertCircle size={24} className="text-red-600" />;
-    statusLabel = 'Step Tracking Disabled';
-    statusDesc =
-      'To count your steps, you need to enable Activity Recognition permission in your device settings.';
-    actionButton = (
-      <button
-        onClick={() => requestPermissions()}
-        disabled={isRequesting}
-        className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50"
-      >
-        {isRequesting ? 'Requesting...' : 'Enable Permission'}
-      </button>
-    );
-  } else if (state === 'unavailable') {
-    bgColor = 'bg-gray-50';
-    borderColor = 'border-gray-200';
-    titleColor = 'text-gray-900';
-    descColor = 'text-gray-700';
-    icon = <AlertCircle size={24} className="text-gray-600" />;
-    statusLabel = 'Not Available';
-    statusDesc = 'Step tracking is not available on this device. This usually means the device does not have a step counter sensor.';
-  } else {
-    // prompt or unknown
-    statusDesc = 'Set up step tracking to start counting your steps.';
-    actionButton = (
-      <button
-        onClick={() => requestPermissions()}
-        disabled={isRequesting}
-        className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
-      >
-        {isRequesting ? 'Requesting...' : 'Set Up Step Tracking'}
-      </button>
-    );
-  }
+  const copy = describe(state);
 
   return (
-    <div className={`card p-4 border-2 ${bgColor} ${borderColor} rounded-2xl`}>
+    <div className="rounded-card bg-bg-sunken p-4">
       <div className="flex items-start gap-3">
-        <div className="w-12 h-12 rounded-lg bg-white flex items-center justify-center flex-shrink-0">{icon}</div>
-        <div className="flex-1">
-          <h3 className={`${titleColor} font-bold text-base`}>{statusLabel}</h3>
-          <p className={`${descColor} text-sm mt-1 leading-relaxed`}>{statusDesc}</p>
-          {actionButton}
-          <button
-            onClick={() => checkPermissions(true)}
-            className="mt-2 text-xs text-gray-500 hover:text-gray-700 underline"
-          >
-            Refresh status
-          </button>
+        <IconTile icon={copy.icon} tone={copy.tone} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-callout font-semibold text-text-primary">{copy.title}</h3>
+            <Pill tone={copy.tone}>{copy.label}</Pill>
+          </div>
+          <p className="mt-1 text-caption leading-relaxed text-text-secondary">{copy.description}</p>
         </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {copy.action && (
+          <Button size="md" onClick={() => requestPermissions()} isLoading={isRequesting} loadingText="Asking…" className="flex-1">
+            {copy.action}
+          </Button>
+        )}
+        <Button
+          size="md"
+          variant="ghost"
+          onClick={() => checkPermissions(true)}
+          disabled={isChecking}
+          leftIcon={<RefreshCw size={16} aria-hidden className={isChecking ? 'animate-spin' : ''} />}
+        >
+          Check again
+        </Button>
       </div>
     </div>
   );

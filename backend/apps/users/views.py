@@ -1,8 +1,7 @@
 import hashlib
 import hmac
-import json
+import logging
 
-import requests
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.db import transaction
@@ -21,15 +20,18 @@ from apps.admin_api.models import SupportTicket, SupportTicketMessage
 from apps.core.throttles import (DashboardReadRateThrottle,
                                  DeviceBindRateThrottle, LoginRateThrottle,
                                  ProfilePictureUploadRateThrottle,
-                                 RegisterRateThrottle)
+                                 RegisterRateThrottle, SocialAuthRateThrottle)
 from apps.core.url_utils import build_absolute_media_url
 
 from .models import User
-from .serializers import (ChangePasswordSerializer, GoogleAuthSerializer,
+from .serializers import (AppleAuthSerializer, ChangePasswordSerializer,
+                          GoogleAuthSerializer,
                           LoginSerializer, RegisterSerializer,
                           SupportTicketCreateSerializer, UserProfileSerializer,
                           UserSupportTicketMessageSerializer,
                           UserSupportTicketSerializer)
+
+logger = logging.getLogger(__name__)
 
 
 class WalletThrottle(UserRateThrottle):
@@ -58,6 +60,12 @@ def register(request):
     """
     Register a new user
     """
+    from apps.admin_api.platform import feature_block
+
+    blocked = feature_block("registrations")
+    if blocked:
+        return blocked
+
     serializer = RegisterSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
@@ -155,85 +163,124 @@ def _build_unique_username(email: str, full_name: str = "") -> str:
     return username
 
 
-@extend_schema(
-    request=GoogleAuthSerializer,
-    responses={
-        200: inline_serializer(
-            name="GoogleAuthResponse",
-            fields={
-                "access": serializers.CharField(),
-                "refresh": serializers.CharField(),
-                "user": UserProfileSerializer(),
-            },
-        ),
-        400: inline_serializer(
-            name="GoogleAuthError", fields={"error": serializers.CharField()}
-        ),
-        403: inline_serializer(
-            name="GoogleAuthForbidden", fields={"error": serializers.CharField()}
-        ),
-    },
-)
-@api_view(["POST"])
-@permission_classes([AllowAny])
-def google_auth(request):
-    """
-    Authenticate or register user using Google OAuth access token
-    """
-    serializer = GoogleAuthSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
+_SOCIAL_AUTH_RESPONSES = {
+    200: inline_serializer(
+        name="SocialAuthResponse",
+        fields={
+            "access": serializers.CharField(),
+            "refresh": serializers.CharField(),
+            "session_id": serializers.CharField(),
+            "created": serializers.BooleanField(),
+            "user": UserProfileSerializer(),
+        },
+    ),
+    400: inline_serializer(
+        name="SocialAuthError",
+        fields={"error": serializers.CharField(), "code": serializers.CharField()},
+    ),
+    403: inline_serializer(
+        name="SocialAuthForbidden",
+        fields={"error": serializers.CharField(), "code": serializers.CharField()},
+    ),
+    503: inline_serializer(
+        name="SocialAuthUnavailable",
+        fields={"error": serializers.CharField(), "code": serializers.CharField()},
+    ),
+}
 
-    token = serializer.validated_data["token"]
+
+def _social_sign_in(request, verify):
+    """Shared tail of Google/Apple sign-in: verify → resolve user → JWT + DeviceSession."""
+    from django.contrib.auth.models import update_last_login
+
+    from .auth_views import get_client_ip
+    from .models import DeviceSession
+    from .social_auth import SocialAuthError, resolve_user
+
     try:
-        response = requests.get(
-            "https://www.googleapis.com/oauth2/v3/userinfo",
-            params={"access_token": token},
-            timeout=10,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except (requests.RequestException, ValueError, json.JSONDecodeError):
-        return Response(
-            {"error": "Invalid Google token"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        identity = verify()
+        resolved = resolve_user(identity)
+    except SocialAuthError as exc:
+        body = {"error": exc.message, "code": exc.code, **getattr(exc, "extra", {})}
+        return Response(body, status=exc.status_code)
 
-    email = payload.get("email")
-    email_verified = payload.get("email_verified")
-    full_name = payload.get("name", "")
-
-    if not email or not email_verified:
-        return Response(
-            {"error": "Google account email is not verified"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    user = User.objects.filter(email=email).first()
-    if not user:
-        username = _build_unique_username(email=email, full_name=full_name)
-        user = User.objects.create(
-            username=username,
-            email=email,
-            first_name=payload.get("given_name", ""),
-            last_name=payload.get("family_name", ""),
-            is_active=True,
-        )
-        user.set_unusable_password()
-        user.save(update_fields=["password"])
-
+    user = resolved.user
     if not user.is_active:
         return Response(
-            {"error": "Account is disabled"},
+            {"error": "Account is disabled", "code": "account_disabled"},
             status=status.HTTP_403_FORBIDDEN,
         )
 
     refresh = RefreshToken.for_user(user)
-    return Response(
-        {
-            "access": str(refresh.access_token),
-            "refresh": str(refresh),
-            "user": UserProfileSerializer(user).data,
-        }
+    update_last_login(None, user)
+    data = {
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+        "created": resolved.created,
+        "user": UserProfileSerializer(user).data,
+    }
+    try:
+        session = DeviceSession.objects.create(
+            user=user,
+            refresh_jti=refresh.get("jti"),
+            device_type=request.data.get("device_type") or "unknown",
+            device_name=(request.data.get("device_name") or "")[:255],
+            app_version=(request.data.get("app_version") or "")[:50],
+            ip_address=get_client_ip(request),
+        )
+        data["session_id"] = str(session.id)
+    except Exception as exc:  # session tracking must not block sign-in
+        logger.error("DeviceSession creation failed (%s sign-in): %s", identity.provider, exc)
+
+    logger.info(
+        "Social sign-in: provider=%s user=%s created=%s linked=%s",
+        identity.provider, user.pk, resolved.created, resolved.linked,
+    )
+    return Response(data, status=status.HTTP_201_CREATED if resolved.created else status.HTTP_200_OK)
+
+
+@extend_schema(request=GoogleAuthSerializer, responses=_SOCIAL_AUTH_RESPONSES)
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@throttle_classes([SocialAuthRateThrottle])
+def google_auth(request):
+    """
+    Sign in (or sign up) with a Google ID token.
+
+    The token is verified locally (signature, issuer, audience ∈ GOOGLE_OAUTH_CLIENT_IDS,
+    expiry, nonce when sent, verified email). Access tokens are not accepted.
+    """
+    from .social_auth import verify_google_id_token
+
+    serializer = GoogleAuthSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    vd = serializer.validated_data
+    return _social_sign_in(
+        request, lambda: verify_google_id_token(vd["id_token"], vd.get("nonce") or None)
+    )
+
+
+@extend_schema(request=AppleAuthSerializer, responses=_SOCIAL_AUTH_RESPONSES)
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@throttle_classes([SocialAuthRateThrottle])
+def apple_auth(request):
+    """
+    Sign in (or sign up) with an Apple identity token.
+
+    Verified against Apple's JWKS: issuer, audience ∈ APPLE_CLIENT_IDS (bundle id /
+    Services ID), expiry, and nonce == SHA-256(raw nonce sent by the app).
+    """
+    from .social_auth import verify_apple_identity_token
+
+    serializer = AppleAuthSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    vd = serializer.validated_data
+    return _social_sign_in(
+        request,
+        lambda: verify_apple_identity_token(
+            vd["id_token"], vd["nonce"], vd.get("given_name", ""), vd.get("family_name", "")
+        ),
     )
 
 
@@ -619,6 +666,11 @@ def create_support_ticket(request):
         is_admin=False,
         message=serializer.validated_data["message"].strip(),
     )
+
+    # Settings > Support: optional auto-assignment (never blocks creation).
+    from apps.admin_api.support_rules import auto_assign
+
+    auto_assign(ticket)
 
     broadcast_support_message(
         ticket.id,

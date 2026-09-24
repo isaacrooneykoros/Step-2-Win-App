@@ -1,5 +1,12 @@
 import api from './client';
 
+// Endpoints are inconsistent: some return DRF pages ({ results }), some bare arrays.
+function asList<T>(data: unknown): T[] {
+  if (Array.isArray(data)) return data as T[];
+  const results = (data as { results?: unknown } | null)?.results;
+  return Array.isArray(results) ? (results as T[]) : [];
+}
+
 export interface UserXP {
   id: number;
   user: number;
@@ -59,33 +66,33 @@ export const gamificationService = {
    * Get all badges definitions
    */
   getAllBadges: async (): Promise<Badge[]> => {
-    const response = await api.get<{ results: Badge[] }>('/api/gamification/badges/');
-    return response.data.results || [];
+    const response = await api.get('/api/gamification/badges/');
+    return asList<Badge>(response.data);
   },
 
   /**
    * Get user's earned badges
    */
   getMyBadges: async (): Promise<UserBadge[]> => {
-    const response = await api.get<{ results: UserBadge[] }>('/api/gamification/badges/my_badges/');
-    return response.data.results || [];
+    const response = await api.get('/api/gamification/badges/my_badges/');
+    return asList<UserBadge>(response.data);
   },
 
   /**
    * Get available badges (not yet earned)
    */
   getUpcomingBadges: async (): Promise<Badge[]> => {
-    const response = await api.get<{ results: Badge[] }>('/api/gamification/badges/upcoming/');
-    return response.data.results || [];
+    const response = await api.get('/api/gamification/badges/upcoming/');
+    return asList<Badge>(response.data);
   },
 
   /**
    * Get recent XP events
    */
   getRecentEvents: async (limit: number = 10): Promise<XPEvent[]> => {
-    const response = await api.get<XPEvent[]>('/api/gamification/events/', {
+    const response = await api.get('/api/gamification/events/', {
       params: { limit },
     });
-    return Array.isArray(response.data) ? response.data : [];
+    return asList<XPEvent>(response.data);
   },
 };

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { DeviceStepCounter, type PermissionState } from '../plugins/deviceStepCounter';
 import { useToast } from '../components/ui/Toast';
+import { openAppSettings } from '../plugins/appSystem';
+import { hasNativeStepCounter, isIOSApp, permissionCopy } from '../utils/platform';
 
 export interface PermissionStatus {
   activityRecognition: PermissionState;
@@ -17,7 +18,8 @@ export function usePermissionStatus() {
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus>({
     activityRecognition: 'prompt',
   });
-  const [isAndroid, setIsAndroid] = useState(false);
+  // True in the Android and iOS apps (native step counter); false on the web.
+  const [hasStepCounter, setHasStepCounter] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [isRequesting, setIsRequesting] = useState(false);
   const lastCheckTimeRef = useRef(0);
@@ -29,19 +31,17 @@ export function usePermissionStatus() {
   }, [permissionStatus]);
 
   useEffect(() => {
-    const platform = Capacitor.getPlatform();
-    setIsAndroid(platform === 'android');
+    setHasStepCounter(hasNativeStepCounter());
   }, []);
 
   const checkPermissions = useCallback(async (skipCache = false) => {
-    const platform = Capacitor.getPlatform();
-    if (platform !== 'android') {
-      setIsAndroid(false);
+    if (!hasNativeStepCounter()) {
+      setHasStepCounter(false);
       setPermissionStatus({ activityRecognition: 'unavailable' });
       return { activityRecognition: 'unavailable' };
     }
 
-    setIsAndroid(true);
+    setHasStepCounter(true);
 
     // Skip frequent checks (cache for 5 seconds)
     const now = Date.now();
@@ -77,12 +77,18 @@ export function usePermissionStatus() {
   }, [checkPermissions]);
 
   const requestPermissions = useCallback(async () => {
-    if (Capacitor.getPlatform() !== 'android') {
+    if (!hasNativeStepCounter()) {
       return { activityRecognition: 'unavailable' };
     }
 
     setIsRequesting(true);
     try {
+      // iOS never shows the Motion & Fitness prompt twice: once denied, only Settings can fix it.
+      if (isIOSApp() && permissionStatusRef.current.activityRecognition === 'denied') {
+        const opened = await openAppSettings();
+        showToast({ message: opened ? permissionCopy().motionOpenedSettingsHint : permissionCopy().motionBlockedHint, type: 'info' });
+        return permissionStatusRef.current;
+      }
       const status = await DeviceStepCounter.requestPermissions();
       setPermissionStatus(status);
       lastCheckTimeRef.current = Date.now();
@@ -95,7 +101,9 @@ export function usePermissionStatus() {
         });
       } else if (status.activityRecognition === 'denied') {
         showToast({
-          message: 'Step tracking permission denied. You can enable it in Settings → Permissions.',
+          message: isIOSApp()
+            ? 'Step tracking permission denied. Turn on Motion & Fitness in Settings › Step2Win.'
+            : 'Step tracking permission denied. You can enable it in Settings → Permissions.',
           type: 'warning',
         });
       }
@@ -111,7 +119,7 @@ export function usePermissionStatus() {
     } finally {
       setIsRequesting(false);
     }
-  }, [isAndroid, showToast]);
+  }, [showToast]);
 
   const isGranted = useCallback(() => {
     return permissionStatus.activityRecognition === 'granted';
@@ -134,7 +142,7 @@ export function usePermissionStatus() {
 
   return {
     permissionStatus,
-    isAndroid,
+    hasStepCounter,
     isChecking,
     isRequesting,
     checkPermissions,

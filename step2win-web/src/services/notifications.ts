@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { AppSystem } from '../plugins/appSystem';
 
 export type NotificationPreferences = {
   pushNotifications: boolean;
@@ -24,7 +25,7 @@ async function ensureAndroidChannel() {
     visibility: 1,
     lights: true,
     vibration: true,
-    lightColor: '#4F9CF9',
+    lightColor: '#14855D',
   });
 }
 
@@ -85,8 +86,12 @@ export async function syncReminderNotifications(preferences: NotificationPrefere
         },
       },
       extra: { type: 'challenge-reminder' },
-      smallIcon: 'ic_launcher',
+      smallIcon: 'ic_stat_step2win',
+      iconColor: '#14855D',
       autoCancel: true,
+      // Daily reminders needn't fire to the second. Exact (the v8.3+ default) makes schedule()
+      // open Android's "Alarms & reminders" settings on every call when that access is off.
+      isExactNotification: false,
     });
   }
 
@@ -103,8 +108,12 @@ export async function syncReminderNotifications(preferences: NotificationPrefere
         },
       },
       extra: { type: 'payout-alert' },
-      smallIcon: 'ic_launcher',
+      smallIcon: 'ic_stat_step2win',
+      iconColor: '#14855D',
       autoCancel: true,
+      // Daily reminders needn't fire to the second. Exact (the v8.3+ default) makes schedule()
+      // open Android's "Alarms & reminders" settings on every call when that access is off.
+      isExactNotification: false,
     });
   }
 
@@ -115,6 +124,11 @@ export async function syncReminderNotifications(preferences: NotificationPrefere
 
 export async function openNotificationSettings() {
   if (!Capacitor.isNativePlatform()) {
-    return;
+    return false;
+  }
+  try {
+    return (await AppSystem.openNotificationSettings()).opened;
+  } catch {
+    return false;
   }
 }

@@ -14,9 +14,7 @@ dist-ssr
 *.sln
 *.sw?
 
-# Capacitor
-android/
-ios/
+# Capacitor (android/ and ios/ are tracked; their own .gitignore files exclude build output)
 .capacitor
 
 # Environment

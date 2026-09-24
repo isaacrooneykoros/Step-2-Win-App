@@ -7,6 +7,7 @@ from drf_spectacular.views import (SpectacularAPIView, SpectacularRedocView,
                                    SpectacularSwaggerView)
 from rest_framework import permissions
 
+from apps.admin_api.platform import app_config
 from step2win.health import health_check
 
 urlpatterns = [
@@ -24,6 +25,7 @@ urlpatterns = [
     path("api/payments/", include("apps.payments.urls")),
     path("api/legal/", include("apps.legal.urls")),
     path("api/health/", health_check, name="health_check"),
+    path("api/app/config/", app_config, name="app_config"),
 ]
 
 # OpenAPI docs — only available in DEBUG mode, never in production

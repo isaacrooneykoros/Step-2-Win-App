@@ -12,7 +12,7 @@ urlpatterns = [
     path("withdraw/", views.withdraw, name="withdraw"),
     path("withdrawals/", views.WithdrawalListView.as_view(), name="withdrawals"),
     path(
-        "withdrawals/<str:reference_number>/",
+        "withdrawals/<uuid:withdrawal_id>/",
         views.withdrawal_detail,
         name="withdrawal_detail",
     ),

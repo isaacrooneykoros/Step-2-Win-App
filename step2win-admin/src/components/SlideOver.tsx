@@ -1,71 +1,68 @@
+import { useId, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
-import { useEffect } from 'react'
+import { useFocusTrap } from '../lib/useFocusTrap'
 
 interface SlideOverProps {
   open:     boolean
   onClose:  () => void
   title:    string
   subtitle?: string
-  children: React.ReactNode
-  width?:   number   // px, default 480
+  children: ReactNode
+  width?:   number   // px, default 480 (capped to the viewport)
+  /** Sticky footer for record actions (approve / reject / save). */
+  footer?:  ReactNode
+  /** Small element beside the title, e.g. a StatusBadge. */
+  headerAside?: ReactNode
 }
 
+/**
+ * Right-hand drawer for record details. Keeps the list in view so operators
+ * can move row to row. Escape closes; focus is trapped and restored.
+ */
 export function SlideOver({
-  open, onClose, title, subtitle, children, width = 480
+  open, onClose, title, subtitle, children, width = 480, footer, headerAside,
 }: SlideOverProps) {
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  const titleId = useId()
+  const ref = useFocusTrap<HTMLDivElement>(open, onClose)
 
-  return (
-    <>
-      {/* Backdrop */}
+  if (!open) return null
+
+  return createPortal(
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-[var(--scrim)]" aria-hidden onClick={onClose} />
       <div
-        className={`fixed inset-0 z-40 transition-opacity duration-300 ${
-          open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-        }`}
-        style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(2px)' }}
-        onClick={onClose}
-      />
-
-      {/* Drawer */}
-      <div
-        className="fixed right-0 top-0 h-full z-50 flex flex-col transition-transform
-                   duration-300 overflow-hidden"
-        style={{
-          width,
-          background:  '#13161F',
-          borderLeft:  '1px solid #21263A',
-          boxShadow:   '-8px 0 32px rgba(0,0,0,0.4)',
-          transform:   open ? 'translateX(0)' : `translateX(${width}px)`,
-        }}>
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 shrink-0"
-          style={{ borderBottom: '1px solid #21263A' }}>
-          <div>
-            <h2 className="text-ink-primary font-bold text-base">{title}</h2>
-            {subtitle && (
-              <p className="text-ink-muted text-xs mt-0.5">{subtitle}</p>
-            )}
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="absolute right-0 top-0 flex h-full max-w-full flex-col border-l border-surface-border bg-surface-overlay shadow-pop"
+        style={{ width }}
+      >
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-surface-border px-5 py-3.5">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 id={titleId} className="truncate text-base font-semibold text-ink-primary">{title}</h2>
+              {headerAside}
+            </div>
+            {subtitle && <p className="mt-0.5 text-xs text-ink-muted">{subtitle}</p>}
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-xl flex items-center justify-center
-                       hover:bg-surface-elevated transition-colors"
-            style={{ border: '1px solid #21263A' }}>
-            <X size={15} color="#7B82A0" />
+            aria-label="Close panel"
+            className="-mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-muted hover:bg-surface-elevated hover:text-ink-primary"
+          >
+            <X size={16} />
           </button>
         </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          {children}
-        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        {footer && (
+          <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-surface-border px-5 py-3">{footer}</div>
+        )}
       </div>
-    </>
+    </div>,
+    document.body,
   )
 }

@@ -12,6 +12,9 @@ downloads/
 eggs/
 .eggs/
 lib/
+# The Python "lib/" rule above must not hide the apps' source folders.
+!step2win-web/src/lib/
+!step2win-admin/src/lib/
 lib64/
 parts/
 sdist/
@@ -28,6 +31,9 @@ htmlcov/
 !.env.example
 !**/.env.example
 step2win-web/.env.staging
+step2win-web/.env.example
+backend/.env.example
+backend/.env
 .venv
 env/
 venv/
@@ -57,9 +63,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Capacitor
-android/
-ios/
+# Capacitor (android/ and ios/ are tracked; their own .gitignore files exclude build output)
 .capacitor/
 
 # Private documentation and API specs (keep local, never push)
@@ -77,4 +81,14 @@ Step2Win API.yaml
 .c9/
 *.launch
 .settings/
+
+
+# Local-only state (never commit)
+.claude/
+backend/celery_broker.db
+backend/celery_results.db
+*.sqlite3
+backend/logs/
+*.log
+nul
 

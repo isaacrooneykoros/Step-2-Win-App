@@ -1,5 +1,5 @@
-import { Capacitor } from '@capacitor/core';
 import { DeviceStepCounter } from '../plugins/deviceStepCounter';
+import { hasNativeStepCounter, isIOSApp } from '../utils/platform';
 
 export type LocationPermissionState = 'prompt' | 'prompt-with-rationale' | 'granted' | 'denied' | 'unavailable';
 
@@ -9,8 +9,12 @@ export type AdvancedPermissionSnapshot = {
   exactAlarm: 'granted' | 'denied' | 'unavailable';
 };
 
+/**
+ * Android: foreground + background location and exact alarms. iOS: location while using the app
+ * only — no background route tracking and no exact-alarm setting, so both report 'unavailable'.
+ */
 export async function checkAdvancedPermissionSnapshot(): Promise<AdvancedPermissionSnapshot> {
-  if (Capacitor.getPlatform() !== 'android') {
+  if (!hasNativeStepCounter()) {
     return {
       location: 'unavailable',
       backgroundLocation: 'unavailable',
@@ -20,22 +24,26 @@ export async function checkAdvancedPermissionSnapshot(): Promise<AdvancedPermiss
 
   try {
     const status = await DeviceStepCounter.checkAdvancedPermissions();
+    const ios = isIOSApp();
     return {
       location: status.location,
-      backgroundLocation: status.backgroundLocation,
-      exactAlarm: status.exactAlarm,
+      backgroundLocation: ios ? 'unavailable' : status.backgroundLocation,
+      // Reminders are scheduled inexactly and the app no longer requests SCHEDULE_EXACT_ALARM
+      // (Google Play restricts it), so there is nothing for the user to grant.
+      exactAlarm: 'unavailable',
     };
   } catch {
+    const ios = isIOSApp();
     return {
       location: 'denied',
-      backgroundLocation: 'denied',
-      exactAlarm: 'denied',
+      backgroundLocation: ios ? 'unavailable' : 'denied',
+      exactAlarm: 'unavailable',
     };
   }
 }
 
 export async function requestForegroundLocationPermission(): Promise<boolean> {
-  if (Capacitor.getPlatform() !== 'android') {
+  if (!hasNativeStepCounter()) {
     return false;
   }
 
@@ -43,8 +51,9 @@ export async function requestForegroundLocationPermission(): Promise<boolean> {
   return result.location === 'granted';
 }
 
+/** Android only (iOS records routes only while the app is open). */
 export async function requestBackgroundLocationPermission(): Promise<boolean> {
-  if (Capacitor.getPlatform() !== 'android') {
+  if (!hasNativeStepCounter() || isIOSApp()) {
     return false;
   }
 
@@ -52,8 +61,9 @@ export async function requestBackgroundLocationPermission(): Promise<boolean> {
   return result.backgroundLocation === 'granted';
 }
 
+/** Android 12+ only. */
 export async function openExactAlarmPermissionSettings(): Promise<boolean> {
-  if (Capacitor.getPlatform() !== 'android') {
+  if (!hasNativeStepCounter() || isIOSApp()) {
     return false;
   }
 

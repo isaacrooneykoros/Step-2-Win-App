@@ -10,6 +10,9 @@ export interface DeviceStepCounterAdvancedPermissionStatus extends DeviceStepCou
   location: PermissionState;
   backgroundLocation: PermissionState;
   exactAlarm: 'granted' | 'denied';
+  /** iOS only: false — exact alarms are an Android concept. */
+  exactAlarmApplicable?: boolean;
+  platform?: 'android' | 'ios';
 }
 
 export interface DeviceStepCounterReading {
@@ -19,25 +22,25 @@ export interface DeviceStepCounterReading {
   available: boolean;
   cadence_spm: number;
   burst_steps_5s: number;
-  gait_state?: 'idle' | 'possible_walking' | 'confirmed_walking' | 'suspicious_motion';
-  gait_confidence?: number;
-  gait_dominant_freq_hz?: number;
-  gait_autocorr?: number;
-  gait_interval_std_ms?: number;
-  gait_valid_peaks_2s?: number;
-  gait_gyro_variance?: number;
-  gait_jerk_rms?: number;
-  carry_mode?: 'unknown' | 'in_hand' | 'pocket' | 'bag';
-  ml_motion_label?: 'walk' | 'shake' | 'other';
-  ml_walk_probability?: number;
-  ml_shake_probability?: number;
+  gait_state?: 'idle' | 'possible_walking' | 'confirmed_walking' | 'suspicious_motion' | null;
+  gait_confidence?: number | null;
+  gait_dominant_freq_hz?: number | null;
+  gait_autocorr?: number | null;
+  gait_interval_std_ms?: number | null;
+  gait_valid_peaks_2s?: number | null;
+  gait_gyro_variance?: number | null;
+  gait_jerk_rms?: number | null;
+  carry_mode?: 'unknown' | 'in_hand' | 'pocket' | 'bag' | null;
+  ml_motion_label?: 'walk' | 'shake' | 'other' | null;
+  ml_walk_probability?: number | null;
+  ml_shake_probability?: number | null;
   ml_model_version?: string;
   // Enhanced ML features (smoothed predictions)
-  smoothed_walk_probability?: number;
-  smoothed_shake_probability?: number;
-  ml_window_count?: number;
-  ml_confidence_stability?: number;
-  motion_entropy?: number;
+  smoothed_walk_probability?: number | null;
+  smoothed_shake_probability?: number | null;
+  ml_window_count?: number | null;
+  ml_confidence_stability?: number | null;
+  motion_entropy?: number | null;
   // Session and replay protection fields
   device_id?: string;
   session_id?: string;
@@ -48,10 +51,19 @@ export interface DeviceStepCounterReading {
   steps_delta?: number;
   steps_total?: number;
   background_running: boolean;
+  platform?: 'android' | 'ios';
+  /**
+   * iOS (CoreMotion) sets this to false: the Android GaitAnalyzer / ML fields above are then
+   * null and must be sent to the backend as null, never as 0.
+   */
+  gait_available?: boolean | null;
+  sensor_source?: 'cmpedometer';
 }
 
 export interface DeviceStepCounterBackgroundStatus {
   running: boolean;
+  /** iOS: false — there is no foreground service; CoreMotion records steps by itself. */
+  supported?: boolean;
 }
 
 export interface DeviceStepCounterWaypoint {
@@ -76,7 +88,7 @@ export interface DeviceStepCounterPlugin {
   openExactAlarmSettings(): Promise<{ opened: boolean; supported: boolean }>;
   startStepSession(): Promise<{
     device_id: string;
-    platform: 'android';
+    platform: 'android' | 'ios';
     app_version: string;
     ml_model_version: string;
     session_id?: string | null;
@@ -96,7 +108,9 @@ export interface DeviceStepCounterPlugin {
   stopBackgroundCapture(): Promise<DeviceStepCounterBackgroundStatus>;
   getBackgroundStatus(): Promise<DeviceStepCounterBackgroundStatus>;
   getPendingWaypoints(): Promise<DeviceStepCounterPendingWaypoints>;
-  clearPendingWaypoints(): Promise<{ cleared: boolean }>;
+  /** Without options clears everything; with `date` + `upTo` only points recorded at or before `upTo`. */
+  clearPendingWaypoints(options?: { date: string; upTo: string }): Promise<{ cleared: boolean; remaining?: number }>;
 }
 
+/** Android: DeviceStepCounterPlugin.java (sensor + foreground service). iOS: DeviceStepCounterPlugin.swift (CMPedometer). */
 export const DeviceStepCounter = registerPlugin<DeviceStepCounterPlugin>('DeviceStepCounter');

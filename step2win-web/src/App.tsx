@@ -1,14 +1,17 @@
 import { lazy, Suspense, useEffect, useState, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { GoogleOAuthProvider } from '@react-oauth/google';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useAuthStore } from './store/authStore';
-import { GOOGLE_CLIENT_ID, isGoogleClientIdConfigured } from './config/googleAuth';
 import { applyThemeMode, loadThemeMode, ThemeMode } from './config/theme';
 import MainLayout from './components/layout/MainLayout';
 import { PageLoader } from './components/ui/LoadingSpinner';
+import { Toaster, toast } from './components/ui/Toast';
+import { runBackHandlers } from './lib/backButton';
+import { hideNativeSplash } from './lib/nativeShell';
+import { BiometricLockGate } from './components/security/BiometricLockGate';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
 import LaunchSplashScreen from './screens/LaunchSplashScreen';
@@ -102,6 +105,11 @@ function NativeBackButtonGuard() {
     }
 
     const listener = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      // Open sheets / the lock screen get first refusal (they close or swallow the press).
+      if (runBackHandlers()) {
+        return;
+      }
+
       const now = Date.now();
       const timeSinceLastPress = now - lastBackPressRef.current;
       const DOUBLE_TAP_THRESHOLD = 2000; // 2 seconds
@@ -141,8 +149,7 @@ function NativeBackButtonGuard() {
         clearTimeout(backPressTimeoutRef.current);
       }
 
-      // Show toast notification about double-tap (optional - requires useToast context)
-      // For now, we'll just set the timeout to reset the press counter
+      toast({ message: 'Press back again to exit', type: 'info', duration: 2000 });
       backPressTimeoutRef.current = setTimeout(() => {
         lastBackPressRef.current = 0;
       }, DOUBLE_TAP_THRESHOLD);
@@ -167,7 +174,11 @@ export default function App() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
 
   useEffect(() => {
-    init().finally(() => setLoading(false));
+    init().finally(() => {
+      setLoading(false);
+      // Tokens are restored: the first real frame (or the lock screen) replaces the splash.
+      hideNativeSplash();
+    });
   }, [init]);
 
   useEffect(() => {
@@ -211,8 +222,8 @@ export default function App() {
   if (loading) return <PageLoader />;
 
   return (
+    <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
-      <GoogleOAuthProvider clientId={isGoogleClientIdConfigured ? GOOGLE_CLIENT_ID : 'invalid-client-id'}>
         <BrowserRouter>
           <NativeBackButtonGuard />
           <AuthLoadRedirect loading={loading} isAuthenticated={isAuthenticated} />
@@ -254,8 +265,10 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           {showOnboarding && <OnboardingScreen onComplete={handleOnboardingComplete} />}
+          <BiometricLockGate />
+          <Toaster />
         </BrowserRouter>
-      </GoogleOAuthProvider>
     </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

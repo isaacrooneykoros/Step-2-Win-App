@@ -1,6 +1,9 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from apps.admin_api import (finance_views, support_views, system_views,
+                            trust_views)
+
 from apps.admin_api.views import (AdminBadgeViewSet, AdminChallengeViewSet,
                                   AdminDashboardViewSet,
                                   AdminTransactionViewSet, AdminUserViewSet,
@@ -67,6 +70,33 @@ urlpatterns = [
         name="support-ticket-update",
     ),
     path("support/admins/", get_support_admins, name="support-admins"),
+    # Helpdesk queue + conversation (apps/admin_api/support_views.py)
+    path("support/queue/", support_views.support_queue, name="support-queue"),
+    path(
+        "support/tickets/<int:ticket_id>/conversation/",
+        support_views.support_conversation,
+        name="support-conversation",
+    ),
+    path(
+        "support/tickets/<int:ticket_id>/tags/",
+        support_views.support_ticket_tags,
+        name="support-ticket-tags",
+    ),
+    path("support/tags/", support_views.support_tags, name="support-tags"),
+    path("support/tags/<int:tag_id>/", support_views.support_tag_delete, name="support-tag-delete"),
+    path("support/templates/", support_views.support_templates, name="support-templates"),
+    path(
+        "support/templates/<int:template_id>/",
+        support_views.support_template_detail,
+        name="support-template-detail",
+    ),
+    path(
+        "support/templates/<int:template_id>/used/",
+        support_views.support_template_used,
+        name="support-template-used",
+    ),
+    # Settings page context (apps/admin_api/system_views.py)
+    path("settings/context/", system_views.settings_context, name="settings-context"),
     path("fraud/", fraud_overview, name="fraud-overview"),
     path("fraud/<int:flag_id>/action/", action_flag, name="fraud-action-flag"),
     path("payments/overview/", payments_overview, name="payments-overview"),
@@ -89,5 +119,26 @@ urlpatterns = [
         name="retry-failed-withdrawal",
     ),
     path("monitoring/ops/", ops_monitoring_dashboard, name="ops-monitoring-dashboard"),
+    # Read-only finance console endpoints (apps/admin_api/finance_views.py)
+    path("finance/withdrawals/", finance_views.finance_withdrawals, name="finance-withdrawals"),
+    path(
+        "finance/withdrawals/<uuid:withdrawal_id>/",
+        finance_views.finance_withdrawal_detail,
+        name="finance-withdrawal-detail",
+    ),
+    path("finance/ledger/", finance_views.finance_ledger, name="finance-ledger"),
+    path("finance/ledger/export/", finance_views.finance_ledger_export, name="finance-ledger-export"),
+    path("finance/report/", finance_views.finance_report, name="finance-report"),
+    path("finance/analytics/", finance_views.finance_analytics, name="finance-analytics"),
+    # Trust & safety console (apps/admin_api/trust_views.py)
+    path("trust/summary/", trust_views.trust_summary, name="trust-summary"),
+    path("trust/cases/", trust_views.trust_cases, name="trust-cases"),
+    path("trust/cases/<str:kind>/<str:case_id>/", trust_views.trust_case_detail, name="trust-case-detail"),
+    path("trust/flags/<int:flag_id>/action/", trust_views.trust_flag_action, name="trust-flag-action"),
+    path("trust/sessions/<uuid:review_id>/decision/", trust_views.trust_session_decision, name="trust-session-decision"),
+    path("trust/moderation/users/", trust_views.moderation_users, name="trust-moderation-users"),
+    path("trust/moderation/history/", trust_views.moderation_history, name="trust-moderation-history"),
+    path("trust/users/<int:user_id>/moderate/", trust_views.moderate_user, name="trust-moderate-user"),
+    path("monitoring/ops/history/", trust_views.ops_history, name="ops-monitoring-history"),
     path("", include(router.urls)),
 ]

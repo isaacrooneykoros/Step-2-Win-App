@@ -129,8 +129,15 @@ class User(AbstractUser):
 
     @property
     def available_balance(self):
-        """Calculate available balance (wallet - locked)"""
-        return self.wallet_balance - self.locked_balance
+        """Spendable/withdrawable balance.
+
+        Challenge entries are debited from ``wallet_balance`` when a user joins or
+        creates a challenge, and ``locked_balance`` separately tracks how much of the
+        user's money is currently committed to challenges (released on payout/refund).
+        ``wallet_balance`` therefore already excludes locked funds; subtracting
+        ``locked_balance`` again would count every entry twice.
+        """
+        return self.wallet_balance
 
 
 auditlog.register(
@@ -306,3 +313,51 @@ class DeviceSession(models.Model):
         if self.device_name:
             return self.device_name
         return dict(self.DEVICE_TYPES).get(self.device_type, "Unknown Device")
+
+
+class SocialAccount(models.Model):
+    """
+    A Google / Apple identity linked to a Step2Win user.
+
+    Linked by the provider's stable subject (``sub``), never by email alone:
+    Apple can hide the real address behind a private relay and only shares it on
+    the first authorisation, and emails can change on the provider side.
+    """
+
+    PROVIDER_GOOGLE = "google"
+    PROVIDER_APPLE = "apple"
+    PROVIDERS = [
+        (PROVIDER_GOOGLE, "Google"),
+        (PROVIDER_APPLE, "Apple"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="social_accounts",
+    )
+    provider = models.CharField(max_length=20, choices=PROVIDERS)
+    subject = models.CharField(
+        max_length=255, help_text="Provider's stable user id (the ID token 'sub' claim)"
+    )
+    email = models.EmailField(blank=True, help_text="Email the provider gave when linked")
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_login_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider", "subject"], name="uniq_social_provider_subject"
+            )
+        ]
+        indexes = [models.Index(fields=["user", "provider"])]
+
+    def __str__(self):
+        return f"{self.provider}:{self.user_id}"
+
+    def touch(self):
+        self.last_login_at = timezone.now()
+        self.save(update_fields=["last_login_at"])
+
+
+auditlog.register(SocialAccount, include_fields=["provider", "subject", "email", "user"])

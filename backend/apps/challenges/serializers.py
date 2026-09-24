@@ -1,12 +1,19 @@
 from datetime import date, timedelta
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.admin_api.models import SystemSettings
 from apps.core.sanitizers import sanitize_text
 
 from .models import Challenge, ChallengeMessage, Participant, format_milestone_label, get_configured_milestones
+
+# Challenge entry contribution (KES). Users type any whole amount in this range;
+# the suggestions are only quick picks shown by the app (served via /api/challenges/config/).
+ENTRY_FEE_MIN = 50
+ENTRY_FEE_MAX = 10000
+ENTRY_FEE_SUGGESTIONS = [100, 250, 500, 1000, 2000]
 
 
 class ParticipantSerializer(serializers.ModelSerializer):
@@ -247,23 +254,26 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
         entry_fee = data.get("entry_fee")
         win_condition = data.get("win_condition", "proportional")
 
-        if is_public:
-            if entry_fee and entry_fee not in [100, 250, 500, 1000]:
+        # Entry is a typed amount (whole shillings) within one shared range for public and
+        # private challenges; the app shows ENTRY_FEE_SUGGESTIONS as quick picks.
+        if entry_fee is not None:
+            if entry_fee != entry_fee.to_integral_value():
+                raise serializers.ValidationError(
+                    {"entry_fee": "Entry must be a whole number of shillings"}
+                )
+            if entry_fee < ENTRY_FEE_MIN or entry_fee > ENTRY_FEE_MAX:
                 raise serializers.ValidationError(
                     {
-                        "entry_fee": "Public challenges must use fixed tiers: 100, 250, 500, 1000"
+                        "entry_fee": f"Entry must be between KES {ENTRY_FEE_MIN:,} and KES {ENTRY_FEE_MAX:,}"
                     }
                 )
+
+        if is_public:
             if win_condition != "proportional":
                 raise serializers.ValidationError(
                     {
                         "win_condition": "Public challenges only support proportional payout"
                     }
-                )
-        else:
-            if entry_fee and (entry_fee < 50 or entry_fee > 10000):
-                raise serializers.ValidationError(
-                    {"entry_fee": "Private challenges must be between 50 and 10,000"}
                 )
 
         return data
@@ -299,8 +309,11 @@ class JoinChallengeSerializer(serializers.Serializer):
     def validate_invite_code(self, value):
         try:
             challenge = Challenge.objects.get(invite_code=value.upper())
-            if challenge.status != "active":
-                raise serializers.ValidationError("Challenge is not active")
+            # Pending challenges are open to join before they start (the lobby lists them).
+            if challenge.status not in ("pending", "active"):
+                raise serializers.ValidationError("Challenge is no longer open to join")
+            if challenge.end_date and challenge.end_date < timezone.localdate():
+                raise serializers.ValidationError("Challenge has already ended")
             if challenge.is_full:
                 raise serializers.ValidationError("Challenge is full")
         except Challenge.DoesNotExist:

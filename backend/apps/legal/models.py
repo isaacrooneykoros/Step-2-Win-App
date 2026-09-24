@@ -52,6 +52,12 @@ class LegalDocument(models.Model):
         blank=True,
         help_text="Full document content as HTML. Rendered in the mobile app.",
     )
+    draft_html = models.TextField(
+        blank=True,
+        default="",
+        help_text="Unpublished edits. Admin saves land here; publishing copies "
+        "them into content_html. Empty means no pending changes.",
+    )
     uploaded_file = models.FileField(
         upload_to="legal/files/",
         null=True,
@@ -120,8 +126,12 @@ class LegalDocument(models.Model):
         """
         from django.utils import timezone
 
-        if self.status == "published":
-            # Re-publishing — increment version
+        if (
+            self.status == "published"
+            or self.history.filter(version=self.version).exists()
+        ):
+            # Re-publishing (or publishing again after a restore) — the current
+            # version number is already in history, so take the next one.
             self.version += 1
             self.version_label = f"1.{self.version}"
         self.status = "published"

@@ -1,10 +1,26 @@
+import { AppSystem, isNativeAppShell } from '../plugins/appSystem';
+
 export type CameraPermissionState = 'granted' | 'denied' | 'prompt' | 'unavailable';
+
+function fromNative(state: string): CameraPermissionState {
+  if (state === 'granted') return 'granted';
+  if (state === 'denied') return 'denied';
+  return 'prompt';
+}
 
 function stopStream(stream: MediaStream) {
   stream.getTracks().forEach((track) => track.stop());
 }
 
 export async function checkCameraPermission(): Promise<CameraPermissionState> {
+  // Android / iOS app: the real OS permission (the WebView's Permissions API always says "prompt").
+  if (isNativeAppShell()) {
+    try {
+      return fromNative((await AppSystem.checkCameraPermission()).camera);
+    } catch {
+      // Older native shell: fall through to the web check.
+    }
+  }
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
     return 'unavailable';
   }
@@ -25,6 +41,13 @@ export async function checkCameraPermission(): Promise<CameraPermissionState> {
 }
 
 export async function requestCameraPermission(): Promise<boolean> {
+  if (isNativeAppShell()) {
+    try {
+      return (await AppSystem.requestCameraPermission()).camera === 'granted';
+    } catch {
+      // Fall back to asking through the WebView.
+    }
+  }
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
     return false;
   }

@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@react-buddy/ide-toolbox": "^2.5.0",
     "@tanstack/react-query": "^5.90.21",
     "@tiptap/extension-highlight": "^3.20.1",
     "@tiptap/extension-link": "^3.20.1",
@@ -30,8 +33,7 @@
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.1",
     "recharts": "^3.8.0",
-    "zustand": "^5.0.12",
-    "@react-buddy/ide-toolbox": "^2.5.0"
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

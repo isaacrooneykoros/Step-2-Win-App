@@ -1,369 +1,275 @@
-import { useEffect, useState, useMemo } from 'react';
-import { ArrowLeftRight, ArrowDownCircle, ArrowUpCircle, Receipt, X, Copy } from 'lucide-react';
-import { adminApi } from '../services/adminApi';
-import type { AdminTransaction } from '../types/admin';
-import { formatKES } from '../utils/currency';
-import { PageHeader } from '../components/PageHeader';
-import { AdminTable } from '../components/AdminTable';
-import { StatCard } from '../components/StatCard';
+import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { AlertTriangle, Download, ReceiptText, RefreshCw } from 'lucide-react'
+import { PageHeader } from '../components/PageHeader'
+import { AdminTable, type Column } from '../components/AdminTable'
+import { SlideOver } from '../components/SlideOver'
+import { DetailRow } from '../components/DetailRow'
+import { StatusBadge } from '../components/StatusBadge'
+import { Card } from '../components/ui/Card'
+import { Button } from '../components/ui/Button'
+import { Input, SearchInput, Select } from '../components/ui/Input'
+import { Toolbar, FilterChip } from '../components/ui/Toolbar'
+import { EmptyState } from '../components/ui/EmptyState'
+import { ErrorState } from '../components/ui/ErrorState'
+import { Skeleton } from '../components/ui/Skeleton'
+import { cn } from '../lib/cn'
+import { formatDateTime, formatKES, formatNumber } from '../lib/format'
+import { financeApi } from '../components/finance/api'
+import { useDebounced } from '../components/finance/hooks'
+import type { LedgerFilters, LedgerRow, LedgerType } from '../components/finance/types'
+import { LEDGER_TYPE_LABEL, Money, Reference, Section, SignedMoney, When, toNum } from '../components/finance/ui'
+
+const PAGE_SIZE = 50
+const TYPES = Object.keys(LEDGER_TYPE_LABEL) as LedgerType[]
+
+const EMPTY: LedgerFilters = { types: [], direction: 'all', user: '', q: '', from: '', to: '', ordering: '-created_at' }
+
+function TotalsBar({ loading, count, credits, debits, net, users, error }: {
+  loading: boolean; count?: number; credits?: string; debits?: string; net?: string; users?: number; error?: boolean
+}) {
+  const items = [
+    { label: 'Entries', value: formatNumber(count) },
+    { label: 'Credits', value: credits !== undefined ? <SignedMoney value={credits} /> : '—' },
+    { label: 'Debits', value: debits !== undefined ? <SignedMoney value={debits} /> : '—' },
+    { label: 'Net', value: net !== undefined ? <SignedMoney value={net} /> : '—' },
+    { label: 'Users', value: formatNumber(users) },
+  ]
+  return (
+    <Card padding="none" aria-label="Totals for the current filters">
+      <dl className="grid grid-cols-2 divide-surface-border sm:grid-cols-5 sm:divide-x">
+        {items.map((it) => (
+          <div key={it.label} className="px-4 py-2.5">
+            <dt className="text-xs text-ink-muted">{it.label}</dt>
+            <dd className="num mt-0.5 text-sm font-semibold text-ink-primary">
+              {loading ? <Skeleton width={90} height={16} /> : error ? '—' : it.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
+  )
+}
 
 export function TransactionsPage() {
-  const [items, setItems] = useState<AdminTransaction[]>([]);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [sortKey, setSortKey] = useState<string>('created_at');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [selectedTransaction, setSelectedTransaction] = useState<AdminTransaction | null>(null);
-  const [copiedLabel, setCopiedLabel] = useState('');
+  const [params] = useSearchParams()
+  const [filters, setFilters] = useState<LedgerFilters>(() => ({ ...EMPTY, user: params.get('user') ?? '' }))
+  const [page, setPage] = useState(1)
+  const [selected, setSelected] = useState<LedgerRow | null>(null)
 
-  useEffect(() => {
-    adminApi
-      .getTransactions()
-      .then(setItems)
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+  const debouncedUser = useDebounced(filters.user)
+  const debouncedQ = useDebounced(filters.q)
+  const effective: LedgerFilters = { ...filters, user: debouncedUser, q: debouncedQ }
 
-  const filteredItems = useMemo(() => {
-    return items.filter((tx) => {
-      const searchLower = searchTerm.toLowerCase();
-      return (
-        tx.user_username?.toLowerCase().includes(searchLower) ||
-        tx.type.toLowerCase().includes(searchLower) ||
-        tx.description?.toLowerCase().includes(searchLower) ||
-        tx.reference_id?.toLowerCase().includes(searchLower)
-      );
-    });
-  }, [items, searchTerm]);
-
-  const sortedItems = useMemo(() => {
-    const sorted = [...filteredItems];
-    sorted.sort((a, b) => {
-      let aVal: string | number = '';
-      let bVal: string | number = '';
-      
-      if (sortKey === 'created_at') {
-        aVal = new Date(a.created_at).getTime();
-        bVal = new Date(b.created_at).getTime();
-      } else if (sortKey === 'amount') {
-        aVal = Math.abs(parseFloat(a.amount));
-        bVal = Math.abs(parseFloat(b.amount));
-      } else if (sortKey === 'user') {
-        aVal = a.user_username || 'System';
-        bVal = b.user_username || 'System';
-      } else if (sortKey === 'type') {
-        aVal = a.type;
-        bVal = b.type;
-      }
-
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-      }
-      return sortDir === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
-    });
-    return sorted;
-  }, [filteredItems, sortKey, sortDir]);
-
-  const stats = useMemo(() => {
-    const deposits = items.filter(tx => parseFloat(tx.amount) > 0);
-    const withdrawals = items.filter(tx => parseFloat(tx.amount) < 0);
-    const totalDeposits = deposits.reduce((sum, tx) => sum + parseFloat(tx.amount), 0);
-    const totalWithdrawals = Math.abs(withdrawals.reduce((sum, tx) => sum + parseFloat(tx.amount), 0));
-    
-    return {
-      totalTransactions: items.length,
-      totalDeposits,
-      totalWithdrawals,
-      netFlow: totalDeposits - totalWithdrawals,
-    };
-  }, [items]);
-
-  const handleSort = (key: string) => {
-    if (sortKey === key) {
-      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortKey(key);
-      setSortDir('desc');
-    }
-  };
-
-  const getTypeIcon = (amount: string) => {
-    const numAmount = parseFloat(amount);
-    if (numAmount > 0) return <ArrowDownCircle size={14} style={{ color: '#22c55e' }} />;
-    if (numAmount < 0) return <ArrowUpCircle size={14} style={{ color: '#ef4444' }} />;
-    return <Receipt size={14} style={{ color: '#64748b' }} />;
-  };
-
-  const getTypeBadge = (type: string) => {
-    const styles: Record<string, { bg: string; color: string }> = {
-      deposit: { bg: 'rgba(34, 197, 94, 0.12)', color: '#22c55e' },
-      withdrawal: { bg: 'rgba(239, 68, 68, 0.12)', color: '#ef4444' },
-      refund: { bg: 'rgba(59, 130, 246, 0.12)', color: '#3b82f6' },
-      reward: { bg: 'rgba(168, 85, 247, 0.12)', color: '#a855f7' },
-      fee: { bg: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b' },
-    };
-    const style = styles[type.toLowerCase()] || { bg: 'rgba(100, 116, 139, 0.12)', color: '#64748b' };
-    
-    return (
-      <span
-        style={{
-          display: 'inline-block',
-          padding: '4px 10px',
-          borderRadius: '6px',
-          fontSize: '12px',
-          fontWeight: 600,
-          background: style.bg,
-          color: style.color,
-        }}
-      >
-        {type}
-      </span>
-    );
-  };
-
-  const copyToClipboard = async (label: string, value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopiedLabel(label);
-      window.setTimeout(() => setCopiedLabel(''), 2000);
-    } catch {
-      setCopiedLabel('');
-    }
-  };
-
-  const columns = [
-    {
-      key: 'user',
-      label: 'User',
-      sortable: true,
-      render: (tx: AdminTransaction) => (
-        <div>
-          <div style={{ color: '#f0f6ff', fontWeight: 600 }}>
-            {tx.user_username || 'System'}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'type',
-      label: 'Type',
-      sortable: true,
-      render: (tx: AdminTransaction) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {getTypeIcon(tx.amount)}
-          {getTypeBadge(tx.type)}
-        </div>
-      ),
-    },
-    {
-      key: 'amount',
-      label: 'Amount',
-      sortable: true,
-      render: (tx: AdminTransaction) => {
-        const numAmount = parseFloat(tx.amount);
-        return (
-          <div
-            style={{
-              fontWeight: 700,
-              fontFamily: 'monospace',
-              color: numAmount > 0 ? '#22c55e' : numAmount < 0 ? '#ef4444' : '#64748b',
-            }}
-          >
-            {numAmount > 0 ? '+' : ''}
-            {formatKES(tx.amount)}
-          </div>
-        );
-      },
-    },
-    {
-      key: 'description',
-      label: 'Description',
-      render: (tx: AdminTransaction) => (
-        <div style={{ color: '#8ba3c7', fontSize: '13px' }}>
-          {tx.description || '-'}
-        </div>
-      ),
-    },
-    {
-      key: 'reference',
-      label: 'Reference',
-      render: (tx: AdminTransaction) => (
-        <button
-          type="button"
-          onClick={() => {
-            if (tx.reference_id) {
-              void copyToClipboard('Reference copied', tx.reference_id)
-            }
-          }}
-          disabled={!tx.reference_id}
-          style={{
-            color: tx.reference_id ? '#64748b' : '#4b5563',
-            fontSize: '12px',
-            fontFamily: 'monospace',
-            cursor: tx.reference_id ? 'pointer' : 'default',
-          }}
-        >
-          {tx.reference_id || '-'}
-        </button>
-      ),
-    },
-    {
-      key: 'created_at',
-      label: 'Date',
-      sortable: true,
-      render: (tx: AdminTransaction) => (
-        <div style={{ color: '#8ba3c7', fontSize: '13px' }}>
-          {new Date(tx.created_at).toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </div>
-      ),
-    },
-  ];
-
-  if (error) {
-    return (
-      <div style={{ padding: '20px' }}>
-        <div
-          style={{
-            padding: '16px',
-            borderRadius: '12px',
-            background: 'rgba(239, 68, 68, 0.12)',
-            color: '#ef4444',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-          }}
-        >
-          {error}
-        </div>
-      </div>
-    );
+  const set = (patch: Partial<LedgerFilters>) => {
+    setFilters((f) => ({ ...f, ...patch }))
+    setPage(1)
   }
 
+  const q = useQuery({
+    queryKey: ['admin', 'finance', 'ledger', effective, page],
+    queryFn: () => financeApi.ledger(effective, PAGE_SIZE, (page - 1) * PAGE_SIZE),
+    placeholderData: (prev) => prev,
+  })
+  const exportCsv = useMutation({ mutationFn: () => financeApi.exportLedger(effective) })
+
+  const data = q.data
+  const toggleType = (t: LedgerType) =>
+    set({ types: filters.types.includes(t) ? filters.types.filter((x) => x !== t) : [...filters.types, t] })
+
+  const onSort = (key: string) => {
+    const field = key === 'amount' ? 'amount' : 'created_at'
+    const current = filters.ordering.replace('-', '')
+    const desc = filters.ordering.startsWith('-')
+    set({ ordering: (current === field && desc ? field : `-${field}`) as LedgerFilters['ordering'] })
+  }
+  const sortKey = filters.ordering.replace('-', '') === 'amount' ? 'amount' : 'time'
+  const sortDir = filters.ordering.startsWith('-') ? 'desc' : 'asc'
+
+  const columns: Column<LedgerRow>[] = [
+    { key: 'time', label: 'Time', sortable: true, render: (r) => <span className="text-ink-secondary"><When value={r.created_at} /></span> },
+    { key: 'user', label: 'User', render: (r) => <span className="font-medium">{r.user_username ?? <span className="text-ink-muted">System</span>}</span> },
+    { key: 'type', label: 'Type', render: (r) => <span className="whitespace-nowrap text-ink-secondary">{LEDGER_TYPE_LABEL[r.type] ?? r.type}</span> },
+    { key: 'amount', label: 'Amount', numeric: true, sortable: true, render: (r) => <SignedMoney value={r.amount} /> },
+    { key: 'before', label: 'Balance before', numeric: true, hideBelow: 'xl', render: (r) => <Money value={r.balance_before} muted /> },
+    { key: 'after', label: 'Balance after', numeric: true, hideBelow: 'md', render: (r) => <Money value={r.balance_after} /> },
+    { key: 'ref', label: 'Reference', hideBelow: 'lg', render: (r) => <Reference value={r.reference_id} /> },
+    {
+      key: 'check', label: 'Check', align: 'right',
+      render: (r) => (r.arithmetic_ok ? <span className="text-xs text-ink-muted">Balanced</span> : <StatusBadge size="sm" tone="danger" label="Mismatch" />),
+    },
+  ]
+
+  const chips = [
+    ...filters.types.map((t) => ({ key: `t-${t}`, label: `Type: ${LEDGER_TYPE_LABEL[t]}`, clear: () => toggleType(t) })),
+    filters.direction !== 'all' && { key: 'dir', label: filters.direction === 'credit' ? 'Credits only' : 'Debits only', clear: () => set({ direction: 'all' }) },
+    filters.user && { key: 'user', label: `User: ${filters.user}`, clear: () => set({ user: '' }) },
+    filters.q && { key: 'q', label: `Reference: ${filters.q}`, clear: () => set({ q: '' }) },
+    filters.from && { key: 'from', label: `From ${filters.from}`, clear: () => set({ from: '' }) },
+    filters.to && { key: 'to', label: `To ${filters.to}`, clear: () => set({ to: '' }) },
+  ].filter(Boolean) as Array<{ key: string; label: string; clear: () => void }>
+
+  const meta = selected?.metadata && Object.keys(selected.metadata).length ? selected.metadata : null
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="space-y-5">
       <PageHeader
         title="Transactions"
-        subtitle={`${stats.totalTransactions} total transactions`}
+        description="Every wallet ledger entry, newest first. Totals and the CSV export follow the filters."
+        actions={
+          <>
+            <Button
+              size="sm"
+              variant="secondary"
+              leftIcon={<Download size={13} />}
+              loading={exportCsv.isPending}
+              disabled={!data?.count}
+              onClick={() => exportCsv.mutate()}
+            >
+              Export CSV
+            </Button>
+            <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={q.isFetching} onClick={() => void q.refetch()}>
+              Refresh
+            </Button>
+          </>
+        }
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
-        <StatCard
-          title="Total Transactions"
-          value={stats.totalTransactions}
-          icon={ArrowLeftRight}
-          color="blue"
-        />
-        <StatCard
-          title="Total Deposits"
-          value={formatKES(stats.totalDeposits)}
-          icon={ArrowDownCircle}
-          color="purple"
-        />
-        <StatCard
-          title="Total Withdrawals"
-          value={formatKES(stats.totalWithdrawals)}
-          icon={ArrowUpCircle}
-          color="red"
-        />
-        <StatCard
-          title="Net Flow"
-          value={formatKES(stats.netFlow)}
-          icon={Receipt}
-          color={stats.netFlow >= 0 ? 'teal' : 'amber'}
-        />
+      {exportCsv.error && (
+        <ErrorState variant="inline" title="Export failed" error={exportCsv.error} onRetry={() => exportCsv.mutate()} retrying={exportCsv.isPending} />
+      )}
+
+      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by type">
+        <button
+          type="button"
+          aria-pressed={filters.types.length === 0}
+          onClick={() => set({ types: [] })}
+          className={cn(
+            'h-7 rounded-md border px-2.5 text-xs font-medium transition-colors',
+            filters.types.length === 0 ? 'border-brand bg-brand-soft text-brand-text' : 'border-surface-border bg-surface-card text-ink-secondary hover:text-ink-primary',
+          )}
+        >
+          All types
+        </button>
+        {TYPES.map((t) => {
+          const on = filters.types.includes(t)
+          return (
+            <button
+              key={t}
+              type="button"
+              aria-pressed={on}
+              onClick={() => toggleType(t)}
+              className={cn(
+                'h-7 rounded-md border px-2.5 text-xs font-medium transition-colors',
+                on ? 'border-brand bg-brand-soft text-brand-text' : 'border-surface-border bg-surface-card text-ink-secondary hover:text-ink-primary',
+              )}
+            >
+              {LEDGER_TYPE_LABEL[t]}
+            </button>
+          )
+        })}
       </div>
 
-      <AdminTable
-        title="All Transactions"
-        subtitle={`Showing ${sortedItems.length} of ${items.length} transactions`}
-        columns={columns}
-        data={sortedItems}
-        isLoading={loading}
-        rowKey={(tx) => tx.id.toString()}
-        searchValue={searchTerm}
-        onSearchChange={setSearchTerm}
-        searchPlaceholder="Search transactions..."
-        emptyMessage="No transactions found"
-        sortKey={sortKey}
-        sortDir={sortDir}
-        onSort={handleSort}
-        onRowClick={(tx) => setSelectedTransaction(tx)}
+      <TotalsBar
+        loading={q.isLoading}
+        error={!!q.error}
+        count={data?.count}
+        credits={data?.totals.credits}
+        debits={data?.totals.debits}
+        net={data?.totals.net}
+        users={data?.totals.users}
       />
 
-      {selectedTransaction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
-          <div className="w-full max-w-2xl rounded-2xl border border-[#21263A] bg-[#13161F] shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-[#21263A]">
-              <div>
-                <p className="text-ink-primary text-lg font-semibold">Transaction Details</p>
-                <p className="text-ink-muted text-xs">Drill-down view with quick copy actions</p>
+      <AdminTable
+        columns={columns}
+        data={data?.results ?? []}
+        rowKey={(r) => r.id}
+        isLoading={q.isLoading}
+        error={q.error}
+        onRetry={() => void q.refetch()}
+        onRowClick={setSelected}
+        isRowActive={(r) => r.id === selected?.id}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        onSort={onSort}
+        maxHeight="68vh"
+        skeletonRows={10}
+        toolbar={
+          <div className="space-y-2">
+            <Toolbar>
+              <SearchInput size="sm" value={filters.q} onChange={(v) => set({ q: v })} placeholder="Reference or description" />
+              <SearchInput size="sm" value={filters.user} onChange={(v) => set({ user: v })} placeholder="User, email or phone" containerClassName="sm:w-52" />
+              <Select size="sm" aria-label="Direction" value={filters.direction} onChange={(e) => set({ direction: e.target.value as LedgerFilters['direction'] })} containerClassName="w-40">
+                <option value="all">All directions</option>
+                <option value="credit">Credits only</option>
+                <option value="debit">Debits only</option>
+              </Select>
+              <Input type="date" size="sm" aria-label="From date" value={filters.from} max={filters.to || undefined} onChange={(e) => set({ from: e.target.value })} className="w-[8.75rem]" />
+              <Input type="date" size="sm" aria-label="To date" value={filters.to} min={filters.from || undefined} onChange={(e) => set({ to: e.target.value })} className="w-[8.75rem]" />
+            </Toolbar>
+            {chips.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {chips.map((c) => <FilterChip key={c.key} label={c.label} onRemove={c.clear} />)}
+                <button type="button" onClick={() => set({ ...EMPTY, ordering: filters.ordering })} className="text-xs font-medium text-brand-text hover:underline">
+                  Clear all
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setSelectedTransaction(null)}
-                className="w-8 h-8 rounded-lg flex items-center justify-center"
-                style={{ background: '#0E1016', border: '1px solid #21263A' }}>
-                <X size={14} color="#7B82A0" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-5">
-              <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
-                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">User</p>
-                <p className="text-ink-primary font-semibold">{selectedTransaction.user_username || 'System'}</p>
-                <p className="text-ink-muted text-xs mt-1">ID: {selectedTransaction.user ?? 'n/a'}</p>
-              </div>
-              <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
-                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Amount</p>
-                <p className="text-ink-primary font-semibold mono">
-                  {parseFloat(selectedTransaction.amount) > 0 ? '+' : ''}{formatKES(selectedTransaction.amount)}
-                </p>
-                <p className="text-ink-muted text-xs mt-1">Type: {selectedTransaction.type}</p>
-              </div>
-              <div className="rounded-xl p-4 md:col-span-2" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
-                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Description</p>
-                <p className="text-ink-secondary text-sm">{selectedTransaction.description || '-'}</p>
-              </div>
-              <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
-                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Balance Before</p>
-                <p className="text-ink-primary font-semibold mono">{formatKES(selectedTransaction.balance_before)}</p>
-              </div>
-              <div className="rounded-xl p-4" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
-                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Balance After</p>
-                <p className="text-ink-primary font-semibold mono">{formatKES(selectedTransaction.balance_after)}</p>
-              </div>
-              <div className="rounded-xl p-4 md:col-span-2" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
-                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Reference</p>
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-ink-secondary mono text-sm break-all">{selectedTransaction.reference_id || '—'}</p>
-                  {selectedTransaction.reference_id && (
-                    <button
-                      type="button"
-                      onClick={() => void copyToClipboard('Reference copied', selectedTransaction.reference_id || '')}
-                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold"
-                      style={{ background: '#191C28', border: '1px solid #21263A', color: '#D4DEFF' }}>
-                      <Copy size={13} />
-                      Copy
-                    </button>
-                  )}
-                </div>
-                {copiedLabel && (
-                  <p className="text-up text-xs mt-2">{copiedLabel}</p>
-                )}
-              </div>
-              <div className="rounded-xl p-4 md:col-span-2" style={{ background: '#0E1016', border: '1px solid #21263A' }}>
-                <p className="text-ink-muted text-xs uppercase tracking-wide mb-1">Created</p>
-                <p className="text-ink-secondary text-sm">{new Date(selectedTransaction.created_at).toLocaleString()}</p>
-              </div>
-            </div>
+            )}
           </div>
-        </div>
-      )}
+        }
+        emptyState={
+          chips.length ? (
+            <EmptyState size="compact" icon={ReceiptText} title="No ledger entries match these filters" action={<Button size="sm" variant="secondary" onClick={() => set({ ...EMPTY })}>Clear filters</Button>} />
+          ) : (
+            <EmptyState size="compact" icon={ReceiptText} title="No ledger entries yet" description="Deposits, challenge entries, payouts and refunds appear here as they happen." />
+          )
+        }
+        pagination={{ page, total: data?.count ?? 0, pageSize: PAGE_SIZE, onPage: setPage, itemLabel: 'entries' }}
+      />
+
+      <SlideOver
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        title={selected ? LEDGER_TYPE_LABEL[selected.type] ?? selected.type : ''}
+        subtitle={selected ? `Ledger entry #${selected.id}` : undefined}
+        headerAside={selected && !selected.arithmetic_ok ? <StatusBadge size="sm" tone="danger" label="Mismatch" /> : undefined}
+      >
+        {selected && (
+          <div className="space-y-5">
+            <div className="rounded-md border border-surface-border bg-surface-sunken/50 px-4 py-3">
+              <p className="text-xs text-ink-muted">{toNum(selected.amount) >= 0 ? 'Credited to wallet' : 'Debited from wallet'}</p>
+              <p className="mt-0.5 text-2xl font-semibold tracking-tight"><SignedMoney value={selected.amount} /></p>
+              <p className="mt-1 text-sm text-ink-secondary">{selected.description || '—'}</p>
+            </div>
+            {!selected.arithmetic_ok && (
+              <p className="flex items-start gap-2 rounded-md border border-danger-line bg-danger-soft px-3 py-2 text-sm text-danger">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden />
+                Balance before plus amount does not equal balance after for this row.
+              </p>
+            )}
+            <Section title="Entry">
+              <div className="rounded-md border border-surface-border px-3">
+                <DetailRow label="User" value={selected.user_username ?? 'System'} />
+                <DetailRow label="Time" value={formatDateTime(selected.created_at)} />
+                <DetailRow label="Balance before" value={formatKES(toNum(selected.balance_before))} mono />
+                <DetailRow label="Amount" value={<SignedMoney value={selected.amount} />} />
+                <DetailRow label="Balance after" value={formatKES(toNum(selected.balance_after))} mono />
+                <DetailRow label="Reference" value={selected.reference_id ? <Reference value={selected.reference_id} truncate={false} /> : null} />
+              </div>
+            </Section>
+            {meta && (
+              <Section title="Metadata">
+                <div className="rounded-md border border-surface-border px-3">
+                  {Object.entries(meta).map(([k, v]) => (
+                    <DetailRow key={k} label={k.replace(/_/g, ' ')} value={typeof v === 'object' ? JSON.stringify(v) : String(v)} mono />
+                  ))}
+                </div>
+              </Section>
+            )}
+          </div>
+        )}
+      </SlideOver>
     </div>
-  );
+  )
 }

@@ -111,8 +111,12 @@ def score_session(session) -> dict[str, Any]:
                 }
             )
 
-    # Many legacy events (unverified ML)
-    if total_events > 0 and legacy_count / total_events > 0.7:
+    # Many legacy events (unverified ML). iOS exposes no raw motion stream, so iPhone
+    # sessions never carry ML labels; don't penalise them for that alone (all other
+    # session and interval rules still apply).
+    device = getattr(session, "device", None)
+    is_ios_session = bool(device and (getattr(device, "platform", "") or "").lower() == "ios")
+    if total_events > 0 and legacy_count / total_events > 0.7 and not is_ios_session:
         legacy_penalty = 5.0
         session_risk += legacy_penalty
         risk_hits.append(

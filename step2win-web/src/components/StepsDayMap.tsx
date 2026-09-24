@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Map as MapIcon } from 'lucide-react';
 import { LocationWaypoint } from '../types';
+import { usePreference } from './settings/preferences';
+import Button from './ui/Button';
 
 interface StepsDayMapProps {
   waypoints: LocationWaypoint[];
@@ -8,13 +11,44 @@ interface StepsDayMapProps {
 
 type RouteSource = 'encoded' | 'waypoints';
 
+/** Reads a design token (HSL triplet) so Leaflet vectors follow the light/dark theme. */
+function tokenColor(name: string, alpha = 1): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim();
+  return value ? `hsl(${value} / ${alpha})` : `rgba(0, 0, 0, ${alpha})`;
+}
+
 type RoutePoint = {
   latitude: number;
   longitude: number;
   hour?: number;
 };
 
-export function StepsDayMap({ waypoints, encodedPolyline }: StepsDayMapProps) {
+/**
+ * Route map for a day. With data saver on, tiles aren't downloaded until the user asks.
+ */
+export function StepsDayMap(props: StepsDayMapProps) {
+  const dataSaver = usePreference('dataSaver');
+  const [loadRequested, setLoadRequested] = useState(false);
+
+  if (dataSaver && !loadRequested) {
+    return (
+      <div className="flex h-60 w-full flex-col items-center justify-center gap-3 border-t border-border-light bg-bg-sunken px-6 text-center sm:h-72">
+        <MapIcon size={24} className="text-text-muted" aria-hidden />
+        <div>
+          <p className="text-callout font-semibold text-text-primary">Map paused by data saver</p>
+          <p className="mt-0.5 text-caption text-text-muted">Loading the map downloads map images (about 1–2 MB).</p>
+        </div>
+        <Button variant="secondary" size="sm" onClick={() => setLoadRequested(true)}>
+          Load map
+        </Button>
+      </div>
+    );
+  }
+
+  return <StepsDayMapView {...props} />;
+}
+
+function StepsDayMapView({ waypoints, encodedPolyline }: StepsDayMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const leafletRef = useRef<any>(null);
   const leafletLibRef = useRef<any>(null);
@@ -152,11 +186,15 @@ export function StepsDayMap({ waypoints, encodedPolyline }: StepsDayMapProps) {
       const coords: [number, number][] = routePoints
         .map((w) => [w.latitude, w.longitude]);
 
-      // Draw the route line — blue, matches app accent color
+      const brand = tokenColor('brand');
+      const startColor = tokenColor('text-primary');
+      const ring = tokenColor('bg-card');
+
+      // Route line in the brand colour
       L.polyline(coords, {
-        color: '#4F9CF9',
+        color: brand,
         weight: 4,
-        opacity: 0.85,
+        opacity: 0.9,
         lineCap: 'round',
         lineJoin: 'round',
       }).addTo(map);
@@ -166,10 +204,10 @@ export function StepsDayMap({ waypoints, encodedPolyline }: StepsDayMapProps) {
         html: `
           <div style="
             width: 14px; height: 14px;
-            background: #34D399;
-            border: 3px solid white;
+            background: ${startColor};
+            border: 3px solid ${ring};
             border-radius: 50%;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.25);
           "></div>`,
         className: '',
         iconSize: [14, 14],
@@ -184,10 +222,10 @@ export function StepsDayMap({ waypoints, encodedPolyline }: StepsDayMapProps) {
         html: `
           <div style="
             width: 14px; height: 14px;
-            background: #4F9CF9;
-            border: 3px solid white;
+            background: ${brand};
+            border: 3px solid ${ring};
             border-radius: 50%;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.25);
           "></div>`,
         className: '',
         iconSize: [14, 14],
@@ -215,8 +253,8 @@ export function StepsDayMap({ waypoints, encodedPolyline }: StepsDayMapProps) {
             html: `
               <div style="
                 width: 8px; height: 8px;
-                background: rgba(79,156,249,0.5);
-                border: 1.5px solid #4F9CF9;
+                background: ${tokenColor('brand', 0.35)};
+                border: 1.5px solid ${brand};
                 border-radius: 50%;
               "></div>`,
             className: '',
@@ -254,23 +292,25 @@ export function StepsDayMap({ waypoints, encodedPolyline }: StepsDayMapProps) {
     }
 
     if (!currentMarkerRef.current) {
+      const info = tokenColor('info');
+      const ring = tokenColor('bg-card');
       const currentIcon = L.divIcon({
         html: `
           <div style="position: relative; width: 14px; height: 14px;">
             <div style="
               position: absolute;
               inset: -8px;
-              background: rgba(52, 211, 153, 0.24);
+              background: ${tokenColor('info', 0.22)};
               border-radius: 50%;
             "></div>
             <div style="
               position: absolute;
               inset: 0;
               width: 14px; height: 14px;
-              background: #34D399;
-              border: 2px solid white;
+              background: ${info};
+              border: 2px solid ${ring};
               border-radius: 50%;
-              box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+              box-shadow: 0 1px 3px rgba(0,0,0,0.25);
             "></div>
           </div>`,
         className: '',
@@ -288,44 +328,24 @@ export function StepsDayMap({ waypoints, encodedPolyline }: StepsDayMapProps) {
   }, [currentLocation]);
 
   return (
-    <div className="relative">
+    <div className="relative border-t border-border-light">
       {/* Map container */}
-      <div
-        ref={mapRef}
-        style={{
-          height: '240px',
-          width: '100%',
-          borderRadius: '0 0 16px 16px',
-          overflow: 'hidden',
-        }}
-      />
+      <div ref={mapRef} className="h-60 w-full sm:h-72" role="img" aria-label="Map of the route walked this day" />
 
       {/* Legend overlay */}
-      <div
-        className="absolute bottom-3 left-3 flex items-center gap-3 px-3 py-1.5 rounded-xl"
-        style={{
-          background: 'hsl(var(--bg-elevated) / 0.92)',
-          boxShadow: '0 1px 6px rgba(0,0,0,0.12)',
-          backdropFilter: 'blur(4px)',
-          border: '1px solid hsl(var(--border-default))',
-        }}
-      >
+      <div className="absolute bottom-3 left-3 z-[400] flex items-center gap-3 rounded-full border border-border-light bg-bg-card/95 px-3 py-1.5 shadow-card">
         <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#34D399' }} />
-          <span className="text-[10px] text-text-secondary font-medium">Start</span>
+          <span className="h-2.5 w-2.5 rounded-full bg-text-primary ring-2 ring-bg-card" aria-hidden />
+          <span className="text-micro font-medium text-text-secondary">Start</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#4F9CF9' }} />
-          <span className="text-[10px] text-text-secondary font-medium">End</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-8 h-0.5 rounded-full" style={{ background: '#4F9CF9' }} />
-          <span className="text-[10px] text-text-secondary font-medium">Route</span>
+          <span className="h-2.5 w-2.5 rounded-full bg-brand ring-2 ring-bg-card" aria-hidden />
+          <span className="text-micro font-medium text-text-secondary">End</span>
         </div>
         {currentLocation && (
           <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#34D399' }} />
-            <span className="text-[10px] text-text-secondary font-medium">Now</span>
+            <span className="h-2.5 w-2.5 rounded-full bg-info ring-2 ring-bg-card" aria-hidden />
+            <span className="text-micro font-medium text-text-secondary">You</span>
           </div>
         )}
       </div>

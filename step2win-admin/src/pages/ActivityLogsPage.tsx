@@ -1,760 +1,250 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { adminApi } from '../services/adminApi';
-import { History, Search, Filter, Calendar, User, Activity, AlertCircle, X, Download, Copy } from 'lucide-react';
-import { PageHeader } from '../components/PageHeader';
-import { StatCard } from '../components/StatCard';
-import { StatusBadge } from '../components/StatusBadge';
+import { Fragment, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { ChevronRight, Download, History, RefreshCw } from 'lucide-react'
+import { PageHeader } from '../components/PageHeader'
+import { Button } from '../components/ui/Button'
+import { Input, SearchInput, Select } from '../components/ui/Input'
+import { FilterChip, Toolbar } from '../components/ui/Toolbar'
+import { SegmentedControl } from '../components/ui/Tabs'
+import { Pagination } from '../components/ui/Pagination'
+import { EmptyState } from '../components/ui/EmptyState'
+import { ErrorState } from '../components/ui/ErrorState'
+import { Skeleton } from '../components/ui/Skeleton'
+import { formatDateTime } from '../lib/format'
+import { cn } from '../lib/cn'
+import { consoleApi } from '../components/users/api'
+import type { AuditLogRow } from '../components/users/types'
+import { AuditActionBadge, ChangeList, Timestamp } from '../components/users/shared'
+import { AUDIT_ACTIONS, auditAction } from '../components/users/auditActions'
+import { downloadCsv, humanize, useDebounced } from '../components/users/utils'
 
-interface AuditLog {
-  id: number;
-  admin_username: string;
-  action: string;
-  resource_type: string;
-  resource_id: number | null;
-  resource_name: string;
-  description: string;
-  changes: Record<string, { old: string; new: string }> | null;
-  ip_address: string | null;
-  created_at: string;
-}
-
-interface AuditLogsParams {
-  limit: number;
-  offset: number;
-  admin_username?: string;
-  action?: string;
-  resource_type?: string;
-  from_date?: string;
-  to_date?: string;
-}
-
-interface AuditLogsResponse {
-  results: AuditLog[];
-  total: number;
-}
+const RESOURCES = [
+  { value: 'user', label: 'User' }, { value: 'challenge', label: 'Challenge' }, { value: 'transaction', label: 'Transaction' },
+  { value: 'withdrawal', label: 'Withdrawal' }, { value: 'badge', label: 'Badge' }, { value: 'settings', label: 'System settings' },
+  { value: 'support', label: 'Support' }, { value: 'auth', label: 'Authentication' },
+]
+const PAGE_SIZE = 50
 
 export function ActivityLogsPage() {
-  const navigate = useNavigate();
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [total, setTotal] = useState(0);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  
-  // Filters
-  const [searchTerm, setSearchTerm] = useState('');
-  const [actionFilter, setActionFilter] = useState('');
-  const [resourceFilter, setResourceFilter] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  const [offset, setOffset] = useState(0);
-  const [limit] = useState(50);
-  
-  // Selected log for viewing details
-  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const [search, setSearch] = useState('')
+  const [action, setAction] = useState('')
+  const [resource, setResource] = useState(params.get('resource_type') ?? '')
+  const [resourceId, setResourceId] = useState(params.get('resource_id') ?? '')
+  const [admin, setAdmin] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [scope, setScope] = useState<'changes' | 'all'>('changes')
+  const [page, setPage] = useState(1)
+  const [open, setOpen] = useState<Set<number>>(new Set())
+  const q = useDebounced(search.trim(), 300)
 
-  const exportLogsCSV = () => {
-    const headers = ['created_at', 'admin_username', 'action', 'resource_type', 'resource_id', 'resource_name', 'description', 'ip_address'];
-    const rows = [
-      headers,
-      ...logs.map((log) => headers.map((header) => {
-        const value = log[header as keyof AuditLog];
-        return String(value ?? '');
-      })),
-    ];
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `activity-logs-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
+  const filters = {
+    search: q || undefined,
+    action: action || undefined,
+    resource_type: resource || undefined,
+    resource_id: resourceId || undefined,
+    admin_username: admin || undefined,
+    from_date: from ? `${from}T00:00:00` : undefined,
+    to_date: to ? `${to}T23:59:59` : undefined,
+    exclude_auth: scope === 'changes' && action !== 'login' && action !== 'logout' ? 'true' : undefined,
+  }
+  const logsQ = useQuery({
+    queryKey: ['admin', 'audit-logs', filters, page],
+    queryFn: () => consoleApi.auditLogs({ ...filters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    placeholderData: keepPreviousData,
+  })
+  const data = logsQ.data
+  const reset = () => { setPage(1); setOpen(new Set()) }
+  const toggle = (id: number) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
-  const loadLogs = useCallback(async () => {
-    setLoading(true);
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
+  const exportCsv = async () => {
+    setExporting(true)
+    setExportError(null)
     try {
-      const params: AuditLogsParams = { limit, offset };
-      
-      if (searchTerm) params.admin_username = searchTerm;
-      if (actionFilter) params.action = actionFilter;
-      if (resourceFilter) params.resource_type = resourceFilter;
-      if (fromDate) params.from_date = fromDate;
-      if (toDate) params.to_date = toDate;
-      
-      const data = (await adminApi.getAuditLogs(params)) as AuditLogsResponse;
-      setLogs(data.results);
-      setTotal(data.total);
-    } catch (err) {
-      setError((err as Error).message);
+      const all = await consoleApi.auditLogs({ ...filters, limit: 1000, offset: 0 })
+      downloadCsv(`audit-log_${new Date().toISOString().slice(0, 10)}.csv`,
+        ['time', 'admin', 'action', 'resource_type', 'resource_id', 'resource_name', 'description', 'ip_address', 'changes'],
+        all.results.map((r) => [r.created_at, r.admin_username, r.action, r.resource_type, r.resource_id, r.resource_name, r.description, r.ip_address, r.changes ? JSON.stringify(r.changes) : '']))
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Export failed')
     } finally {
-      setLoading(false);
+      setExporting(false)
     }
-  }, [limit, offset, searchTerm, actionFilter, resourceFilter, fromDate, toDate]);
+  }
 
-  useEffect(() => {
-    // Defer to microtask to avoid synchronous setState inside effect
-    queueMicrotask(() => { void loadLogs(); });
-  }, [loadLogs]);
+  const targetLink = (r: AuditLogRow) => {
+    if (r.resource_id == null) return null
+    if (r.resource_type === 'user' && r.action !== 'delete') return `/users?user=${r.resource_id}`
+    if (r.resource_type === 'challenge' && r.action !== 'delete') return `/challenges?open=${r.resource_id}`
+    if (r.resource_type === 'badge') return '/badges'
+    if (r.resource_type === 'settings') return '/settings'
+    return null
+  }
 
-  const handleSearch = () => {
-    setOffset(0);
-    loadLogs();
-  };
+  const chips = [
+    q && { key: 'q', label: `Search: ${q}`, clear: () => setSearch('') },
+    action && { key: 'a', label: `Action: ${auditAction(action).label}`, clear: () => setAction('') },
+    resource && { key: 'r', label: `Resource: ${humanize(resource)}`, clear: () => setResource('') },
+    resourceId && { key: 'rid', label: `Record #${resourceId}`, clear: () => setResourceId('') },
+    admin && { key: 'ad', label: `Admin: ${admin}`, clear: () => setAdmin('') },
+    (from || to) && { key: 'd', label: `Dates: ${from || '…'} – ${to || '…'}`, clear: () => { setFrom(''); setTo('') } },
+  ].filter(Boolean) as Array<{ key: string; label: string; clear: () => void }>
 
-  const handleClearFilters = () => {
-    setSearchTerm('');
-    setActionFilter('');
-    setResourceFilter('');
-    setFromDate('');
-    setToDate('');
-    setOffset(0);
-  };
-
-  const getResourceIcon = (resourceType: string) => {
-    switch (resourceType) {
-      case 'user': return <User size={14} />;
-      case 'auth': return <User size={14} />;
-      default: return <Activity size={14} />;
-    }
-  };
-
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  // Calculate stats for StatCards
-  const currentPage = Math.floor(offset / limit) + 1;
-  const totalPages = Math.ceil(total / limit);
-  
-  const uniqueAdmins = new Set(logs.map(log => log.admin_username)).size;
-  const actionCounts = logs.reduce((acc, log) => {
-    acc[log.action] = (acc[log.action] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-  const mostCommonAction = Object.entries(actionCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A';
-
-  const getActionBadgeVariant = (action: string): 'active' | 'completed' | 'cancelled' | 'pending' | 'warning' | 'info' | 'banned' | 'failed' => {
-    const variantMap: Record<string, 'active' | 'completed' | 'cancelled' | 'pending' | 'warning' | 'info' | 'banned' | 'failed'> = {
-      create: 'completed',
-      update: 'active',
-      delete: 'cancelled',
-      login: 'active',
-      logout: 'info',
-      ban: 'banned',
-      unban: 'completed',
-      approve: 'completed',
-      reject: 'cancelled',
-      cancel: 'cancelled',
-      promote: 'active',
-      demote: 'warning',
-      reset_password: 'warning',
-      settings_change: 'active',
-    };
-    return variantMap[action] || 'info';
-  };
+  const cell = 'px-3 py-2 align-middle'
 
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
+    <div className="space-y-5">
       <PageHeader
-        title="Activity Logs"
-        subtitle={`${total} total activities`}
-        actions={(
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button
-              onClick={exportLogsCSV}
-              style={{
-                padding: '8px 14px',
-                background: '#00f5e9',
-                color: '#091120',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              <Download size={16} /> Export CSV
-            </button>
-            <button
-              onClick={() => navigate('/users')}
-              style={{
-                padding: '8px 14px',
-                background: '#1a2332',
-                color: '#fff',
-                border: '1px solid #2d3748',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: 500,
-              }}
-            >
-              Users
-            </button>
-          </div>
-        )}
+        title="Audit log"
+        description="Who did what, to which record, and when. Entries cannot be edited or deleted from the console."
+        actions={
+          <>
+            <Button size="sm" variant="secondary" leftIcon={<Download size={13} />} loading={exporting} disabled={!data?.total} onClick={() => void exportCsv()}>
+              Export CSV
+            </Button>
+            <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={logsQ.isFetching} onClick={() => void logsQ.refetch()}>
+              Refresh
+            </Button>
+          </>
+        }
       />
+      {exportError && <ErrorState variant="inline" title="Export failed" error={exportError} />}
 
-      {/* Error Message */}
-      {error && (
-        <div style={{ padding: '12px 16px', background: '#7f1d1d', borderRadius: '6px', color: '#fca5a5', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <AlertCircle size={18} />
-          {error}
-        </div>
-      )}
-
-      {/* Stats Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
-        <StatCard
-          title="Total Activities"
-          value={total.toLocaleString()}
-          icon={Activity}
-          color="teal"
-          trend={logs.length}
-          trendLabel="on this page"
-        />
-        <StatCard
-          title="Active Admins"
-          value={uniqueAdmins.toString()}
-          icon={User}
-          color="blue"
-          trend={uniqueAdmins}
-          trendLabel="admins acting"
-        />
-        <StatCard
-          title="Most Common Action"
-          value={mostCommonAction.replace(/_/g, ' ')}
-          icon={Filter}
-          color="purple"
-          trend={actionCounts[mostCommonAction] || 0}
-          trendLabel="occurrences"
-        />
-        <StatCard
-          title="Recent Timespan"
-          value={logs.length > 0 ? logs.length + ' entries' : 'No data'}
-          icon={Calendar}
-          color="amber"
-          trend={logs.length > 0 ? Math.round((logs.length / limit) * 10) : 0}
-          trendLabel="% of page"
-        />
-      </div>
-
-      {/* Filters Section */}
-      <div style={{
-        background: '#0C1117',
-        border: '1px solid #21263A',
-        borderRadius: '8px',
-        padding: '20px',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-          <Filter size={18} style={{ color: '#00f5e9' }} />
-          <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#fff' }}>Filters</h3>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
-          {/* Admin Username */}
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#64748b', fontSize: '14px' }}>
-              Admin Username
-            </label>
-            <div style={{ position: 'relative' }}>
-              <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
-              <input
-                type="text"
-                placeholder="Search admin..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px 8px 36px',
-                  background: '#13161F',
-                  border: '1px solid #21263A',
-                  borderRadius: '6px',
-                  color: '#fff',
-                  fontSize: '14px',
-                }}
-              />
+      <div className="min-w-0 overflow-hidden rounded-lg border border-surface-border bg-surface-card shadow-card">
+        <div className="space-y-2 border-b border-surface-border px-4 py-2.5">
+          <Toolbar actions={<span className="num text-xs text-ink-muted" aria-live="polite">{data ? `${data.total.toLocaleString()} entries` : ''}</span>}>
+            <SegmentedControl label="Entry scope" value={scope} onChange={(v) => { setScope(v); reset() }}
+              items={[{ value: 'changes' as const, label: 'Changes' }, { value: 'all' as const, label: 'Include sign-ins' }]} />
+            <SearchInput size="sm" value={search} onChange={(v) => { setSearch(v); reset() }} placeholder="Search description, record or admin" containerClassName="sm:w-72" />
+            <Select size="sm" aria-label="Action" value={action} onChange={(e) => { setAction(e.target.value); reset() }} containerClassName="w-40">
+              <option value="">Any action</option>
+              {Object.entries(AUDIT_ACTIONS).sort((a, b) => a[1].label.localeCompare(b[1].label)).map(([code, m]) => <option key={code} value={code}>{m.label}</option>)}
+            </Select>
+            <Select size="sm" aria-label="Resource type" value={resource} onChange={(e) => { setResource(e.target.value); reset() }} containerClassName="w-40">
+              <option value="">Any resource</option>
+              {RESOURCES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </Select>
+            <Select size="sm" aria-label="Admin" value={admin} onChange={(e) => { setAdmin(e.target.value); reset() }} containerClassName="w-40">
+              <option value="">Any admin</option>
+              {(data?.admins ?? []).map((a) => <option key={a} value={a}>{a}</option>)}
+            </Select>
+            <span className="flex items-center gap-1.5">
+              <Input size="sm" type="date" aria-label="From date" value={from} max={to || undefined} onChange={(e) => { setFrom(e.target.value); reset() }} />
+              <span className="text-xs text-ink-muted">to</span>
+              <Input size="sm" type="date" aria-label="To date" value={to} min={from || undefined} onChange={(e) => { setTo(e.target.value); reset() }} />
+            </span>
+          </Toolbar>
+          {chips.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {chips.map((c) => <FilterChip key={c.key} label={c.label} onRemove={() => { c.clear(); reset() }} />)}
             </div>
-          </div>
-
-          {/* Action */}
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#64748b', fontSize: '14px' }}>
-              Action
-            </label>
-            <select
-              value={actionFilter}
-              onChange={(e) => setActionFilter(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                background: '#13161F',
-                border: '1px solid #21263A',
-                borderRadius: '6px',
-                color: '#fff',
-                fontSize: '14px',
-              }}
-            >
-              <option value="">All Actions</option>
-              <option value="create">Create</option>
-              <option value="update">Update</option>
-              <option value="delete">Delete</option>
-              <option value="login">Login</option>
-              <option value="logout">Logout</option>
-              <option value="ban">Ban</option>
-              <option value="unban">Unban</option>
-              <option value="approve">Approve</option>
-              <option value="reject">Reject</option>
-              <option value="cancel">Cancel</option>
-              <option value="promote">Promote</option>
-              <option value="demote">Demote</option>
-              <option value="reset_password">Reset Password</option>
-              <option value="settings_change">Settings Change</option>
-            </select>
-          </div>
-
-          {/* Resource Type */}
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#64748b', fontSize: '14px' }}>
-              Resource Type
-            </label>
-            <select
-              value={resourceFilter}
-              onChange={(e) => setResourceFilter(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                background: '#13161F',
-                border: '1px solid #21263A',
-                borderRadius: '6px',
-                color: '#fff',
-                fontSize: '14px',
-              }}
-            >
-              <option value="">All Resources</option>
-              <option value="user">User</option>
-              <option value="challenge">Challenge</option>
-              <option value="transaction">Transaction</option>
-              <option value="withdrawal">Withdrawal</option>
-              <option value="badge">Badge</option>
-              <option value="settings">System Settings</option>
-              <option value="auth">Authentication</option>
-            </select>
-          </div>
-
-          {/* From Date */}
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#64748b', fontSize: '14px' }}>
-              From Date
-            </label>
-            <div style={{ position: 'relative' }}>
-              <Calendar size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px 8px 36px',
-                  background: '#13161F',
-                  border: '1px solid #21263A',
-                  borderRadius: '6px',
-                  color: '#fff',
-                }}
-              />
-            </div>
-          </div>
-
-          {/* To Date */}
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#64748b', fontSize: '14px' }}>
-              To Date
-            </label>
-            <div style={{ position: 'relative' }}>
-              <Calendar size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px 8px 36px',
-                  background: '#13161F',
-                  border: '1px solid #21263A',
-                  borderRadius: '6px',
-                  color: '#fff',
-                }}
-              />
-            </div>
-          </div>
+          )}
         </div>
 
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <button
-            onClick={handleSearch}
-            style={{
-              padding: '8px 16px',
-              background: 'linear-gradient(135deg, #00f5e9 0%, #0e7490 100%)',
-              color: '#091120',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '14px',
-            }}
-          >
-            Apply Filters
-          </button>
-          <button
-            onClick={handleClearFilters}
-            style={{
-              padding: '8px 16px',
-              background: '#21263A',
-              color: '#fff',
-              border: '1px solid #2d3748',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-            }}
-          >
-            Clear All
-          </button>
-        </div>
-      </div>
-
-      {/* Activity Logs Table */}
-      <div style={{
-        background: '#0C1117',
-        border: '1px solid #21263A',
-        borderRadius: '8px',
-        overflow: 'hidden',
-      }}>
-        {loading ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
-            Loading logs...
-          </div>
-        ) : logs.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
-            No activity logs found
-          </div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <caption className="sr-only">Admin audit log</caption>
             <thead>
-              <tr style={{ background: '#13161F', borderBottom: '1px solid #21263A' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Timestamp</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Admin</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Action</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Resource</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Description</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>IP Address</th>
-                <th style={{ padding: '12px 16px', textAlign: 'center', color: '#64748b', fontWeight: 600, fontSize: '12px' }}>Actions</th>
+              <tr className="border-b border-surface-border text-left text-xs text-ink-muted">
+                <th scope="col" className="w-8 px-2 py-2"><span className="sr-only">Details</span></th>
+                <th scope="col" className="px-3 py-2 font-medium">When</th>
+                <th scope="col" className="px-3 py-2 font-medium">Admin</th>
+                <th scope="col" className="px-3 py-2 font-medium">Action</th>
+                <th scope="col" className="px-3 py-2 font-medium">Target</th>
+                <th scope="col" className="hidden px-3 py-2 font-medium md:table-cell">Description</th>
+                <th scope="col" className="hidden px-3 py-2 font-medium xl:table-cell">IP address</th>
               </tr>
             </thead>
             <tbody>
-              {logs.map((log) => (
-                <tr
-                  key={log.id}
-                  style={{ borderBottom: '1px solid #21263A', transition: 'background 0.2s', cursor: 'pointer' }}
-                  onClick={() => setSelectedLog(log)}
-                  onMouseEnter={(e) => e.currentTarget.style.background = '#13161F'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                >
-                  <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '13px', whiteSpace: 'nowrap' }}>
-                    {formatDate(log.created_at)}
-                  </td>
-                  <td style={{ padding: '12px 16px', color: '#fff', fontWeight: 500, fontSize: '13px' }}>
-                    {log.admin_username}
-                  </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <StatusBadge 
-                      variant={getActionBadgeVariant(log.action)}
-                      label={log.action.replace(/_/g, ' ')}
-                    />
-                  </td>
-                  <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '13px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      {getResourceIcon(log.resource_type)}
-                      <span style={{ textTransform: 'capitalize' }}>{log.resource_type}</span>
-                      {log.resource_id && <span style={{ color: '#64748b' }}>#{log.resource_id}</span>}
-                    </div>
-                  </td>
-                  <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '13px', maxWidth: '300px' }}>
-                    {log.description}
-                    {log.resource_name && (
-                      <span style={{ color: '#64748b', fontStyle: 'italic' }}> ({log.resource_name})</span>
-                    )}
-                  </td>
-                  <td style={{ padding: '12px 16px', color: '#64748b', fontSize: '12px', fontFamily: 'monospace' }}>
-                    {log.ip_address || '-'}
-                  </td>
-                  <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                    <button
-                      onClick={() => setSelectedLog(log)}
-                      style={{
-                        padding: '4px 12px',
-                        background: '#0e7490',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        fontWeight: 500,
-                        transition: 'background 0.2s',
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = '#0891b2'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = '#0e7490'}
-                    >
-                      Details
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {logsQ.error && !data ? (
+                <tr><td colSpan={7}><ErrorState size="compact" error={logsQ.error} onRetry={() => void logsQ.refetch()} /></td></tr>
+              ) : logsQ.isLoading ? (
+                Array.from({ length: 10 }).map((_, i) => (
+                  <tr key={i} className="border-b border-surface-border">
+                    <td className="px-2 py-2.5" />
+                    {[40, 50, 40, 60].map((w, j) => <td key={j} className="px-3 py-2.5"><Skeleton width={`${w}%`} /></td>)}
+                    <td className="hidden px-3 py-2.5 md:table-cell"><Skeleton width="80%" /></td>
+                    <td className="hidden px-3 py-2.5 xl:table-cell"><Skeleton width="50%" /></td>
+                  </tr>
+                ))
+              ) : !data?.results.length ? (
+                <tr><td colSpan={7}>
+                  <EmptyState size="compact" icon={History} title={chips.length ? 'No entries match these filters' : 'No admin actions recorded yet'}
+                    description={chips.length ? 'Remove a filter or widen the date range.' : 'Bans, approvals, edits and settings changes are recorded here.'} />
+                </td></tr>
+              ) : (
+                data.results.map((r) => {
+                  const expanded = open.has(r.id)
+                  const link = targetLink(r)
+                  const detailId = `audit-detail-${r.id}`
+                  return (
+                    <Fragment key={r.id}>
+                      <tr className={cn('border-b border-surface-border hover:bg-surface-elevated/60', expanded && 'bg-surface-elevated/40')}>
+                        <td className="px-2 py-1 align-middle">
+                          <button type="button" onClick={() => toggle(r.id)} aria-expanded={expanded} aria-controls={detailId}
+                            aria-label={expanded ? 'Hide details' : 'Show details'}
+                            className="flex h-7 w-7 items-center justify-center rounded text-ink-muted hover:bg-surface-elevated hover:text-ink-primary">
+                            <ChevronRight size={14} className={cn('transition-transform', expanded && 'rotate-90')} aria-hidden />
+                          </button>
+                        </td>
+                        <td className={cn(cell, 'whitespace-nowrap text-ink-secondary')}><Timestamp value={r.created_at} /></td>
+                        <td className={cn(cell, 'font-medium text-ink-primary')}>{r.admin_username}</td>
+                        <td className={cell}><AuditActionBadge action={r.action} /></td>
+                        <td className={cn(cell, 'max-w-64')}>
+                          <span className="flex min-w-0 items-baseline gap-1.5">
+                            {link ? (
+                              <button type="button" onClick={() => navigate(link)} className="truncate text-left font-medium text-ink-primary hover:text-brand-text hover:underline">
+                                {r.resource_name || 'Open record'}
+                              </button>
+                            ) : (
+                              <span className="truncate font-medium text-ink-primary">{r.resource_name || '—'}</span>
+                            )}
+                            <span className="shrink-0 text-xs text-ink-muted">{humanize(r.resource_type)}</span>
+                          </span>
+                        </td>
+                        <td className={cn(cell, 'hidden max-w-md text-ink-secondary md:table-cell')}>
+                          <span className="line-clamp-1" title={r.description}>{r.description}</span>
+                        </td>
+                        <td className={cn(cell, 'mono hidden whitespace-nowrap text-xs text-ink-secondary xl:table-cell')}>{r.ip_address ?? '—'}</td>
+                      </tr>
+                      {expanded && (
+                        <tr id={detailId} className="border-b border-surface-border bg-surface-elevated/40">
+                          <td />
+                          <td colSpan={6} className="px-3 pb-3 pt-1">
+                            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+                              <div className="space-y-2">
+                                <p className="text-sm text-ink-primary">{r.description}</p>
+                                <ChangeList changes={r.changes} />
+                                {!r.changes && <p className="text-xs text-ink-muted">No field changes were recorded for this entry.</p>}
+                              </div>
+                              <dl className="space-y-1 text-xs">
+                                <div className="flex justify-between gap-3"><dt className="text-ink-muted">Exact time</dt><dd className="text-ink-primary">{formatDateTime(r.created_at)}</dd></div>
+                                <div className="flex justify-between gap-3"><dt className="text-ink-muted">Entry ID</dt><dd className="mono text-ink-primary">{r.id}</dd></div>
+                                <div className="flex justify-between gap-3"><dt className="text-ink-muted">IP address</dt><dd className="mono text-ink-primary">{r.ip_address ?? '—'}</dd></div>
+                                <div className="flex justify-between gap-3"><dt className="text-ink-muted">Record</dt><dd className="text-ink-primary">{humanize(r.resource_type)} {r.resource_id != null ? `#${r.resource_id}` : ''}</dd></div>
+                              </dl>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })
+              )}
             </tbody>
           </table>
+        </div>
+        {data && data.total > 0 && (
+          <div className="border-t border-surface-border px-4 py-2">
+            <Pagination page={page} total={data.total} pageSize={PAGE_SIZE} onPage={(p) => { setPage(p); setOpen(new Set()) }} itemLabel="entries" />
+          </div>
         )}
       </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px' }}>
-          <button
-            onClick={() => setOffset(Math.max(0, offset - limit))}
-            disabled={offset === 0}
-            style={{
-              padding: '8px 16px',
-              background: offset === 0 ? '#2d3748' : 'linear-gradient(135deg, #00f5e9 0%, #0e7490 100%)',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: offset === 0 ? 'not-allowed' : 'pointer',
-              opacity: offset === 0 ? 0.5 : 1,
-              fontSize: '14px',
-              fontWeight: 500,
-            }}
-          >
-            Previous
-          </button>
-          <span style={{ color: '#64748b', fontSize: '14px', fontWeight: 500 }}>
-            Page {currentPage} of {totalPages}
-          </span>
-          <button
-            onClick={() => setOffset(offset + limit)}
-            disabled={offset + limit >= total}
-            style={{
-              padding: '8px 16px',
-              background: offset + limit >= total ? '#2d3748' : 'linear-gradient(135deg, #00f5e9 0%, #0e7490 100%)',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: offset + limit >= total ? 'not-allowed' : 'pointer',
-              opacity: offset + limit >= total ? 0.5 : 1,
-              fontSize: '14px',
-              fontWeight: 500,
-            }}
-          >
-            Next
-          </button>
-        </div>
-      )}
-
-      {/* Activity Details Modal */}
-      {selectedLog && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0, 0, 0, 0.8)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-          }}
-          onClick={() => setSelectedLog(null)}
-        >
-          <div
-            style={{
-              background: '#0C1117',
-              border: '1px solid #21263A',
-              borderRadius: '8px',
-              width: '600px',
-              maxWidth: '90%',
-              maxHeight: '80vh',
-              overflow: 'auto',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div style={{
-              background: 'linear-gradient(135deg, #00f5e9 0%, #0e7490 100%)',
-              padding: '20px',
-              borderBottom: '1px solid #21263A',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <History size={20} style={{ color: '#091120' }} />
-                <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#091120' }}>Activity Details</h2>
-              </div>
-              <button
-                onClick={() => setSelectedLog(null)}
-                style={{
-                  background: 'rgba(0, 0, 0, 0.2)',
-                  border: 'none',
-                  color: '#091120',
-                  cursor: 'pointer',
-                  padding: '4px',
-                  borderRadius: '4px',
-                }}
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div style={{ padding: '24px', color: '#fff' }}>
-              <div style={{ marginBottom: '24px' }}>
-                <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Admin</p>
-                <p style={{ color: '#fff', fontWeight: 600, fontSize: '16px' }}>{selectedLog.admin_username}</p>
-              </div>
-
-              <div style={{ marginBottom: '24px' }}>
-                <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Action</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <StatusBadge 
-                    variant={getActionBadgeVariant(selectedLog.action)}
-                    label={selectedLog.action.replace(/_/g, ' ')}
-                  />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '24px' }}>
-                <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Description</p>
-                <p style={{ color: '#94a3b8', fontSize: '14px' }}>{selectedLog.description}</p>
-              </div>
-
-              <div style={{ marginBottom: '24px' }}>
-                <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Timestamp</p>
-                <p style={{ color: '#fff', fontFamily: 'monospace', fontSize: '13px' }}>{formatDate(selectedLog.created_at)}</p>
-              </div>
-
-              <div style={{ marginBottom: '24px' }}>
-                <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>IP Address</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <p style={{ color: '#fff', fontFamily: 'monospace', fontSize: '13px', margin: 0 }}>{selectedLog.ip_address || '-'}</p>
-                  {selectedLog.ip_address && (
-                    <button
-                      onClick={() => void navigator.clipboard.writeText(selectedLog.ip_address || '')}
-                      style={{
-                        padding: '4px 10px',
-                        background: 'rgba(255,255,255,0.06)',
-                        color: '#fff',
-                        border: '1px solid #2d3748',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                      }}
-                    >
-                      <Copy size={12} /> Copy IP
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {selectedLog.resource_name && (
-                <div style={{ marginBottom: '24px' }}>
-                  <p style={{ color: '#64748b', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Resource</p>
-                  <p style={{ color: '#fff', fontWeight: 500, fontSize: '14px' }}>{selectedLog.resource_name}</p>
-                </div>
-              )}
-
-              {selectedLog.changes && (
-                <div style={{ marginTop: '24px' }}>
-                  <p style={{ color: '#64748b', marginBottom: '16px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Changes</p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    {Object.entries(selectedLog.changes).map(([field, change]) => (
-                      <div
-                        key={field}
-                        style={{
-                          padding: '16px',
-                          background: '#13161F',
-                          borderRadius: '6px',
-                          border: '1px solid #21263A',
-                        }}
-                      >
-                        <p style={{ color: '#00f5e9', fontWeight: 600, marginBottom: '12px', textTransform: 'capitalize' }}>
-                          {field.replace(/_/g, ' ')}
-                        </p>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                          <div>
-                            <p style={{ color: '#64748b', fontSize: '12px', marginBottom: '8px' }}>Old Value</p>
-                            <p style={{ color: '#fca5a5', fontFamily: 'monospace', fontSize: '13px', wordBreak: 'break-all' }}>
-                              {change.old || '(empty)'}
-                            </p>
-                          </div>
-                          <div>
-                            <p style={{ color: '#64748b', fontSize: '12px', marginBottom: '8px' }}>New Value</p>
-                            <p style={{ color: '#6ee7b7', fontFamily: 'monospace', fontSize: '13px', wordBreak: 'break-all' }}>
-                              {change.new || '(empty)'}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div style={{
-              padding: '16px 24px',
-              borderTop: '1px solid #21263A',
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: '12px',
-            }}>
-              <button
-                onClick={() => setSelectedLog(null)}
-                style={{
-                  padding: '10px 20px',
-                  background: '#21263A',
-                  color: '#fff',
-                  border: '1px solid #2d3748',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                  transition: 'background 0.2s',
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = '#2d3748'}
-                onMouseLeave={(e) => e.currentTarget.style.background = '#21263A'}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
-  );
+  )
 }

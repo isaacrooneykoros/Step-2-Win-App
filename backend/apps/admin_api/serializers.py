@@ -128,6 +128,13 @@ class AdminUserSerializer(serializers.ModelSerializer):
     badges_count = serializers.SerializerMethodField()
     is_banned = serializers.SerializerMethodField()
     total_deposited = serializers.SerializerMethodField()
+    available_balance = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    trust_score = serializers.SerializerMethodField()
+    trust_status = serializers.SerializerMethodField()
+    open_flags = serializers.SerializerMethodField()
+    last_seen_at = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -137,7 +144,12 @@ class AdminUserSerializer(serializers.ModelSerializer):
             "email",
             "phone_number",
             "wallet_balance",
+            "available_balance",
             "locked_balance",
+            "trust_score",
+            "trust_status",
+            "open_flags",
+            "last_seen_at",
             "total_steps",
             "challenges_won",
             "challenges_joined",
@@ -174,6 +186,29 @@ class AdminUserSerializer(serializers.ModelSerializer):
 
     def get_is_banned(self, obj) -> bool:
         return not obj.is_active
+
+    def get_trust_score(self, obj) -> int:
+        from apps.admin_api.console import trust_fields
+
+        return trust_fields(obj)[0]
+
+    def get_trust_status(self, obj) -> str:
+        from apps.admin_api.console import trust_fields
+
+        return trust_fields(obj)[1]
+
+    def get_open_flags(self, obj) -> int:
+        annotated = getattr(obj, "open_flags", None)
+        if annotated is not None:
+            return annotated
+        return obj.fraud_flags.filter(reviewed=False).count()
+
+    def get_last_seen_at(self, obj):
+        if hasattr(obj, "last_seen_at"):
+            return obj.last_seen_at
+        from django.db.models import Max
+
+        return obj.device_sessions.aggregate(m=Max("last_active_at"))["m"]
 
     def get_total_deposited(self, obj) -> Decimal:
         total = WalletTransaction.objects.filter(
@@ -213,6 +248,9 @@ class AdminChallengeSerializer(serializers.ModelSerializer):
         max_digits=12, decimal_places=2, read_only=True
     )
     current_entries = serializers.SerializerMethodField()
+    net_pool = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
 
     class Meta:
         model = Challenge
@@ -233,6 +271,14 @@ class AdminChallengeSerializer(serializers.ModelSerializer):
             "milestone",
             "invite_code",
             "is_private",
+            "is_public",
+            "is_featured",
+            "featured_until",
+            "is_platform_challenge",
+            "platform_bonus_kes",
+            "win_condition",
+            "payout_structure",
+            "net_pool",
             "created_at",
             "updated_at",
         ]
@@ -241,6 +287,11 @@ class AdminChallengeSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "platform_fee",
+            "is_featured",
+            "featured_until",
+            "is_platform_challenge",
+            "platform_bonus_kes",
+            "net_pool",
         ]
 
     def get_current_entries(self, obj) -> int:
@@ -400,6 +451,23 @@ class SystemSettingsSerializer(serializers.Serializer):
     maintenance_mode = serializers.BooleanField()
     maintenance_message = serializers.CharField(allow_blank=True, required=False)
 
+    # Support desk (response targets, auto-assignment, escalation)
+    support_sla_urgent_hours = serializers.IntegerField(min_value=1, max_value=720)
+    support_sla_high_hours = serializers.IntegerField(min_value=1, max_value=720)
+    support_sla_medium_hours = serializers.IntegerField(min_value=1, max_value=720)
+    support_sla_low_hours = serializers.IntegerField(min_value=1, max_value=720)
+    support_auto_assign_mode = serializers.ChoiceField(
+        choices=["off", "round_robin", "category"]
+    )
+    support_agent_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), allow_empty=True
+    )
+    support_category_assignees = serializers.DictField(
+        child=serializers.IntegerField(min_value=1, allow_null=True), allow_empty=True
+    )
+    support_escalation_enabled = serializers.BooleanField()
+    support_escalation_raise_priority = serializers.BooleanField()
+
     # Metadata
     updated_at = serializers.DateTimeField(read_only=True)
     updated_by = serializers.SerializerMethodField()
@@ -422,6 +490,48 @@ class SystemSettingsSerializer(serializers.Serializer):
             raise serializers.ValidationError("At least one milestone is required")
 
         return sorted(unique_values)
+
+    def validate_minimum_withdrawal_amount(self, value):
+        from django.conf import settings as django_settings
+
+        ceiling = Decimal(str(getattr(django_settings, "MAX_WITHDRAWAL_KES", 0) or 0))
+        if value < 0:
+            raise serializers.ValidationError("Must be zero or more")
+        if ceiling and value > ceiling:
+            raise serializers.ValidationError(
+                f"Must not exceed the largest single withdrawal (KES {ceiling:,.0f})"
+            )
+        return value
+
+    def _staff_ids(self):
+        from django.contrib.auth import get_user_model
+
+        return set(
+            get_user_model()
+            .objects.filter(is_staff=True, is_active=True)
+            .values_list("id", flat=True)
+        )
+
+    def validate_support_agent_ids(self, value):
+        unique = list(dict.fromkeys(value))
+        unknown = [i for i in unique if i not in self._staff_ids()]
+        if unknown:
+            raise serializers.ValidationError("Every agent must be an active staff account")
+        return unique
+
+    def validate_support_category_assignees(self, value):
+        categories = {c[0] for c in SupportTicket.CATEGORY_CHOICES}
+        staff = self._staff_ids()
+        out = {}
+        for category, uid in value.items():
+            if category not in categories:
+                raise serializers.ValidationError(f"Unknown category: {category}")
+            if uid is None:
+                continue
+            if uid not in staff:
+                raise serializers.ValidationError("Every assignee must be an active staff account")
+            out[category] = uid
+        return out
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

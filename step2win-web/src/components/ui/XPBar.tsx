@@ -1,4 +1,4 @@
-import React from 'react';
+import ProgressBar from './ProgressBar';
 
 interface XPBarProps {
   currentXP: number;
@@ -8,44 +8,29 @@ interface XPBarProps {
   className?: string;
 }
 
-export const XPBar: React.FC<XPBarProps> = ({ 
-  currentXP, 
-  xpToNext, 
-  level, 
-  xpThisWeek = 0,
-  className = '' 
-}) => {
-  const progress = (currentXP % xpToNext) / xpToNext;
-  
+/** Level progress: level chip, XP bar and "x / y XP to level n". */
+export function XPBar({ currentXP, xpToNext, level, xpThisWeek = 0, className = '' }: XPBarProps) {
+  const safeNext = Math.max(1, xpToNext);
+  const into = ((currentXP % safeNext) + safeNext) % safeNext;
+  const pct = (into / safeNext) * 100;
+
   return (
-    <div className={`bg-white rounded-3xl p-3.5 shadow-card ${className}`}>
-      <div className="flex items-center justify-between mb-2">
+    <div className={`rounded-card border border-border-light bg-bg-card p-4 shadow-card ${className}`}>
+      <div className="mb-2 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <div 
-            className="w-7 h-7 rounded-xl flex items-center justify-center text-xs font-black bg-accent-blue text-white"
-          >
+          <span className="num inline-flex h-7 min-w-[28px] items-center justify-center rounded-lg bg-brand-soft px-1.5 text-caption font-semibold text-brand">
             {level}
-          </div>
-          <span className="text-text-secondary text-xs">Level {level}</span>
-        </div>
-        {xpThisWeek > 0 && (
-          <span className="text-accent-blue font-mono text-xs font-bold">
-            +{xpThisWeek} XP
           </span>
-        )}
+          <span className="text-callout text-text-secondary">Level {level}</span>
+        </div>
+        {xpThisWeek > 0 && <span className="num text-caption font-semibold text-brand">+{xpThisWeek} XP this week</span>}
       </div>
-      
-      {/* XP Bar */}
-      <div className="h-2 bg-bg-page rounded-full overflow-hidden">
-        <div 
-          className="xp-bar-fill h-full rounded-full bg-accent-blue"
-          style={{ width: `${progress * 100}%` }}
-        />
-      </div>
-      
-      <p className="text-text-muted text-[10px] mt-1.5 text-right font-mono">
-        {currentXP % xpToNext} / {xpToNext} XP to Level {level + 1}
+      <ProgressBar progress={pct} height="sm" color="brand" label={`Progress to level ${level + 1}`} />
+      <p className="num mt-1.5 text-right text-caption text-text-muted">
+        {into} / {safeNext} XP to level {level + 1}
       </p>
     </div>
   );
-};
+}
+
+export default XPBar;

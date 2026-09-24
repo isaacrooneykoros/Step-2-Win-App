@@ -1,35 +1,26 @@
-﻿import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { LoadError } from '../components/ui/ErrorState';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Edit3, LogIn, QrCode, Copy, Download, X } from 'lucide-react';
+import { AlertCircle, Compass, Copy, Download, KeyRound, Plus, QrCode } from 'lucide-react';
 import { challengesService } from '../services/api';
 import { useToast } from '../components/ui/Toast';
 import { useAuthStore } from '../store/authStore';
-import { BaseModal } from '../components/ui/BaseModal';
+import { Sheet } from '../components/ui/Sheet';
+import Button from '../components/ui/Button';
+import { ScreenHeader } from '../components/ui/ScreenHeader';
+import { ListGroup, ListRow } from '../components/ui/ListRow';
+import { IconTile } from '../components/ui/Pill';
+import { Segmented } from '../components/ui/Segmented';
 import { checkCameraPermission, requestCameraPermission } from '../services/cameraPermissions';
-import type { Challenge } from '../types';
-import { formatKES } from '../utils/currency';
-
-const ChallengesLobbyScreen = lazy(() => import('./ChallengesLobbyScreen'));
-const ChallengesMineSection = lazy(() => import('./challenges/ChallengesMineSection'));
-
-const MILESTONE_OPTIONS = [
-  { value: '10000', label: '10,000 steps · Starter' },
-  { value: '15000', label: '15,000 steps · Warm-up' },
-  { value: '20000', label: '20,000 steps · Walker' },
-  { value: '25000', label: '25,000 steps · Steady' },
-  { value: '30000', label: '30,000 steps · Active' },
-  { value: '40000', label: '40,000 steps · Strong' },
-  { value: '50000', label: '50,000 steps · Endurance' },
-  { value: '65000', label: '65,000 steps · Power' },
-  { value: '80000', label: '80,000 steps · Athletic' },
-  { value: '100000', label: '100,000 steps · Runner' },
-  { value: '125000', label: '125,000 steps · Advanced Runner' },
-  { value: '150000', label: '150,000 steps · Elite' },
-  { value: '200000', label: '200,000 steps · Pro' },
-  { value: '250000', label: '250,000 steps · Heavyweight' },
-  { value: '300000', label: '300,000 steps · Ultra' },
-] as const;
+import type { Challenge, ChallengeDetail, CreateChallengeForm } from '../types';
+import { formatKES } from '../lib/format';
+import { CreateChallengeSheet } from '../components/challenge/CreateChallengeSheet';
+import { challengeToCardModel } from '../components/challenge/challengeUtils';
+import ChallengesMineSection, { type MineTab } from './challenges/ChallengesMineSection';
+import { openAppSettings } from '../plugins/appSystem';
+import { permissionCopy } from '../utils/platform';
+import { canvasToBlob, saveOrShareImage } from '../lib/share';
 
 type QrScanner = {
   start: (
@@ -40,9 +31,34 @@ type QrScanner = {
   ) => Promise<null>;
   stop: () => Promise<void>;
   clear: () => void;
+  isScanning: boolean;
 };
 
-type Tab = 'Active' | 'Mine' | 'Completed';
+/** Turn a DRF error payload into one readable sentence. */
+function describeCreateError(error: any): string {
+  const errorData = error?.response?.data;
+  if (errorData?.errors) {
+    return Object.entries(errorData.errors)
+      .map(([field, msgs]: [string, any]) => {
+        const message = Array.isArray(msgs) ? msgs[0] : msgs;
+        return `${field.replace(/_/g, ' ')}: ${message}`;
+      })
+      .join(' ');
+  }
+  if (errorData?.error) return String(errorData.error);
+  if (!error?.response) return "We couldn't reach Step2Win. Check your connection and try again.";
+  return 'Something went wrong. Please try again.';
+}
+
+function describeJoinError(error: any): string {
+  const data = error?.response?.data;
+  const fieldMsg = data?.invite_code?.[0] ?? data?.details?.invite_code?.[0];
+  if (fieldMsg) return String(fieldMsg);
+  if (data?.error && typeof data.error === 'string') return data.error;
+  if (typeof data?.message === 'string' && !data.message.startsWith('{')) return data.message;
+  if (!error?.response) return "We couldn't reach Step2Win. Check your connection and try again.";
+  return 'Failed to join challenge';
+}
 
 export default function ChallengesScreen() {
   const navigate = useNavigate();
@@ -50,150 +66,114 @@ export default function ChallengesScreen() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const user = useAuthStore((state) => state.user);
-  const [tab, setTab] = useState<'mine' | 'discover'>('mine');
-  const [activeTab, setActiveTab] = useState<Tab>('Active');
-  const [showActionMenu, setShowActionMenu] = useState(false);
+  const [tab, setTab] = useState<MineTab>('active');
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createSheetKey, setCreateSheetKey] = useState(0);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [joinError, setJoinError] = useState<string | null>(null);
   const [joinTab, setJoinTab] = useState<'manual' | 'qr'>('manual');
   const [inviteCode, setInviteCode] = useState('');
-  const [createForm, setCreateForm] = useState({
-    name: '',
-    milestone: '50000',
-    entry_fee: '100',
-    max_participants: '20',
-    is_public: true,
-    duration: '7',
-    win_condition: 'proportional',
-    theme_emoji: '',
-  });
-  const [createdChallenge, setCreatedChallenge] = useState<any>(null);
+  const [createdChallenge, setCreatedChallenge] = useState<ChallengeDetail | null>(null);
+  const [showCreated, setShowCreated] = useState(false);
+  const [copied, setCopied] = useState(false);
   const scannerRef = useRef<QrScanner | null>(null);
 
-  const { data: myChallenges = [], isLoading: loadingMy } = useQuery({
+  const {
+    data: myChallenges = [],
+    isLoading: loadingMy,
+    isError: myError,
+    isFetching: fetchingMy,
+    refetch: refetchMy,
+  } = useQuery({
     queryKey: ['challenges', 'my'],
     queryFn: challengesService.getMyChallenges,
     retry: 1,
   });
 
+  const { data: config } = useQuery({
+    queryKey: ['challenges', 'config'],
+    queryFn: challengesService.getConfig,
+    staleTime: 10 * 60_000,
+  });
+
+  // Shares the lobby screen's default cache entry (filter all, any goal, featured sort).
+  const { data: lobby } = useQuery({
+    queryKey: ['challenges', 'lobby', 'all', 'all', 'featured'],
+    queryFn: () => challengesService.getLobby({ filter: 'all', sort: 'featured' }),
+    staleTime: 30_000,
+  });
+  const openInLobby = lobby ? lobby.challenges.filter((c) => !c.user_is_joined).length : null;
+
   const joinMutation = useMutation({
     mutationFn: (code: string) => challengesService.join({ invite_code: code }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['challenges'] });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
+      queryClient.invalidateQueries({ queryKey: ['wallet'] });
       setShowJoinModal(false);
       setInviteCode('');
       showToast({ message: 'Successfully joined challenge!', type: 'success' });
     },
     onError: (error: any) => {
-      showToast({ message: error.response?.data?.error || 'Failed to join challenge', type: 'error' });
+      setJoinError(describeJoinError(error));
     },
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: any) => challengesService.create(data),
-    onSuccess: (data: any) => {
+    mutationFn: (data: CreateChallengeForm) => challengesService.create(data),
+    onSuccess: (data: ChallengeDetail) => {
       queryClient.invalidateQueries({ queryKey: ['challenges'] });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
+      queryClient.invalidateQueries({ queryKey: ['wallet'] });
+      setShowCreateModal(false);
       setCreatedChallenge(data);
-      setCreateForm({
-        name: '',
-        milestone: '50000',
-        entry_fee: '100',
-        max_participants: '20',
-        is_public: true,
-        duration: '7',
-        win_condition: 'proportional',
-        theme_emoji: '',
-      });
+      setShowCreated(true);
       showToast({ message: 'Challenge created successfully!', type: 'success' });
     },
     onError: (error: any) => {
-      console.error('Challenge creation error:', error.response?.data);
-      const errorData = error.response?.data;
-      let errorMsg = 'Failed to create challenge';
-      
-      if (errorData?.errors) {
-        // DRF validation errors
-        const fieldErrors = Object.entries(errorData.errors)
-          .map(([field, msgs]: [string, any]) => {
-            const message = Array.isArray(msgs) ? msgs[0] : msgs;
-            return `${field}: ${message}`;
-          })
-          .join(', ');
-        errorMsg = fieldErrors;
-      } else if (errorData?.error) {
-        // Custom error message (includes balance check)
-        errorMsg = errorData.error;
-      }
-      
-      console.log('Showing error toast:', errorMsg);
-      showToast({ message: errorMsg, type: 'error' });
+      setCreateError(describeCreateError(error));
     },
   });
 
-  const getMilestoneMeta = (milestone: number) => {
-    const option = MILESTONE_OPTIONS.find((entry) => Number(entry.value) === milestone);
-    if (option) {
-      return {
-        name: option.label.replace(' steps', ' Steps'),
-        bg: '#EFF6FF',
-        color: '#2563EB',
-      };
-    }
+  // ── Partition my challenges ────────────────────────────────────────────────
+  const partitions = useMemo(() => {
+    const list: Challenge[] = Array.isArray(myChallenges) ? myChallenges : [];
+    // A creator's challenge only counts as active once someone else has joined.
+    const waiting = (c: Challenge) => c.creator === user?.id && c.current_participants < 2;
     return {
-      name: `${milestone.toLocaleString()} Steps`,
-      bg: '#F5F3FF',
-      color: '#7C3AED',
+      active: list.filter((c) => c.status === 'active' && !waiting(c)),
+      upcoming: list.filter((c) => c.status === 'pending' || (c.status === 'active' && waiting(c))),
+      completed: list.filter((c) => c.status === 'completed' || c.status === 'cancelled'),
     };
+  }, [myChallenges, user?.id]);
+
+  const counts = {
+    active: partitions.active.length,
+    upcoming: partitions.upcoming.length,
+    completed: partitions.completed.length,
   };
+  const cards = partitions[tab].map((c) => challengeToCardModel(c, user?.id));
 
-  const filteredChallenges =
-    activeTab === 'Active'
-      ? (Array.isArray(myChallenges) ? myChallenges : []).filter((c: Challenge) => {
-          const isActiveOrPending = c.status === 'active' || c.status === 'pending';
-          
-          // If I'm the creator, only show if there are 2 or more participants
-          if (c.creator === user?.id) {
-            return isActiveOrPending && c.current_participants >= 2;
-          }
-          
-          // If I joined it (not the creator), show it
-          return isActiveOrPending;
-        })
-      : activeTab === 'Mine'
-      ? (Array.isArray(myChallenges) ? myChallenges : []).filter((c: Challenge) => c.status !== 'completed')
-      : (Array.isArray(myChallenges) ? myChallenges : []).filter((c: Challenge) => c.status === 'completed');
+  const availableBalance = user?.available_balance != null ? Number(user.available_balance) : null;
 
-  const isLoading = loadingMy;
-  const mineCount = (Array.isArray(myChallenges) ? myChallenges : []).filter((c: Challenge) => c.status !== 'completed').length;
-
-  const handleJoin = () => {
-    if (inviteCode.length === 8) {
-      joinMutation.mutate(inviteCode.toUpperCase());
-    } else {
-      showToast({ message: 'Invite code must be 8 characters', type: 'error' });
-    }
-  };
-
-  const handleQRSuccess = (decodedText: string) => {
-    // Extract the 8-character code from the QR data
-    const codeMatch = decodedText.match(/([A-Z0-9]{8})/);
-    const code = codeMatch ? codeMatch[1] : decodedText.toUpperCase();
-    
-    if (code.length === 8) {
-      setInviteCode(code);
-      void joinWithCode(code);
-    }
-  };
-
+  // ── Join by code / QR ──────────────────────────────────────────────────────
   const clearScanner = () => {
-    if (scannerRef.current) {
+    const scanner = scannerRef.current;
+    scannerRef.current = null;
+    if (!scanner) return;
+    // Stop the stream first (releases the camera / indicator), then clear the viewfinder.
+    const clear = () => {
       try {
-        scannerRef.current.clear();
+        scanner.clear();
       } catch (error) {
         console.warn('Error clearing scanner:', error);
-      } finally {
-        scannerRef.current = null;
       }
+    };
+    if (scanner.isScanning) {
+      scanner.stop().then(clear).catch(clear);
+    } else {
+      clear();
     }
   };
 
@@ -201,6 +181,15 @@ export default function ChallengesScreen() {
     try {
       const initial = await checkCameraPermission();
       if (initial === 'granted') return true;
+      if (initial === 'denied') {
+        // Blocked for good: the OS won't ask again, so point to the app's settings.
+        const opened = await openAppSettings();
+        showToast({
+          message: opened ? permissionCopy().openedSettingsFor('Camera') : `Camera is blocked. Allow it in ${permissionCopy().settingsName}, or enter the code.`,
+          type: 'info',
+        });
+        return false;
+      }
 
       const granted = await requestCameraPermission();
 
@@ -217,6 +206,7 @@ export default function ChallengesScreen() {
   };
 
   const joinWithCode = async (code: string) => {
+    setJoinError(null);
     try {
       const result = await joinMutation.mutateAsync(code.toUpperCase());
       clearScanner();
@@ -224,36 +214,79 @@ export default function ChallengesScreen() {
       setInviteCode('');
       navigate(`/challenges/${result.challenge.id}`);
     } catch {
-      // joinMutation already surfaces the error toast
+      // joinMutation surfaces the error inline
     }
   };
 
-  const downloadQRCode = () => {
-    const canvas = document.getElementById('challenge-qr-canvas') as HTMLCanvasElement;
-    if (canvas) {
-      const link = document.createElement('a');
-      link.href = canvas.toDataURL('image/png');
-      link.download = `challenge-${createdChallenge.invite_code}.png`;
-      link.click();
+  const handleJoin = () => {
+    if (inviteCode.length === 8) {
+      void joinWithCode(inviteCode);
+    } else {
+      setJoinError('Invite codes are 8 characters long.');
     }
   };
 
-  const copyInviteCode = () => {
-    navigator.clipboard.writeText(createdChallenge.invite_code);
-    showToast({ message: 'Invite code copied!', type: 'success' });
+  const handleQRSuccess = (decodedText: string) => {
+    // Extract the 8-character code from the QR data
+    const codeMatch = decodedText.match(/([A-Z0-9]{8})/);
+    const code = codeMatch ? codeMatch[1] : decodedText.toUpperCase();
+
+    if (code.length === 8) {
+      setInviteCode(code);
+      void joinWithCode(code);
+    }
   };
 
-  const handleCreate = () => {
-    createMutation.mutate({
-      name: createForm.name,
-      milestone: parseInt(createForm.milestone, 10),
-      entry_fee: parseFloat(createForm.entry_fee),
-      max_participants: parseInt(createForm.max_participants, 10),
-      is_public: createForm.is_public,
-      duration_days: parseInt(createForm.duration, 10),
-      win_condition: createForm.is_public ? 'proportional' : createForm.win_condition,
-      theme_emoji: createForm.theme_emoji,
-    });
+  const closeJoin = () => {
+    if (joinMutation.isPending) return;
+    setShowJoinModal(false);
+    setJoinTab('manual');
+    setJoinError(null);
+    clearScanner();
+  };
+
+  const openJoin = () => {
+    setJoinError(null);
+    setShowJoinModal(true);
+  };
+
+  const openCreate = () => {
+    setCreateError(null);
+    setCreateSheetKey((k) => k + 1);
+    setShowCreateModal(true);
+  };
+
+  // ── Created challenge (share) ──────────────────────────────────────────────
+  const downloadQRCode = async () => {
+    const canvas = document.getElementById('challenge-qr-canvas') as HTMLCanvasElement | null;
+    if (!canvas || !createdChallenge) return;
+    try {
+      const blob = await canvasToBlob(canvas);
+      const result = await saveOrShareImage(
+        { blob, name: `challenge-${createdChallenge.invite_code}.png` },
+        `Invite QR for ${createdChallenge.name}`,
+      );
+      if (result === 'failed') showToast({ message: 'Couldn’t save the QR image.', type: 'error' });
+    } catch {
+      showToast({ message: 'Couldn’t save the QR image.', type: 'error' });
+    }
+  };
+
+  const copyInviteCode = async () => {
+    if (!createdChallenge) return;
+    try {
+      await navigator.clipboard.writeText(createdChallenge.invite_code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+      showToast({ message: 'Invite code copied!', type: 'success' });
+    } catch {
+      showToast({ message: "Couldn't copy. Select the code and copy it manually.", type: 'error' });
+    }
+  };
+
+  const handleCreate = (payload: CreateChallengeForm) => {
+    setCreateError(null);
+    createMutation.mutate(payload);
   };
 
   // QR Scanner effect
@@ -270,12 +303,11 @@ export default function ChallengesScreen() {
           if (!scannerRef.current) {
             const { Html5Qrcode } = await import('html5-qrcode');
 
-            scannerRef.current = new Html5Qrcode(
-              'qr-scanner',
-            );
+            scannerRef.current = new Html5Qrcode('qr-scanner');
 
             await scannerRef.current.start(
-              { facingMode: { exact: 'environment' } },
+              // Prefer the rear camera but fall back to any camera (tablets, emulators).
+              { facingMode: 'environment' },
               {
                 fps: 10,
                 qrbox: { width: 250, height: 250 },
@@ -287,12 +319,13 @@ export default function ChallengesScreen() {
               },
               () => {
                 // Keep scanning until a valid QR is found.
-              }
+              },
             );
           }
         } catch (error) {
           console.error('QR Scanner error:', error);
-          showToast({ message: 'Camera access denied', type: 'error' });
+          scannerRef.current = null;
+          showToast({ message: 'Couldn’t start the camera. You can type the invite code instead.', type: 'error' });
         }
       };
 
@@ -306,457 +339,279 @@ export default function ChallengesScreen() {
     };
   }, [joinTab, showJoinModal]);
 
-  // QR Code generation effect
+  // QR Code generation effect (the canvas mounts with the success sheet)
   useEffect(() => {
-    if (createdChallenge) {
-      const generateQR = async () => {
-        try {
-          const canvas = document.getElementById('challenge-qr-canvas') as HTMLCanvasElement;
-          if (canvas) {
-            const { default: QR } = await import('qrcode');
-            await QR.toCanvas(canvas, createdChallenge.invite_code, {
-              errorCorrectionLevel: 'H',
-              margin: 2,
-              width: 260,
-              color: {
-                dark: '#000000',
-                light: '#FFFFFF',
-              },
-            });
-          }
-        } catch (error) {
-          console.error('QR Code generation error:', error);
+    if (!createdChallenge) return;
+    let cancelled = false;
+    const generateQR = async (attempt = 0) => {
+      try {
+        const canvas = document.getElementById('challenge-qr-canvas') as HTMLCanvasElement | null;
+        if (!canvas) {
+          if (attempt < 10 && !cancelled) window.setTimeout(() => void generateQR(attempt + 1), 50);
+          return;
         }
-      };
-      generateQR();
-    }
+        const { default: QR } = await import('qrcode');
+        await QR.toCanvas(canvas, createdChallenge.invite_code, {
+          errorCorrectionLevel: 'H',
+          margin: 2,
+          width: 220,
+          color: {
+            dark: '#000000',
+            light: '#FFFFFF',
+          },
+        });
+      } catch (error) {
+        console.error('QR Code generation error:', error);
+      }
+    };
+    void generateQR();
+    return () => {
+      cancelled = true;
+    };
   }, [createdChallenge]);
 
+  // Deep links: open the join sheet with a code, or the create sheet.
   useEffect(() => {
-    const joinCode = (location.state as { joinCode?: string } | null)?.joinCode;
-    if (joinCode) {
-      setInviteCode(joinCode);
+    const state = location.state as { joinCode?: string; openCreate?: boolean } | null;
+    if (state?.joinCode) {
+      setInviteCode(state.joinCode);
+      setJoinError(null);
       setShowJoinModal(true);
+      window.history.replaceState({}, document.title);
+    } else if (state?.openCreate) {
+      setCreateError(null);
+      setCreateSheetKey((k) => k + 1);
+      setShowCreateModal(true);
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
 
   return (
-    <div className="screen-enter pb-nav bg-bg-page">
-      {/*  HEADER  */}
-      <div className="pt-safe px-4 pt-6 pb-4">
-        <h1 className="text-text-primary text-2xl font-bold mb-1">Challenges</h1>
-        <p className="text-text-muted text-sm">Compete and win prizes</p>
-      </div>
+    <div className="pb-nav">
+      <ScreenHeader variant="large" title="Challenges" subtitle="Walk with others. Everyone who reaches the goal shares the pool." />
 
-      <div className="mx-4 mb-4">
-        <div className="flex rounded-2xl p-1 bg-bg-input border border-border-light">
-          {[
-            { key: 'mine', label: 'My Challenges' },
-            { key: 'discover', label: ' Discover' },
-          ].map((section) => (
-            <button
-              key={section.key}
-              onClick={() => setTab(section.key as 'mine' | 'discover')}
-              className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all"
-              style={{
-                background: tab === section.key ? 'hsl(var(--bg-elevated))' : 'transparent',
-                color: tab === section.key ? 'hsl(var(--text-primary))' : 'hsl(var(--text-muted))',
-                boxShadow: tab === section.key ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
-              }}
-            >
-              {section.label}
-            </button>
-          ))}
+      <div className="space-y-6 px-5">
+        <div className="grid grid-cols-2 gap-3">
+          <Button onClick={openCreate} leftIcon={<Plus size={18} className="shrink-0" aria-hidden />} fullWidth>
+            Create
+          </Button>
+          <Button variant="outline" onClick={openJoin} leftIcon={<KeyRound size={18} className="shrink-0" aria-hidden />} fullWidth>
+            Join with code
+          </Button>
         </div>
-      </div>
 
-      {tab === 'discover' && (
-        <Suspense fallback={<div className="px-4 pb-4"><div className="skeleton h-40 rounded-3xl" /></div>}>
-          <ChallengesLobbyScreen embedded />
-        </Suspense>
-      )}
-
-      {tab === 'mine' && (
-        <Suspense fallback={<div className="px-4 pb-4"><div className="skeleton h-40 rounded-3xl" /></div>}>
-          <ChallengesMineSection
-            isLoading={isLoading}
-            activeTab={activeTab}
-            mineCount={mineCount}
-            filteredChallenges={filteredChallenges}
-            onActiveTabChange={setActiveTab}
-            onOpenCreateModal={() => setShowCreateModal(true)}
-            onOpenActionMenu={() => setShowActionMenu(true)}
-            onViewChallenge={(id: number) => navigate(`/challenges/${id}`)}
-            getMilestoneMeta={getMilestoneMeta}
+        <ListGroup>
+          <ListRow
+            to="/challenges/lobby"
+            leading={<IconTile icon={Compass} tone="brand" />}
+            title="Discover public challenges"
+            subtitle={
+              openInLobby === null
+                ? 'Browse challenges open to everyone'
+                : openInLobby === 0
+                  ? 'No open challenges right now'
+                  : `${openInLobby} open to join`
+            }
           />
-        </Suspense>
-      )}
+        </ListGroup>
 
-      {/*  ACTION MENU MODAL  */}
-      <BaseModal open={showActionMenu} onClose={() => setShowActionMenu(false)}>
-        <h2 className="text-2xl font-black text-text-primary mb-1">Choose Action</h2>
-        <p className="text-sm text-text-muted mb-6">What would you like to do?</p>
-        
-        <div className="space-y-3">
-          {/* Create Challenge Button */}
-          <button
-            onClick={() => {
-              setShowActionMenu(false);
-              setShowCreateModal(true);
-            }}
-            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-tint-blue/50 hover:bg-tint-blue transition-colors active:scale-95"
-          >
-            <div className="w-12 h-12 rounded-lg bg-accent-blue flex items-center justify-center flex-shrink-0">
-              <Edit3 size={20} className="text-white" />
-            </div>
-            <div className="text-left flex-1">
-              <p className="font-bold text-text-primary">Create Challenge</p>
-              <p className="text-xs text-text-muted mt-0.5">Start a new competition</p>
-            </div>
-          </button>
-
-          {/* Join Challenge Button */}
-          <button
-            onClick={() => {
-              setShowActionMenu(false);
-              setShowJoinModal(true);
-            }}
-            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-tint-green/50 hover:bg-tint-green transition-colors active:scale-95"
-          >
-            <div className="w-12 h-12 rounded-lg bg-accent-green flex items-center justify-center flex-shrink-0">
-              <LogIn size={20} className="text-white" />
-            </div>
-            <div className="text-left flex-1">
-              <p className="font-bold text-text-primary">Join Challenge</p>
-              <p className="text-xs text-text-muted mt-0.5">Enter invite code</p>
-            </div>
-          </button>
-        </div>
-      </BaseModal>
-
-      {/*  JOIN MODAL  */}
-      <BaseModal open={showJoinModal} onClose={() => {
-        setShowJoinModal(false);
-        setJoinTab('manual');
-        clearScanner();
-      }}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-black text-text-primary">Join Challenge</h2>
-          <button
-            onClick={() => {
-              setShowJoinModal(false);
-              setJoinTab('manual');
-              clearScanner();
-            }}
-            className="text-text-muted hover:text-text-primary"
-          >
-            <X size={24} />
-          </button>
-        </div>
-
-        {/* Join Tabs */}
-        <div className="flex gap-2 mb-6 bg-bg-input p-1 rounded-xl">
-          <button
-            onClick={() => setJoinTab('manual')}
-            className={`flex-1 px-4 py-2.5 rounded-lg font-semibold transition-colors ${
-              joinTab === 'manual'
-                ? 'bg-accent-blue text-white'
-                : 'text-text-secondary hover:text-text-primary'
-            }`}
-          >
-            Code
-          </button>
-          <button
-            onClick={() => setJoinTab('qr')}
-            className={`flex-1 px-4 py-2.5 rounded-lg font-semibold transition-colors flex items-center justify-center gap-1.5 ${
-              joinTab === 'qr'
-                ? 'bg-accent-blue text-white'
-                : 'text-text-secondary hover:text-text-primary'
-            }`}
-          >
-            <QrCode size={16} />
-            Scan
-          </button>
-        </div>
-
-        {joinTab === 'manual' ? (
-          <>
-            <p className="text-sm text-text-muted mb-4">Enter the 8-character invite code</p>
-            <input
-              type="text"
-              value={inviteCode}
-              onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-              placeholder="ABCD1234"
-              maxLength={8}
-              className="input-field w-full mb-6 text-center text-lg font-mono tracking-widest"
-            />
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowJoinModal(false)}
-                className="flex-1 btn-secondary py-3 rounded-2xl"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleJoin}
-                disabled={inviteCode.length !== 8 || joinMutation.isPending}
-                className="flex-1 btn-primary py-3 rounded-2xl disabled:opacity-40"
-              >
-                {joinMutation.isPending ? 'Joining...' : 'Join'}
-              </button>
-            </div>
-          </>
+        {myError ? (
+          <LoadError resource="your challenges" onRetry={() => refetchMy()} isRetrying={fetchingMy} />
         ) : (
-          <>
-            <p className="text-sm text-text-muted mb-4">Point your camera at the QR code</p>
-            <div id="qr-scanner" className="mb-6 rounded-2xl overflow-hidden bg-black" style={{ height: '300px' }} />
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowJoinModal(false)}
-                className="flex-1 btn-secondary py-3 rounded-2xl"
-              >
-                Cancel
-              </button>
-              {inviteCode && (
-                <button
-                  onClick={() => void joinWithCode(inviteCode)}
-                  disabled={joinMutation.isPending}
-                  className="flex-1 btn-primary py-3 rounded-2xl disabled:opacity-40"
-                >
-                  {joinMutation.isPending ? 'Joining...' : 'Join'}
-                </button>
-              )}
-            </div>
-          </>
+        <ChallengesMineSection
+          isLoading={loadingMy}
+          tab={tab}
+          counts={counts}
+          challenges={cards}
+          onTabChange={setTab}
+          onCreate={openCreate}
+          onDiscover={() => navigate('/challenges/lobby')}
+        />
         )}
-      </BaseModal>
+      </div>
 
-      {/*  CREATE SUCCESS MODAL (with QR code)  */}
-      {createdChallenge && (
-        <BaseModal
-          open={true}
-          onClose={() => {
-            setCreatedChallenge(null);
-            setShowCreateModal(false);
+      {/* JOIN WITH CODE */}
+      <Sheet
+        open={showJoinModal}
+        onClose={closeJoin}
+        dismissible={!joinMutation.isPending}
+        title="Join with a code"
+        description="Use the 8-character code or QR code from the person who invited you."
+        footer={
+          <div className="flex gap-3 pb-3">
+            <Button variant="outline" size="lg" onClick={closeJoin} disabled={joinMutation.isPending}>
+              Cancel
+            </Button>
+            <Button
+              fullWidth
+              size="lg"
+              onClick={joinTab === 'manual' ? handleJoin : () => void joinWithCode(inviteCode)}
+              disabled={inviteCode.length !== 8}
+              isLoading={joinMutation.isPending}
+              loadingText="Joining…"
+            >
+              Join challenge
+            </Button>
+          </div>
+        }
+      >
+        <Segmented
+          label="How to enter the code"
+          value={joinTab}
+          onChange={(v) => {
+            setJoinTab(v);
+            setJoinError(null);
           }}
-        >
-          <div className="text-center">
-            <h2 className="text-2xl font-black text-text-primary mb-2">Challenge Created! </h2>
-            <p className="text-sm text-text-muted mb-8">{createdChallenge.name}</p>
+          options={[
+            { value: 'manual', label: 'Type code' },
+            {
+              value: 'qr',
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <QrCode size={16} aria-hidden /> Scan QR
+                </span>
+              ),
+            },
+          ]}
+        />
 
-            {/* QR Code Box */}
-            <div className="bg-tint-blue rounded-3xl p-6 mb-6 inline-block">
-              <div id="challenge-qr" className="bg-bg-elevated p-3 rounded-xl inline-block border border-border-light">
-                <canvas
-                  id="challenge-qr-canvas"
-                  style={{ display: 'block', margin: '0 auto' }}
-                />
-              </div>
-            </div>
-
-            {/* Invite Code Display */}
-            <div className="mb-6 p-4 bg-bg-input rounded-2xl">
-              <p className="text-xs text-text-muted mb-2">Invite Code</p>
-              <p className="text-2xl font-mono font-bold text-text-primary mb-4">{createdChallenge.invite_code}</p>
-              <button
-                onClick={copyInviteCode}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-accent-blue text-white rounded-lg font-semibold hover:opacity-90 transition-opacity"
-              >
-                <Copy size={16} />
-                Copy Code
-              </button>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-3">
-              <button
-                onClick={downloadQRCode}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-tint-blue text-accent-blue font-semibold hover:opacity-80 transition-opacity"
-              >
-                <Download size={16} />
-                Download
-              </button>
-              <button
-                onClick={() => {
-                  setCreatedChallenge(null);
-                  setShowCreateModal(false);
-                }}
-                className="flex-1 btn-primary py-3 rounded-2xl"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </BaseModal>
-      )}
-
-      {/*  CREATE MODAL  */}
-      <BaseModal open={showCreateModal && !createdChallenge} onClose={() => setShowCreateModal(false)}>
-        <h2 className="text-2xl font-black text-text-primary mb-2">Create Challenge</h2>
-        <p className="text-sm text-text-muted mb-4">Set up a new competition</p>
-        
-        {/* Balance Display */}
-        <div className="mb-6 p-3 rounded-xl bg-tint-blue border border-border-light">
-          <p className="text-xs text-text-muted">Available Balance</p>
-          <p className="text-lg font-bold text-accent-blue">
-            {formatKES(user?.wallet_balance || '0')}
-          </p>
-        </div>
-        
-        <div className="space-y-4 mb-6">
-          <div>
-            <label className="block text-sm font-semibold text-text-secondary mb-2">Challenge Name</label>
-            <input
-              type="text"
-              value={createForm.name}
-              onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-              placeholder="Weekend Warriors"
-              className="input-field w-full"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-semibold text-text-secondary mb-2">Milestone Goal</label>
-            <select
-              value={createForm.milestone}
-              onChange={(e) => setCreateForm({ ...createForm, milestone: e.target.value })}
-              className="input-field w-full"
-            >
-              {MILESTONE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-semibold text-text-secondary mb-2">Entry Fee (KSh)</label>
-              <input
-                type="number"
-                value={createForm.entry_fee}
-                onChange={(e) => setCreateForm({ ...createForm, entry_fee: e.target.value })}
-                className="input-field w-full font-mono"
-                min={createForm.is_public ? '100' : '50'}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-text-secondary mb-2">Max Players</label>
-              <input
-                type="number"
-                value={createForm.max_participants}
-                onChange={(e) => setCreateForm({ ...createForm, max_participants: e.target.value })}
-                className="input-field w-full font-mono"
-                min="2"
-              />
-            </div>
-          </div>
-
-          {/* Visibility Toggle */}
-          <div>
-            <label className="block text-sm font-semibold text-text-secondary mb-3">Challenge Visibility</label>
-            <div className="flex gap-3">
-              <label className="flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all" 
-                style={{
-                  borderColor: createForm.is_public ? 'rgb(59, 130, 246)' : 'var(--color-border-light)',
-                  backgroundColor: createForm.is_public ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
-                }}>
-                <input
-                  type="radio"
-                  name="visibility"
-                  checked={createForm.is_public}
-                  onChange={() => setCreateForm({ ...createForm, is_public: true })}
-                  className="w-4 h-4"
-                />
-                <span className="font-semibold text-text-primary">Public</span>
-                <span className="text-xs text-text-muted">Anyone can join</span>
-              </label>
-              <label className="flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all" 
-                style={{
-                  borderColor: !createForm.is_public ? 'rgb(246, 113, 113)' : 'var(--color-border-light)',
-                  backgroundColor: !createForm.is_public ? 'rgba(246, 113, 113, 0.1)' : 'transparent',
-                }}>
-                <input
-                  type="radio"
-                  name="visibility"
-                  checked={!createForm.is_public}
-                  onChange={() => setCreateForm({ ...createForm, is_public: false })}
-                  className="w-4 h-4"
-                />
-                <span className="font-semibold text-text-primary">Private</span>
-                <span className="text-xs text-text-muted">Link only</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Duration Selection */}
-          <div>
-            <label className="block text-sm font-semibold text-text-secondary mb-2">Challenge Duration</label>
-            <select
-              value={createForm.duration}
-              onChange={(e) => setCreateForm({ ...createForm, duration: e.target.value })}
-              className="input-field w-full"
-            >
-              <option value="7">7 days</option>
-              <option value="14">14 days</option>
-              <option value="21">21 days</option>
-              <option value="30">30 days</option>
-            </select>
-          </div>
-
-          {!createForm.is_public && (
+        <div className="mt-5">
+          {joinTab === 'manual' ? (
             <>
-              <div>
-                <label className="block text-sm font-semibold text-text-secondary mb-2">Win Condition</label>
-                <select
-                  value={createForm.win_condition}
-                  onChange={(e) => setCreateForm({ ...createForm, win_condition: e.target.value })}
-                  className="input-field w-full"
-                >
-                  <option value="proportional">Proportional Split</option>
-                  <option value="winner_takes_all">Winner Takes All</option>
-                  <option value="qualification_only">Qualification Only</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-text-secondary mb-2">Theme Emoji</label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {['', '', '', ''].map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setCreateForm({ ...createForm, theme_emoji: emoji })}
-                      className={`py-2 rounded-xl border-2 text-xl ${createForm.theme_emoji === emoji ? 'border-accent-blue bg-tint-blue' : 'border-border-light'}`}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <label htmlFor="invite-code" className="label">
+                Invite code
+              </label>
+              <input
+                id="invite-code"
+                type="text"
+                value={inviteCode}
+                onChange={(e) => {
+                  setInviteCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+                  setJoinError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && inviteCode.length === 8) handleJoin();
+                }}
+                placeholder="ABCD1234"
+                maxLength={8}
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                aria-invalid={joinError ? true : undefined}
+                aria-describedby="invite-code-help"
+                className="input-field h-14 text-center font-mono text-title tracking-[0.3em] placeholder:tracking-[0.3em]"
+              />
+              <p id="invite-code-help" className="num mt-1.5 text-caption text-text-muted">
+                {inviteCode.length}/8 characters
+              </p>
+            </>
+          ) : (
+            <>
+              <div
+                id="qr-scanner"
+                className="aspect-square w-full overflow-hidden rounded-card border border-border-light bg-bg-sunken"
+                aria-label="Camera viewfinder"
+              />
+              <p className="mt-2 text-caption text-text-muted">
+                {inviteCode ? (
+                  <>
+                    Code found: <span className="font-mono font-semibold text-text-primary">{inviteCode}</span>
+                  </>
+                ) : (
+                  'Point your camera at the challenge QR code.'
+                )}
+              </p>
             </>
           )}
         </div>
-        
-        <div className="flex gap-3">
-          <button
-            onClick={() => setShowCreateModal(false)}
-            className="flex-1 btn-secondary py-3 rounded-2xl"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleCreate}
-            disabled={!createForm.name || createMutation.isPending}
-            className="flex-1 btn-primary py-3 rounded-2xl disabled:opacity-40"
-          >
-            {createMutation.isPending ? 'Creating...' : 'Create'}
-          </button>
+
+        {joinError && (
+          <div className="mt-4 flex items-start gap-3 rounded-card bg-danger-soft p-4" role="alert">
+            <AlertCircle size={18} className="mt-0.5 shrink-0 text-danger" aria-hidden />
+            <div className="min-w-0">
+              <p className="text-callout font-semibold text-danger">Couldn't join</p>
+              <p className="mt-0.5 text-caption text-text-secondary">{joinError}</p>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-5 rounded-card bg-bg-sunken p-4">
+          <p className="text-callout text-text-secondary">
+            Joining deducts the challenge's entry contribution from your wallet straight away.
+            {availableBalance !== null && (
+              <>
+                {' '}
+                Available now: <span className="num font-semibold text-text-primary">{formatKES(availableBalance)}</span>.
+              </>
+            )}
+          </p>
         </div>
-      </BaseModal>
+      </Sheet>
+
+      {/* CREATE */}
+      <CreateChallengeSheet
+        key={createSheetKey}
+        open={showCreateModal}
+        onClose={() => {
+          if (!createMutation.isPending) setShowCreateModal(false);
+        }}
+        config={config}
+        availableBalance={availableBalance}
+        isSubmitting={createMutation.isPending}
+        error={createError}
+        onSubmit={handleCreate}
+        onDeposit={() => navigate('/wallet')}
+      />
+
+      {/* CREATED: share invite */}
+      <Sheet
+        open={showCreated}
+        onClose={() => setShowCreated(false)}
+        title="Challenge created"
+        description={createdChallenge ? `${createdChallenge.name} is live. Share the code so others can join.` : undefined}
+        footer={
+          <div className="flex gap-3 pb-3">
+            <Button variant="outline" size="lg" onClick={() => void downloadQRCode()} leftIcon={<Download size={18} aria-hidden />}>
+              Save QR
+            </Button>
+            <Button
+              fullWidth
+              size="lg"
+              onClick={() => {
+                const id = createdChallenge?.id;
+                setShowCreated(false);
+                if (id) navigate(`/challenges/${id}`);
+              }}
+            >
+              View challenge
+            </Button>
+          </div>
+        }
+      >
+        {createdChallenge && (
+          <div className="flex flex-col items-center">
+            <div className="rounded-card border border-border-light bg-bg-card p-3">
+              <canvas id="challenge-qr-canvas" className="block h-[220px] w-[220px]" aria-label={`QR code for invite code ${createdChallenge.invite_code}`} role="img" />
+            </div>
+            <p className="eyebrow mt-5">Invite code</p>
+            <p className="mt-1 font-mono text-title tracking-[0.25em] text-text-primary">{createdChallenge.invite_code}</p>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-3"
+              onClick={() => void copyInviteCode()}
+              leftIcon={<Copy size={14} aria-hidden />}
+              isSuccess={copied}
+              successText="Copied"
+            >
+              Copy code
+            </Button>
+            <p className="mt-5 text-center text-caption text-text-muted">
+              Your entry of <span className="num font-semibold text-text-secondary">{formatKES(createdChallenge.entry_fee)}</span> is in the pool.
+            </p>
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 }
-

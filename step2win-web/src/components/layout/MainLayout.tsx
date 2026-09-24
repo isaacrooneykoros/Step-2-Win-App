@@ -1,11 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
-import { Home, Footprints, Trophy, Wallet, User, BellRing, Sparkles, AlertCircle } from 'lucide-react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Home, Trophy, Wallet, User, Footprints, Bell, Camera, MapPin, Navigation, Activity } from 'lucide-react';
 import { useStepsWebSocket } from '../../hooks/useStepsWebSocket';
 import { useHealthSync } from '../../hooks/useHealthSync';
 import { usePermissionStatus } from '../../hooks/usePermissionStatus';
-import { BaseModal } from '../ui/BaseModal';
+import { useDataSaver } from '../../hooks/useDataSaver';
+import { authService } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
+import { Sheet } from '../ui/Sheet';
+import Button from '../ui/Button';
+import { IconTile, Pill } from '../ui/Pill';
+import { ConnectionBanner } from '../ui/ConnectionBanner';
+import { isIOSApp, permissionCopy } from '../../utils/platform';
 import {
   checkNotificationPermission,
   requestNotificationPermission,
@@ -21,29 +30,18 @@ import {
 
 const PERMISSIONS_BOOTSTRAP_DONE_KEY = 'permissions_bootstrap_done_v1';
 
-type BrandToken = {
-  accent: string;
-  tint: string;
-  label: string;
-  icon: typeof Sparkles;
-};
-
+// Four destinations keep the bar calm. Step activity lives under Home (its hero ring links to /steps).
 const navItems = [
-  { to: '/', icon: Home, label: 'Home' },
-  { to: '/steps', icon: Footprints, label: 'Steps' },
-  { to: '/challenges', icon: Trophy, label: 'Challenges' },
-  { to: '/wallet', icon: Wallet, label: 'Wallet' },
-  { to: '/profile', icon: User, label: 'Profile' },
+  { to: '/', icon: Home, label: 'Home', match: (p: string) => p === '/' || p.startsWith('/steps') },
+  { to: '/challenges', icon: Trophy, label: 'Challenges', match: (p: string) => p.startsWith('/challenges') },
+  { to: '/wallet', icon: Wallet, label: 'Wallet', match: (p: string) => p.startsWith('/wallet') },
+  {
+    to: '/profile',
+    icon: User,
+    label: 'Profile',
+    match: (p: string) => ['/profile', '/settings', '/support', '/legal'].some((prefix) => p.startsWith(prefix)),
+  },
 ];
-
-const BRAND_TOKENS: Record<string, BrandToken> = {
-  '/': { accent: '#4F9CF9', tint: '#EFF6FF', label: 'Momentum', icon: Sparkles },
-  '/steps': { accent: '#34D399', tint: '#ECFDF5', label: 'Stride', icon: Footprints },
-  '/challenges': { accent: '#A78BFA', tint: '#F5F3FF', label: 'Compete', icon: Trophy },
-  '/wallet': { accent: '#FBBF24', tint: '#FFFBEB', label: 'Wealth', icon: Wallet },
-  '/profile': { accent: '#64748B', tint: '#F1F5F9', label: 'Identity', icon: User },
-  '/settings': { accent: '#0F172A', tint: '#E2E8F0', label: 'Control', icon: BellRing },
-};
 
 function readNotificationPreferences() {
   try {
@@ -63,7 +61,10 @@ function readNotificationPreferences() {
 export default function MainLayout() {
   const location = useLocation();
   useStepsWebSocket();
-  const { syncHealthSilent, connectDevice, isConnectingDevice, permissionStatus } = useHealthSync();
+  const { syncHealthSilent, syncHealthNow, connectDevice, isConnectingDevice, permissionStatus } = useHealthSync();
+  const { stepSyncIntervalMs } = useDataSaver();
+  const queryClient = useQueryClient();
+  const [permissionsVersion, setPermissionsVersion] = useState(0);
   const { permissionStatus: globalPermissionStatus } = usePermissionStatus();
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<'prompt' | 'prompt-with-rationale' | 'granted' | 'denied' | 'unavailable'>('prompt');
@@ -72,9 +73,18 @@ export default function MainLayout() {
   const [backgroundLocationPermission, setBackgroundLocationPermission] = useState<LocationPermissionState>('prompt');
 
   const isNative = Capacitor.isNativePlatform();
-  const brand = useMemo(() => {
-    const token = BRAND_TOKENS[location.pathname] || BRAND_TOKENS['/'];
-    return token;
+  const updateUser = useAuthStore((state) => state.updateUser);
+
+  // The auth store restores tokens on launch but not the user object; hydrate it from the
+  // profile endpoint so greetings, balances and goals are correct after a reload.
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: authService.getProfile });
+  useEffect(() => {
+    if (profile) updateUser(profile);
+  }, [profile, updateUser]);
+
+  // Scroll to top on navigation (the document scrolls, not an inner container).
+  useEffect(() => {
+    window.scrollTo(0, 0);
   }, [location.pathname]);
 
   const canRequestDevicePermission = useMemo(() => {
@@ -93,6 +103,7 @@ export default function MainLayout() {
     return isNative && locationPermission !== 'granted';
   }, [isNative, locationPermission]);
 
+  // Background step sync: every 30 s, or every 5 min with data saver on (switches instantly).
   useEffect(() => {
     syncHealthSilent();
 
@@ -100,10 +111,34 @@ export default function MainLayout() {
       if (document.visibilityState === 'visible') {
         syncHealthSilent();
       }
-    }, 30000);
+    }, stepSyncIntervalMs);
 
     return () => window.clearInterval(interval);
-  }, [syncHealthSilent]);
+  }, [stepSyncIntervalMs, syncHealthSilent]);
+
+  // App resume: sync steps immediately (even with data saver), refresh what's on screen if the
+  // app was away for a while, and re-read permissions the user may have changed in Settings.
+  const syncNowRef = useRef(syncHealthNow);
+  syncNowRef.current = syncHealthNow;
+  useEffect(() => {
+    if (!isNative) return;
+    let pausedAt = 0;
+    const handle = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive) {
+        pausedAt = Date.now();
+        return;
+      }
+      void syncNowRef.current();
+      setPermissionsVersion((v) => v + 1);
+      if (pausedAt && Date.now() - pausedAt > 30_000) {
+        void queryClient.invalidateQueries({ refetchType: 'active' });
+      }
+      pausedAt = 0;
+    });
+    return () => {
+      handle.then((h) => h.remove()).catch(() => null);
+    };
+  }, [isNative, queryClient]);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,7 +165,7 @@ export default function MainLayout() {
     return () => {
       cancelled = true;
     };
-  }, [isNative]);
+  }, [isNative, permissionsVersion]);
 
   useEffect(() => {
     if (!isNative) return;
@@ -183,7 +218,7 @@ export default function MainLayout() {
     const locationGranted = await requestForegroundLocationPermission();
     setLocationPermission(locationGranted ? 'granted' : 'denied');
 
-    if (locationGranted) {
+    if (locationGranted && !isIOSApp()) {
       const backgroundGranted = await requestBackgroundLocationPermission();
       setBackgroundLocationPermission(backgroundGranted ? 'granted' : 'denied');
     }
@@ -192,183 +227,174 @@ export default function MainLayout() {
     setShowPermissionModal(false);
   };
 
-  const activeAccent = brand.accent;
+  const activityDenied = globalPermissionStatus.activityRecognition === 'denied';
+  const showActivityBanner = isNative && globalPermissionStatus.activityRecognition !== 'granted';
 
   return (
-    <div
-      className="app-shell min-h-screen flex flex-col"
-      style={{
-        background: `radial-gradient(circle at top, ${activeAccent}22, transparent 30%), hsl(var(--bg-page))`,
-      }}
-    >
-      <div
-        className="pointer-events-none fixed inset-x-0 top-0 h-24"
-        style={{ background: `linear-gradient(180deg, ${activeAccent}18, transparent 72%)` }}
-      />
+    <div className="app-shell flex min-h-[100dvh] flex-col">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[130] focus:rounded-xl focus:bg-bg-card focus:px-4 focus:py-2 focus:shadow-raised"
+      >
+        Skip to content
+      </a>
 
-      {/* Permission Status Header Indicator */}
-      {isNative && globalPermissionStatus.activityRecognition !== 'granted' && (
-        <div className="sticky top-0 z-40 px-4 pt-2 pb-2 bg-yellow-50 border-b border-yellow-200">
-          <div className="flex items-center gap-2 max-w-md mx-auto">
-            <AlertCircle size={16} className="text-yellow-600 flex-shrink-0" />
-            <p className="text-xs text-yellow-800 flex-1">
-              {globalPermissionStatus.activityRecognition === 'denied'
-                ? 'Physical activity permission is disabled. Enable it in Settings → Permissions.'
-                : 'Enable physical activity permission to start counting your steps.'}
+      <div className="sticky top-0 z-40">
+        <ConnectionBanner />
+        {showActivityBanner && (
+          <div className="flex items-center gap-3 bg-warning-soft px-4 py-2.5 pt-safe" role="status">
+            <Activity size={16} className="shrink-0 text-warning" aria-hidden />
+            <p className="min-w-0 flex-1 text-caption font-medium text-text-primary">
+              {activityDenied
+                ? `Step counting is off. Allow ${permissionCopy().motionName} access to record steps.`
+                : `Allow ${permissionCopy().motionName} access to start counting steps.`}
             </p>
+            {activityDenied ? (
+              <button
+                type="button"
+                onClick={handleEnablePermission}
+                disabled={isConnectingDevice}
+                className="shrink-0 text-caption font-semibold text-warning underline-offset-2 hover:underline"
+              >
+                Open settings
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleEnablePermission}
+                disabled={isConnectingDevice}
+                className="shrink-0 text-caption font-semibold text-warning underline-offset-2 hover:underline"
+              >
+                {isConnectingDevice ? 'Requesting…' : 'Allow'}
+              </button>
+            )}
           </div>
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto pb-24">
-        <Outlet />
+        )}
       </div>
 
-      <nav
-        className="app-bottom-nav fixed bottom-0 left-0 right-0 px-3 pb-3 safe-bottom"
-        style={{ boxShadow: '0 -14px 34px rgba(15, 23, 42, 0.14)' }}
-      >
-        <div
-          className="mx-auto grid grid-cols-5 items-stretch gap-1 rounded-[28px] px-2 py-2 backdrop-blur-xl"
-          style={{
-            background: 'hsl(var(--bg-elevated) / 0.88)',
-            border: '1px solid hsl(var(--border-default))',
-          }}
-        >
-          {navItems.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
-              className={({ isActive }) => `
-                flex min-w-0 flex-col items-center justify-center rounded-[20px] px-1 py-2 transition-all
-                ${isActive ? 'text-text-primary' : 'text-text-muted'}
-              `}
-            >
-              {({ isActive }) => (
-                <div
-                  className="flex w-full min-w-0 flex-col items-center gap-1"
-                  style={{
-                    background: isActive ? `${activeAccent}14` : 'transparent',
-                    boxShadow: isActive ? `0 8px 20px ${activeAccent}22` : 'none',
-                  }}
-                >
-                  <div
-                    className="flex h-9 w-9 items-center justify-center rounded-2xl transition-all"
-                    style={{
-                      background: isActive ? `${activeAccent}18` : 'transparent',
-                      color: isActive ? activeAccent : 'inherit',
-                    }}
-                  >
-                    <Icon size={18} strokeWidth={isActive ? 2.4 : 1.9} />
-                  </div>
-                  <span className={`text-[10px] sm:text-xs font-semibold leading-none ${isActive ? 'text-text-primary' : 'text-text-muted'}`}>
-                    {label}
-                  </span>
-                </div>
-              )}
-            </NavLink>
-          ))}
+      <main id="main" className="flex-1">
+        <div key={location.pathname} className="screen-enter">
+          <Outlet />
         </div>
+      </main>
+
+      <nav
+        aria-label="Primary"
+        className="app-bottom-nav fixed inset-x-0 bottom-0 z-50 border-t border-border-light bg-bg-elevated/95 backdrop-blur-md safe-bottom"
+      >
+        <ul className="mx-auto grid h-[var(--nav-height)] max-w-md grid-cols-4">
+          {navItems.map(({ to, icon: Icon, label, match }) => {
+            const active = match(location.pathname);
+            return (
+              <li key={to} className="flex">
+                <NavLink
+                  to={to}
+                  end={to === '/'}
+                  aria-current={active ? 'page' : undefined}
+                  className={`relative flex flex-1 flex-col items-center justify-center gap-1 active:!scale-95 ${
+                    active ? 'text-brand' : 'text-text-muted hover:text-text-secondary'
+                  }`}
+                >
+                  <span
+                    aria-hidden
+                    className={`absolute top-0 h-[3px] w-8 rounded-b-full bg-brand transition-opacity duration-normal ${active ? 'opacity-100' : 'opacity-0'}`}
+                  />
+                  <Icon size={22} strokeWidth={active ? 2.3 : 1.8} aria-hidden />
+                  <span className={`text-micro ${active ? 'font-semibold' : 'font-medium'}`}>{label}</span>
+                </NavLink>
+              </li>
+            );
+          })}
+        </ul>
       </nav>
 
-      <BaseModal open={showPermissionModal} onClose={handleDismissPermission} title="Enable Step2Win permissions">
-        <p className="text-sm text-text-secondary mb-4">
-          Turn on device access so the app can track steps and send reminders like challenge alerts and wallet updates.
-        </p>
-
-        <div className="space-y-3 mb-5">
-          <PermissionCard
-            title="Step sync"
-            subtitle="Uses your phone's built-in motion sensor (activity recognition) to count and sync steps in real time."
-            status={permissionStatus === 'granted' ? 'Granted' : 'Needs permission'}
-            accent={activeAccent}
-          />
-          <PermissionCard
-            title="Notifications"
-            subtitle="Allows reminders, payout alerts, and app notifications."
-            status={notificationPermission === 'granted' ? 'Granted' : 'Needs permission'}
-            accent="#FBBF24"
-          />
-          <PermissionCard
-            title="QR camera"
-            subtitle="Needed to scan challenge QR invites quickly without extra prompts."
-            status={cameraPermission === 'granted' ? 'Granted' : 'Needs permission'}
-            accent="#34D399"
-          />
-          <PermissionCard
-            title="Location tracking"
-            subtitle="Keeps route map accurate with current location and movement history."
-            status={locationPermission === 'granted' ? 'Granted' : 'Needs permission'}
-            accent="#A78BFA"
-          />
-          <PermissionCard
-            title="Background location"
-            subtitle="Captures route continuity while app is in background for better map consistency."
-            status={backgroundLocationPermission === 'granted' ? 'Granted' : 'Optional'}
-            accent="#22D3EE"
-          />
-        </div>
-
-        <div className="flex flex-col gap-3">
-          <button
-            onClick={handleEnableEverything}
-            disabled={isConnectingDevice}
-            className="w-full rounded-2xl px-4 py-3 font-semibold text-white transition-opacity disabled:opacity-60"
-            style={{ background: `linear-gradient(135deg, ${activeAccent}, #0F172A)` }}
-          >
-            {isConnectingDevice ? 'Requesting...' : 'Enable all permissions'}
-          </button>
-          <div className="flex gap-3">
-            <button
-              onClick={handleEnablePermission}
-              disabled={isConnectingDevice || permissionStatus === 'granted'}
-              className="flex-1 py-3 rounded-2xl bg-bg-input text-text-secondary font-semibold disabled:opacity-50"
-            >
-              {permissionStatus === 'granted' ? 'Sensor access on' : 'Allow sensor access'}
-            </button>
-            <button
-              onClick={handleEnableNotifications}
-              disabled={notificationPermission === 'granted'}
-              className="flex-1 py-3 rounded-2xl bg-bg-input text-text-secondary font-semibold disabled:opacity-50"
-            >
-              {notificationPermission === 'granted' ? 'Notifications on' : 'Allow notifications'}
-            </button>
+      <Sheet
+        open={showPermissionModal}
+        onClose={handleDismissPermission}
+        title="Set up step tracking"
+        description="Step2Win counts steps with your phone's motion sensor. Choose what to allow — you can change this any time in Settings."
+        footer={
+          <div className="flex flex-col gap-2">
+            <Button fullWidth size="lg" onClick={handleEnableEverything} isLoading={isConnectingDevice} loadingText="Requesting access…">
+              Allow access
+            </Button>
+            <Button fullWidth variant="ghost" onClick={handleDismissPermission}>
+              Not now
+            </Button>
           </div>
-          <button
-            onClick={handleDismissPermission}
-            className="w-full py-3 rounded-2xl text-text-muted font-semibold"
-          >
-            Continue without prompts
-          </button>
+        }
+      >
+        <div className="divide-y divide-border-light overflow-hidden rounded-card border border-border-light">
+          <PermissionRow
+            icon={Footprints}
+            title={permissionCopy().motionName}
+            subtitle="Counts and verifies your steps in real time."
+            granted={permissionStatus === 'granted'}
+            required
+          />
+          <PermissionRow
+            icon={Bell}
+            title="Notifications"
+            subtitle="Challenge reminders, results and payout updates."
+            granted={notificationPermission === 'granted'}
+          />
+          <PermissionRow
+            icon={Camera}
+            title="Camera"
+            subtitle="Scan challenge invite QR codes."
+            granted={cameraPermission === 'granted'}
+          />
+          <PermissionRow
+            icon={MapPin}
+            title="Location"
+            subtitle="Draws your walking route on the activity map."
+            granted={locationPermission === 'granted'}
+          />
+          {!isIOSApp() && (
+            <PermissionRow
+              icon={Navigation}
+              title="Background location"
+              subtitle="Keeps routes continuous while the app is closed."
+              granted={backgroundLocationPermission === 'granted'}
+              optional
+            />
+          )}
         </div>
-      </BaseModal>
+      </Sheet>
     </div>
   );
 }
 
-function PermissionCard({
+function PermissionRow({
+  icon,
   title,
   subtitle,
-  status,
-  accent,
+  granted,
+  required = false,
+  optional = false,
 }: {
+  icon: typeof Footprints;
   title: string;
   subtitle: string;
-  status: string;
-  accent: string;
+  granted: boolean;
+  required?: boolean;
+  optional?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-bg-card p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-text-primary">{title}</p>
-          <p className="text-xs text-text-muted mt-0.5">{subtitle}</p>
-        </div>
-        <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: `${accent}16`, color: accent }}>
-          {status}
-        </span>
+    <div className="flex items-center gap-3 px-4 py-3">
+      <IconTile icon={icon} tone={granted ? 'success' : 'neutral'} size="sm" />
+      <div className="min-w-0 flex-1">
+        <p className="text-callout font-semibold text-text-primary">
+          {title}
+          {required && <span className="ml-1.5 text-micro font-medium text-text-muted">Required</span>}
+        </p>
+        <p className="text-caption text-text-muted">{subtitle}</p>
       </div>
+      {granted ? (
+        <Pill tone="success">Allowed</Pill>
+      ) : (
+        <Pill tone="neutral">{optional ? 'Optional' : 'Off'}</Pill>
+      )}
     </div>
   );
 }

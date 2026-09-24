@@ -12,6 +12,7 @@ import { ChatMessage } from '../types';
 import { challengesService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { resolveApiBaseUrl, resolveWsBaseUrl } from '../config/network';
+import { isDataSaverOn } from './useDataSaver';
 
 const API_BASE = resolveApiBaseUrl();
 const WS_BASE = resolveWsBaseUrl();
@@ -22,6 +23,7 @@ export function useGroupChat(challengeId: number) {
   const [realtimeUnavailable, setRealtimeUnavailable] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const shouldReconnectRef = useRef(true);
@@ -30,6 +32,8 @@ export function useGroupChat(challengeId: number) {
   const typingTimer = useRef<ReturnType<typeof setTimeout>>();
   const pollTimer = useRef<ReturnType<typeof setInterval>>();
   const isTypingRef = useRef(false);
+  // Bumped on unmount so an in-flight connect() from a previous mount never opens a stray socket.
+  const generationRef = useRef(0);
 
   const refreshAccessToken = useCallback(async (): Promise<string | null> => {
     let refreshToken: string | null = null;
@@ -80,10 +84,12 @@ export function useGroupChat(challengeId: number) {
 
   // ── WebSocket connection ──────────────────────────────────────────────
   const connect = useCallback(async () => {
+    const generation = generationRef.current;
     let token = await useAuthStore.getState().getAccessToken();
     if (!token) {
       token = await refreshAccessToken();
     }
+    if (generation !== generationRef.current) return;
     if (!token) {
       setConnected(false);
       setRealtimeUnavailable(true);
@@ -95,12 +101,18 @@ export function useGroupChat(challengeId: number) {
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
+    // If the handshake stalls, show history over REST while the socket keeps trying.
+    setTimeout(() => {
+      if (wsRef.current === ws && ws.readyState !== WebSocket.OPEN) startPollingFallback();
+    }, 3000);
+
     ws.onopen = () => {
       setConnected(true);
       setRealtimeUnavailable(false);
       reconnectAttemptsRef.current = 0;
       // Clear polling fallback if WS connected
       if (pollTimer.current) clearInterval(pollTimer.current);
+      pollTimer.current = undefined;
     };
 
     ws.onmessage = (event) => {
@@ -109,6 +121,7 @@ export function useGroupChat(challengeId: number) {
 
         if (data.type === 'history') {
           setMessages(data.messages);
+          setHistoryLoaded(true);
         } else if (data.type === 'message') {
           setMessages((prev) => {
             // Avoid duplicates
@@ -135,6 +148,8 @@ export function useGroupChat(challengeId: number) {
     };
 
     ws.onclose = (event) => {
+      // A socket replaced by a newer connection (e.g. remount) must not tear down its successor.
+      if (wsRef.current !== ws) return;
       setConnected(false);
       wsRef.current = null;
 
@@ -171,14 +186,19 @@ export function useGroupChat(challengeId: number) {
   // ── REST polling fallback ─────────────────────────────────────────────
   const startPollingFallback = useCallback(() => {
     if (pollTimer.current) return;
-    pollTimer.current = setInterval(async () => {
+    const poll = async () => {
       try {
         const data = await challengesService.getChatMessages(challengeId);
         setMessages(data);
+        setHistoryLoaded(true);
       } catch {
         /* ignore */
       }
-    }, 5000);
+    };
+    // Fetch once straight away so the thread isn't blank while the socket is down.
+    void poll();
+    // Fallback polling while the socket is down; much slower under data saver.
+    pollTimer.current = setInterval(poll, isDataSaverOn() ? 30_000 : 5000);
   }, [challengeId]);
 
   useEffect(() => {
@@ -188,18 +208,22 @@ export function useGroupChat(challengeId: number) {
     connect();
     return () => {
       shouldReconnectRef.current = false;
-      wsRef.current?.close();
+      generationRef.current += 1;
+      const socket = wsRef.current;
+      wsRef.current = null;
+      socket?.close();
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (pollTimer.current) clearInterval(pollTimer.current);
+      pollTimer.current = undefined;
       if (typingTimer.current) clearTimeout(typingTimer.current);
     };
   }, [connect]);
 
   // ── Send message ──────────────────────────────────────────────────────
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string): Promise<boolean> => {
       const trimmed = content.trim();
-      if (!trimmed) return;
+      if (!trimmed) return false;
       setSending(true);
 
       try {
@@ -213,10 +237,12 @@ export function useGroupChat(challengeId: number) {
             challengeId,
             trimmed
           );
-          setMessages((prev) => [...prev, msg]);
+          setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
         }
+        return true;
       } catch (e) {
         console.error('Send failed:', e);
+        return false;
       } finally {
         setSending(false);
       }
@@ -240,6 +266,7 @@ export function useGroupChat(challengeId: number) {
 
   return {
     messages,
+    historyLoaded,
     connected,
     realtimeUnavailable,
     typingUsers,

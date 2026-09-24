@@ -292,12 +292,29 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(required=True, style={"input_type": "password"})
 
 
-class GoogleAuthSerializer(serializers.Serializer):
-    """
-    Serializer for Google OAuth access token auth
-    """
+class _SocialDeviceFields(serializers.Serializer):
+    device_type = serializers.ChoiceField(
+        choices=["android", "ios", "web", "unknown"], required=False, default="unknown"
+    )
+    device_name = serializers.CharField(required=False, allow_blank=True, max_length=255, default="")
+    app_version = serializers.CharField(required=False, allow_blank=True, max_length=50, default="")
 
-    token = serializers.CharField(required=True, trim_whitespace=True)
+
+class GoogleAuthSerializer(_SocialDeviceFields):
+    """Google OpenID Connect ID token (never an access token)."""
+
+    id_token = serializers.CharField(required=True, trim_whitespace=True, max_length=8192)
+    nonce = serializers.CharField(required=False, allow_blank=True, max_length=256, default="")
+
+
+class AppleAuthSerializer(_SocialDeviceFields):
+    """Apple identity token + the raw nonce whose SHA-256 the token must carry."""
+
+    id_token = serializers.CharField(required=True, trim_whitespace=True, max_length=8192)
+    nonce = serializers.CharField(required=True, max_length=256)
+    # Apple shares the name only on the first authorisation, outside the token.
+    given_name = serializers.CharField(required=False, allow_blank=True, max_length=150, default="")
+    family_name = serializers.CharField(required=False, allow_blank=True, max_length=150, default="")
 
 
 class SupportTicketCreateSerializer(serializers.Serializer):
@@ -339,7 +356,7 @@ class UserSupportTicketSerializer(serializers.ModelSerializer):
             "status",
             "priority",
             "message",
-            "admin_notes",
+            # admin_notes is a staff-only internal note and is never sent to users.
             "resolved_at",
             "created_at",
             "updated_at",

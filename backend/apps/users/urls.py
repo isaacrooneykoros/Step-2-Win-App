@@ -10,6 +10,7 @@ urlpatterns = [
     path("register/", views.register, name="register"),
     path("login/", auth_views.CustomLoginView.as_view(), name="login"),
     path("google/", views.google_auth, name="google_auth"),
+    path("apple/", views.apple_auth, name="apple_auth"),
     path("logout/", auth_views.CustomLogoutView.as_view(), name="logout"),
     path("refresh/", auth_views.CustomRefreshView.as_view(), name="token_refresh"),
     path(

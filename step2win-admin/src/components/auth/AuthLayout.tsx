@@ -1,40 +1,48 @@
 import type { ReactNode } from 'react';
-import { AuthLeftPanel } from './AuthLeftPanel';
-import { AuthRightPanel } from './AuthRightPanel';
+import { Lock } from 'lucide-react';
+import { AuthLogo } from './AuthLogo';
+import { ThemeToggle } from '../ThemeToggle';
+import { API_BASE } from '../../config/network';
 
 interface AuthLayoutProps {
+  /** Kept for compatibility; both modes share one calm layout. */
   mode: 'login' | 'register';
   children: ReactNode;
 }
 
-export function AuthLayout({ mode, children }: AuthLayoutProps) {
-  return (
-    <div
-      className="min-h-screen flex items-center justify-center px-4 py-6 sm:px-6 lg:px-8"
-      style={{
-        background:
-          'linear-gradient(135deg, #060810 0%, #0A0C12 48%, #08120F 100%)',
-      }}>
-      <div className="relative w-full max-w-6xl">
-        <div
-          className="absolute -inset-px rounded-[22px] opacity-70"
-          style={{
-            background:
-              'linear-gradient(135deg, rgba(34,211,160,0.35), rgba(79,156,249,0.18) 42%, rgba(245,166,35,0.18))',
-          }}
-        />
+function apiHost(): string {
+  try {
+    return new URL(API_BASE).host;
+  } catch {
+    return API_BASE;
+  }
+}
 
-        <div
-          className="relative flex flex-col overflow-hidden rounded-[20px] lg:min-h-[680px] lg:flex-row"
-          style={{
-            background: '#0A0C12',
-            border: '1px solid #1C1F2E',
-            boxShadow: '0 28px 90px rgba(0,0,0,0.58)',
-          }}>
-          <AuthLeftPanel mode={mode}>{children}</AuthLeftPanel>
-          <AuthRightPanel />
-        </div>
+/**
+ * Sign-in shell: one centred card on the page background, the environment the
+ * console is connected to, and nothing else. No marketing, no sample data.
+ */
+export function AuthLayout({ children }: AuthLayoutProps) {
+  return (
+    <div className="flex min-h-dvh flex-col bg-surface-base">
+      <div className="flex justify-end p-3">
+        <ThemeToggle />
       </div>
+      <main className="flex flex-1 items-start justify-center px-4 pb-10 pt-[6vh] sm:items-center sm:pt-0">
+        <div className="w-full max-w-[400px]">
+          <AuthLogo />
+          <div className="rounded-lg border border-surface-border bg-surface-card p-6 shadow-card sm:p-7">{children}</div>
+          <div className="mt-4 space-y-1 text-center text-xs text-ink-muted">
+            <p className="flex items-center justify-center gap-1.5">
+              <Lock size={12} aria-hidden />
+              Restricted to authorised Step2Win staff.
+            </p>
+            <p>
+              Connected to <span className="mono text-ink-secondary">{apiHost()}</span>
+            </p>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }

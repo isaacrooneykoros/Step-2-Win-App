@@ -1,104 +1,104 @@
-import { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Info, AlertTriangle } from 'lucide-react';
+import { useEffect } from 'react';
+import { create } from 'zustand';
+import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'info' | 'warning';
 
-interface ToastProps {
-  message: string;
-  type?: ToastType;
-  duration?: number;
-  onClose: () => void;
-}
-
-const icons = {
-  success: CheckCircle,
-  error: XCircle,
-  info: Info,
-  warning: AlertTriangle,
-};
-
-const colors = {
-  success: {
-    background: 'hsl(var(--bg-elevated) / 0.96)',
-    border: 'rgba(52,211,153,0.45)',
-    icon: 'text-accent-green',
-  },
-  error: {
-    background: 'hsl(var(--bg-elevated) / 0.96)',
-    border: 'rgba(248,113,113,0.45)',
-    icon: 'text-accent-red',
-  },
-  info: {
-    background: 'hsl(var(--bg-elevated) / 0.96)',
-    border: 'hsl(var(--border-default))',
-    icon: 'text-accent-blue',
-  },
-  warning: {
-    background: 'hsl(var(--bg-elevated) / 0.96)',
-    border: 'rgba(251,191,36,0.45)',
-    icon: 'text-accent-yellow',
-  },
-};
-
-export default function Toast({ message, type = 'info', duration = 3000, onClose }: ToastProps) {
-  useEffect(() => {
-    const timer = setTimeout(onClose, duration);
-    return () => clearTimeout(timer);
-  }, [duration, onClose]);
-
-  const Icon = icons[type];
-
-  return (
-    <div
-      className="flex items-center gap-3 px-4 py-3.5 rounded-2xl shadow-2xl pointer-events-auto"
-      style={{
-        background: colors[type].background,
-        border: `1px solid ${colors[type].border}`,
-        backdropFilter: 'blur(10px)',
-        animation: 'slideDown 0.3s ease-out',
-      }}
-      role="alert"
-    >
-      <Icon size={18} className={colors[type].icon} />
-      <p className="text-sm font-medium text-text-primary">{message}</p>
-    </div>
-  );
-}
-
-// Toast manager hook
 interface ToastConfig {
   message: string;
   type?: ToastType;
   duration?: number;
 }
 
-let toastId = 0;
+interface ToastItem extends ToastConfig {
+  id: number;
+}
 
-export function useToast() {
-  const [toasts, setToasts] = useState<Array<ToastConfig & { id: number }>>([]);
+interface ToastStore {
+  toasts: ToastItem[];
+  push: (config: ToastConfig) => void;
+  dismiss: (id: number) => void;
+}
 
-  const showToast = (config: ToastConfig) => {
-    const id = toastId++;
-    setToasts((prev) => [...prev, { ...config, id }]);
-  };
+let nextId = 0;
 
-  const removeToast = (id: number) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  };
+const useToastStore = create<ToastStore>((set) => ({
+  toasts: [],
+  push: (config) =>
+    set((state) => ({
+      // Drop exact duplicates that are already visible (e.g. repeated sync errors).
+      toasts: state.toasts.some((t) => t.message === config.message)
+        ? state.toasts
+        : [...state.toasts.slice(-2), { ...config, id: nextId++ }],
+    })),
+  dismiss: (id) => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
+}));
 
-  const ToastContainer = () => (
-    <div className="fixed top-4 left-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
-      {toasts.map((toast) => (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          type={toast.type}
-          duration={toast.duration}
-          onClose={() => removeToast(toast.id)}
-        />
+/** Imperative access for non-React code. */
+export const toast = (config: ToastConfig) => useToastStore.getState().push(config);
+
+const meta = {
+  success: { icon: CheckCircle2, className: 'text-success' },
+  error: { icon: XCircle, className: 'text-danger' },
+  info: { icon: Info, className: 'text-info' },
+  warning: { icon: AlertTriangle, className: 'text-warning' },
+};
+
+function ToastView({ item }: { item: ToastItem }) {
+  const dismiss = useToastStore((s) => s.dismiss);
+  const type = item.type ?? 'info';
+  const { icon: Icon, className } = meta[type];
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => dismiss(item.id), item.duration ?? (type === 'error' ? 5000 : 3200));
+    return () => window.clearTimeout(timer);
+  }, [dismiss, item.id, item.duration, type]);
+
+  return (
+    <div
+      className="pointer-events-auto flex w-full items-start gap-3 rounded-2xl border border-border-light bg-bg-elevated px-4 py-3 shadow-raised"
+      style={{ animation: 'slideDown var(--dur-normal) var(--ease-enter) both' }}
+      role={type === 'error' ? 'alert' : 'status'}
+    >
+      <Icon size={20} className={`mt-px shrink-0 ${className}`} aria-hidden />
+      <p className="min-w-0 flex-1 text-callout font-medium text-text-primary">{item.message}</p>
+      <button
+        type="button"
+        onClick={() => dismiss(item.id)}
+        className="-m-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:bg-bg-input"
+        aria-label="Dismiss notification"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
+
+/** Render once near the app root. */
+export function Toaster() {
+  const toasts = useToastStore((s) => s.toasts);
+  return (
+    <div
+      className="pointer-events-none fixed inset-x-0 top-0 z-[120] mx-auto flex max-w-md flex-col gap-2 px-4 pt-safe"
+      aria-live="polite"
+    >
+      {toasts.map((item) => (
+        <ToastView key={item.id} item={item} />
       ))}
     </div>
   );
-
-  return { showToast, ToastContainer };
 }
+
+// Legacy: screens still render <ToastContainer />. The global <Toaster /> now does the work,
+// so this is a stable no-op component (no remounts, toasts survive navigation).
+function ToastContainer() {
+  return null;
+}
+
+/** Hook API kept identical to the previous implementation. */
+export function useToast() {
+  const push = useToastStore((s) => s.push);
+  return { showToast: push, ToastContainer };
+}
+
+export default ToastView;

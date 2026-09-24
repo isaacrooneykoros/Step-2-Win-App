@@ -1,20 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Send } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 import { challengesService } from '../../services/api';
 import { useToast } from '../ui/Toast';
 import type { ChatMessage } from '../../types';
 import { getStoredAccessToken, resolveWsBaseUrl } from '../../config/network';
+import { usePrefersReducedMotion } from '../../lib/motion';
+import { Skeleton } from './Skeleton';
+import { ChatBubble, ChatComposer, ChatSystemLine } from '../challenge-detail/ChatParts';
 
 interface ChallengeChatProps {
   challengeId: number;
 }
 
+/** REST + websocket-invalidation chat (legacy variant of GroupChat). */
 export function ChallengeChat({ challengeId }: ChallengeChatProps) {
   const [message, setMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const reduced = usePrefersReducedMotion();
 
   const { data: messages = [], isLoading } = useQuery({
     queryKey: ['challenges', challengeId, 'chat'],
@@ -30,7 +35,7 @@ export function ChallengeChat({ challengeId }: ChallengeChatProps) {
     },
     onError: (error: any) => {
       showToast({
-        message: error.response?.data?.error || 'Failed to send message',
+        message: error.response?.data?.error || 'Message not sent. Try again.',
         type: 'error',
       });
     },
@@ -50,10 +55,6 @@ export function ChallengeChat({ challengeId }: ChallengeChatProps) {
 
       websocket = new WebSocket(wsUrl);
 
-      websocket.onopen = () => {
-        console.log('Chat WebSocket connected');
-      };
-
       websocket.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.type === 'chat.message') {
@@ -63,10 +64,6 @@ export function ChallengeChat({ challengeId }: ChallengeChatProps) {
 
       websocket.onerror = (error) => {
         console.error('Chat WebSocket error:', error);
-      };
-
-      websocket.onclose = () => {
-        console.log('Chat WebSocket disconnected');
       };
     };
 
@@ -78,10 +75,9 @@ export function ChallengeChat({ challengeId }: ChallengeChatProps) {
     };
   }, [challengeId, queryClient]);
 
-  // Auto-scroll to bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'nearest' });
+  }, [messages, reduced]);
 
   const handleSend = () => {
     const trimmed = message.trim();
@@ -89,110 +85,46 @@ export function ChallengeChat({ challengeId }: ChallengeChatProps) {
     sendMutation.mutate(trimmed);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  };
-
-  if (isLoading) {
-    return (
-      <div className="card rounded-4xl p-5">
-        <div className="text-center text-text-muted">Loading chat...</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="card rounded-4xl p-5">
-      <h3 className="text-lg font-black text-text-primary mb-4 flex items-center gap-2">
-        💬 Group Chat
-      </h3>
+    <section className="flex flex-col overflow-hidden rounded-card border border-border-light bg-bg-card shadow-card">
+      <header className="border-b border-border-light px-4 py-3">
+        <h2 className="text-headline text-text-primary">Group chat</h2>
+      </header>
 
-      {/* Messages */}
-      <div className="mb-4 space-y-3 max-h-[400px] overflow-y-auto">
-        {messages.length === 0 ? (
-          <div className="text-center py-10 text-text-muted text-sm">
-            No messages yet. Start the conversation!
+      <div className="max-h-[400px] min-h-[200px] overflow-y-auto px-4 pb-3" role="log" aria-live="polite" aria-label="Chat messages">
+        {isLoading ? (
+          <div className="space-y-3 pt-3" aria-hidden>
+            <Skeleton className="h-9 w-2/3 rounded-2xl" />
+            <Skeleton className="ml-auto h-9 w-1/2 rounded-2xl" />
+            <Skeleton className="h-9 w-3/5 rounded-2xl" />
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center">
+            <span className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-bg-input text-text-secondary" aria-hidden>
+              <MessageSquare size={20} />
+            </span>
+            <p className="text-callout font-medium text-text-primary">No messages yet</p>
           </div>
         ) : (
-          messages.map((msg: ChatMessage) => {
-            const isMe = msg.is_mine;
-            const isSystem = msg.is_system;
-
-            if (isSystem) {
-              return (
-                <div key={msg.id} className="text-center">
-                  <span className="text-xs px-3 py-1.5 rounded-full font-semibold bg-tint-blue text-accent-blue">
-                    {msg.content}
-                  </span>
-                </div>
-              );
-            }
-
+          messages.map((msg: ChatMessage, i: number) => {
+            if (msg.is_system) return <ChatSystemLine key={msg.id} content={msg.content} />;
+            const prev = messages[i - 1];
             return (
-              <div
+              <ChatBubble
                 key={msg.id}
-                className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[75%] rounded-2xl px-4 py-2 ${
-                    isMe
-                      ? 'bg-accent-blue text-white'
-                      : 'bg-bg-input text-text-primary'
-                  }`}
-                >
-                  {!isMe && (
-                    <div className="text-xs font-bold mb-1 opacity-70">
-                      {msg.sender}
-                    </div>
-                  )}
-                  <div className="text-sm whitespace-pre-wrap break-words">
-                    {msg.content}
-                  </div>
-                  <div
-                    className={`text-[10px] mt-1 ${
-                      isMe ? 'text-white/60' : 'text-text-muted'
-                    }`}
-                  >
-                    {formatTime(msg.created_at)}
-                  </div>
-                </div>
-              </div>
+                sender={msg.sender}
+                content={msg.content}
+                createdAt={msg.created_at}
+                mine={msg.is_mine}
+                firstInRun={!prev || prev.is_system || prev.sender !== msg.sender}
+              />
             );
           })
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder="Type a message..."
-          className="input-field flex-1"
-          disabled={sendMutation.isPending}
-        />
-        <button
-          onClick={handleSend}
-          disabled={!message.trim() || sendMutation.isPending}
-          className="bg-accent-blue text-white px-4 py-2 rounded-2xl flex items-center justify-center disabled:opacity-50 hover:opacity-90 transition-opacity"
-        >
-          <Send size={20} />
-        </button>
-      </div>
-    </div>
+      <ChatComposer value={message} onChange={(e) => setMessage(e.target.value)} onSend={handleSend} sending={sendMutation.isPending} />
+    </section>
   );
 }

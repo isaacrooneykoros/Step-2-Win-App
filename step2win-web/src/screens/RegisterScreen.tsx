@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { UserPlus, Footprints, Mail } from 'lucide-react';
-import { useGoogleLogin } from '@react-oauth/google';
 import { authService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { googleClientIdHelpText, isGoogleClientIdConfigured } from '../config/googleAuth';
 import { resolveApiBaseUrl } from '../config/network';
 import Input from '../components/ui/Input';
+import { Button } from '../components/ui/Button';
+import { AuthLayout, FormError, PasswordField } from '../components/auth/AuthParts';
+import { SocialSignIn } from '../components/auth/SocialSignIn';
+import { LegalSheet, type LegalSlug } from '../components/auth/LegalSheet';
 import { useToast } from '../components/ui/Toast';
 
 export default function RegisterScreen() {
@@ -23,6 +24,8 @@ export default function RegisterScreen() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [socialBusy, setSocialBusy] = useState(false);
+  const [legalDoc, setLegalDoc] = useState<LegalSlug | null>(null);
 
   const getFieldError = (value: unknown): string => {
     if (Array.isArray(value)) {
@@ -32,10 +35,10 @@ export default function RegisterScreen() {
   };
 
   const getPasswordStrength = (password: string) => {
-    if (password.length === 0) return { strength: 0, label: '' };
-    if (password.length < 6) return { strength: 33, label: 'Weak', color: 'bg-accent-red' };
-    if (password.length < 10) return { strength: 66, label: 'Medium', color: 'bg-accent-yellow' };
-    return { strength: 100, label: 'Strong', color: 'bg-accent-green' };
+    if (password.length === 0) return { level: 0, label: '', color: 'bg-bg-input' };
+    if (password.length < 6) return { level: 1, label: 'Weak', color: 'bg-danger' };
+    if (password.length < 10) return { level: 2, label: 'Fair', color: 'bg-warning' };
+    return { level: 3, label: 'Strong', color: 'bg-success' };
   };
 
   const passwordStrength = getPasswordStrength(formData.password);
@@ -87,176 +90,135 @@ export default function RegisterScreen() {
     }
   };
 
-  const handleGoogleSignUp = useGoogleLogin({
-    onSuccess: async (codeResponse) => {
-      setErrors({});
-      setIsLoading(true);
-      try {
-        const response = await authService.googleSignIn(codeResponse.access_token);
-        await setAuth(response.user, response.access, response.refresh);
-        navigate('/');
-      } catch (err: any) {
-        setErrors({ form: err.response?.data?.error || 'Google sign up failed. Please try again.' });
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    onError: () => {
-      setErrors({ form: 'Google sign up failed. Please try again.' });
-    },
-    flow: 'implicit',
-  });
-
   return (
-    <div className="min-h-screen bg-bg-page flex flex-col overflow-hidden relative">
-      <div className="absolute inset-x-0 top-0 h-56" style={{ background: 'radial-gradient(circle at 50% 0%, rgba(167,139,250,0.12), transparent 65%)' }} />
-      {/* Top section with branding */}
-      <div className="flex flex-col items-center justify-center px-6 pt-12 pb-8 flex-shrink-0 relative z-10">
-        <div 
-          className="w-20 h-20 rounded-[1.75rem] bg-gradient-to-br from-accent-blue to-accent-purple flex items-center justify-center mb-4"
-          style={{ boxShadow: '0 12px 30px rgba(79,156,249,0.28)' }}
-        >
-          <Footprints size={36} className="text-white" />
-        </div>
-        <h1 className="screen-title text-text-primary text-4xl mb-1">Join Step2Win</h1>
-        <p className="text-text-secondary text-sm tracking-wide">Start your fitness journey today</p>
-      </div>
+    <AuthLayout
+      title="Create your account"
+      subtitle="Track verified steps, join challenges and build a daily habit."
+      footer={
+        <p className="text-center text-callout text-text-secondary">
+          Already have an account?{' '}
+          <Link to="/login" className="inline-flex min-h-touch items-center font-semibold text-brand hover:underline">
+            Sign in
+          </Link>
+        </p>
+      }
+    >
+      <FormError message={errors.form} />
 
-      {/* Scrollable form section */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 pb-6 relative z-10">
-        {/* Form card */}
-        <div className="card p-6 sm:p-7 min-h-fit rounded-[1.75rem]">
-        <h2 className="text-text-primary text-2xl font-bold mb-6">Create Account</h2>
+      <form onSubmit={handleSubmit}>
+        <Input
+          label="Username"
+          name="username"
+          type="text"
+          value={formData.username}
+          onChange={handleChange}
+          placeholder="Choose a username"
+          error={getFieldError(errors.username)}
+          required
+          autoComplete="username"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="next"
+        />
 
-        {errors.form && (
-          <div className="bg-tint-red border border-red-200 text-accent-red px-4 py-3 rounded-xl mb-6 text-sm">
-            {errors.form}
+        <Input
+          label="Email"
+          name="email"
+          type="email"
+          inputMode="email"
+          value={formData.email}
+          onChange={handleChange}
+          placeholder="you@example.com"
+          error={getFieldError(errors.email)}
+          required
+          autoComplete="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          enterKeyHint="next"
+        />
+
+        <Input
+          label="M-Pesa phone number"
+          name="phone_number"
+          type="tel"
+          inputMode="tel"
+          value={formData.phone_number}
+          onChange={handleChange}
+          placeholder="2547XXXXXXXX"
+          error={getFieldError(errors.phone_number)}
+          helperText="Used for deposits and withdrawals."
+          required
+          autoComplete="tel"
+          enterKeyHint="next"
+        />
+
+        <PasswordField
+          label="Password"
+          name="password"
+          value={formData.password}
+          onChange={handleChange}
+          placeholder="Create a password"
+          error={getFieldError(errors.password)}
+          required
+          autoComplete="new-password"
+          enterKeyHint="next"
+        />
+        {formData.password && (
+          <div className="-mt-2 mb-4" aria-live="polite">
+            <div className="flex gap-1" aria-hidden>
+              {[1, 2, 3].map((level) => (
+                <span
+                  key={level}
+                  className={`h-1 flex-1 rounded-full transition-colors duration-normal ${
+                    passwordStrength.level >= level ? passwordStrength.color : 'bg-bg-input'
+                  }`}
+                />
+              ))}
+            </div>
+            <p className="mt-1.5 text-caption text-text-muted">
+              Strength: <span className="font-semibold text-text-secondary">{passwordStrength.label}</span>
+            </p>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <Input
-            label="Username"
-            name="username"
-            type="text"
-            value={formData.username}
-            onChange={handleChange}
-            placeholder="Choose a username"
-            error={getFieldError(errors.username)}
-            required
-            autoComplete="username"
-          />
+        <PasswordField
+          label="Confirm password"
+          name="confirm_password"
+          value={formData.confirm_password}
+          onChange={handleChange}
+          placeholder="Re-enter your password"
+          error={getFieldError(errors.confirm_password)}
+          required
+          autoComplete="new-password"
+          enterKeyHint="done"
+        />
 
-          <Input
-            label="Email"
-            name="email"
-            type="email"
-            value={formData.email}
-            onChange={handleChange}
-            placeholder="your@email.com"
-            error={getFieldError(errors.email)}
-            required
-            autoComplete="email"
-          />
-
-          <Input
-            label="Phone Number (Required for withdrawals)"
-            name="phone_number"
-            type="tel"
-            value={formData.phone_number}
-            onChange={handleChange}
-            placeholder="254712345678"
-            error={getFieldError(errors.phone_number)}
-            required
-            autoComplete="tel"
-          />
-
-          <div>
-            <Input
-              label="Password"
-              name="password"
-              type="password"
-              value={formData.password}
-              onChange={handleChange}
-              placeholder="Create a strong password"
-              error={getFieldError(errors.password)}
-              required
-              autoComplete="new-password"
-            />
-            {formData.password && (
-              <div className="mt-3">
-                <div className="h-2 bg-bg-input rounded-full overflow-hidden">
-                  <div
-                    className={`h-full ${passwordStrength.color} transition-all duration-300`}
-                    style={{ width: `${passwordStrength.strength}%` }}
-                  />
-                </div>
-                <p className="text-xs text-text-muted mt-2">
-                  Password strength: <span className="font-semibold">{passwordStrength.label}</span>
-                </p>
-              </div>
-            )}
-          </div>
-
-          <Input
-            label="Confirm Password"
-            name="confirm_password"
-            type="password"
-            value={formData.confirm_password}
-            onChange={handleChange}
-            placeholder="Confirm your password"
-            error={getFieldError(errors.confirm_password)}
-            required
-            autoComplete="new-password"
-          />
-
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-8 flex items-center justify-center gap-2 transition-all duration-200 hover:scale-105 active:scale-95"
-            style={{ background: 'linear-gradient(135deg, #4F9CF9, #A78BFA)', boxShadow: '0 8px 20px rgba(79,156,249,0.28)' }}
-          >
-            {isLoading ? (
-              <span>Creating account...</span>
-            ) : (
-              <>
-                <UserPlus size={18} />
-                Create Account
-              </>
-            )}
+        <p className="mb-5 text-caption text-text-muted">
+          By creating an account you agree to our{' '}
+          <button type="button" onClick={() => setLegalDoc('terms-and-conditions')} className="font-semibold text-text-secondary underline underline-offset-2 hover:text-text-primary">
+            Terms
+          </button>{' '}
+          and{' '}
+          <button type="button" onClick={() => setLegalDoc('privacy-policy')} className="font-semibold text-text-secondary underline underline-offset-2 hover:text-text-primary">
+            Privacy Policy
           </button>
-        </form>
-
-        <div className="flex items-center gap-2 my-8">
-          <div className="flex-1 h-px bg-bg-input"></div>
-          <span className="text-text-muted text-xs">or</span>
-          <div className="flex-1 h-px bg-bg-input"></div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => {
-            if (!isGoogleClientIdConfigured) {
-              setErrors({ form: googleClientIdHelpText });
-              return;
-            }
-            handleGoogleSignUp();
-          }}
-          disabled={isLoading || !isGoogleClientIdConfigured}
-          className="w-full py-4 rounded-2xl text-text-primary text-sm font-bold border border-bg-input bg-bg-card flex items-center justify-center gap-3 transition-all duration-200 hover:bg-bg-page active:scale-95"
-        >
-          <Mail size={18} />
-          Continue with Gmail
-        </button>
-
-        <p className="text-center text-text-muted text-sm mt-8">
-          Already have an account?{' '}
-          <Link to="/login" className="text-accent-blue font-semibold hover:opacity-80 transition-opacity">
-            Login
-          </Link>
+          . Challenge entries are contributions to a shared pool; payouts depend on qualifying.
         </p>
-        </div>
-      </div>
-    </div>
+
+        <Button type="submit" size="lg" fullWidth isLoading={isLoading} disabled={socialBusy} loadingText="Creating account">
+          Create account
+        </Button>
+      </form>
+
+      <SocialSignIn
+        mode="register"
+        disabled={isLoading}
+        onBusyChange={setSocialBusy}
+        onError={(message) => setErrors(message ? { form: message } : {})}
+      />
+
+      <LegalSheet slug={legalDoc} onClose={() => setLegalDoc(null)} />
+    </AuthLayout>
   );
 }

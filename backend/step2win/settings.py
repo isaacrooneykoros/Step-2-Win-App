@@ -115,6 +115,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.admin_api.platform.MaintenanceModeMiddleware",
     "axes.middleware.AxesMiddleware",
     "apps.steps.middleware.HMACSignatureMiddleware",
     "step2win.middleware.UserIsolationAuditMiddleware",
@@ -275,6 +276,7 @@ REST_FRAMEWORK = {
         "login": "5/minute",
         "admin_login": "3/minute",
         "register": "3/minute",
+        "social_auth": "10/minute",
         "password_reset": "3/hour",
         # Financial endpoints
         "deposit": "5/minute",
@@ -426,6 +428,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.users.tasks.cleanup_inactive_sessions",
         "schedule": crontab(hour=3, minute=0),  # 3AM every night
     },
+    "escalate-overdue-support-tickets": {
+        "task": "apps.admin_api.tasks.escalate_overdue_support_tickets",
+        "schedule": crontab(minute="*/15"),  # every 15 minutes
+    },
 }
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
@@ -517,6 +523,18 @@ if ENABLE_DEFENDER:
     DEFENDER_REDIS_URL = os.getenv("REDIS_URL", "")
 
 AUTH_USER_MODEL = "users.User"
+
+# ── Sign in with Google / Apple ──────────────────────────────────────────────
+# Comma-separated OAuth client ids whose ID tokens we accept (the token's "aud").
+# Empty = provider disabled; the endpoint answers 503 "not configured".
+# Google: Web client id (also used by Android as serverClientId) + iOS client id.
+GOOGLE_OAUTH_CLIENT_IDS = [
+    c.strip() for c in os.getenv("GOOGLE_OAUTH_CLIENT_IDS", "").split(",") if c.strip()
+]
+# Apple: iOS bundle id (com.step2win.app) + the web Services ID.
+APPLE_CLIENT_IDS = [
+    c.strip() for c in os.getenv("APPLE_CLIENT_IDS", "").split(",") if c.strip()
+]
 
 # IntaSend Configuration
 # Get your API keys from https://payment.intasend.com (live) or https://sandbox.intasend.com (test)

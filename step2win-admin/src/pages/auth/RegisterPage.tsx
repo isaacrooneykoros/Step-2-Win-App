@@ -54,19 +54,19 @@ function getPasswordRules(password: string): PasswordRule[] {
 
 function getPasswordStrength(password: string): { label: string; color: string; width: string } {
   if (password.length === 0) {
-    return { label: '', color: '#21263A', width: '0%' };
+    return { label: '', color: 'var(--border)', width: '0%' };
   }
   const passedRules = getPasswordRules(password).filter((rule) => rule.passed).length;
   if (passedRules <= 1) {
-    return { label: 'Weak', color: '#F06060', width: '25%' };
+    return { label: 'Weak', color: 'var(--danger)', width: '25%' };
   }
   if (passedRules === 2) {
-    return { label: 'Fair', color: '#F5A623', width: '50%' };
+    return { label: 'Fair', color: 'var(--warning)', width: '50%' };
   }
   if (passedRules === 3) {
-    return { label: 'Good', color: '#4F9CF9', width: '75%' };
+    return { label: 'Good', color: 'var(--info)', width: '75%' };
   }
-  return { label: 'Strong', color: '#22D3A0', width: '100%' };
+  return { label: 'Strong', color: 'var(--success)', width: '100%' };
 }
 
 function getApiFieldMessage(value: string[] | string | undefined): string | undefined {
@@ -233,141 +233,125 @@ export default function RegisterPage() {
 
   return (
     <AuthLayout mode="register">
-      <div
-        className="mb-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold"
-        style={{
-          background: 'rgba(34,211,160,0.12)',
-          border: '1px solid rgba(34,211,160,0.22)',
-          color: '#22D3A0',
-        }}>
-        <ShieldCheck size={14} />
+      <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-brand-text">
+        <ShieldCheck size={14} aria-hidden />
         First admin setup
-      </div>
-
-      <h1
-        className="mb-2 text-3xl font-extrabold leading-tight sm:text-[34px]"
-        style={{ fontFamily: 'Syne, sans-serif', color: '#F0F2F8', letterSpacing: 0 }}>
-        Secure admin access
-      </h1>
-      <p className="mb-7 text-sm leading-relaxed" style={{ color: '#8B93AD' }}>
-        Create the first Step2Win operator account with a verified setup code.
+      </p>
+      <h1 className="text-lg font-semibold text-ink-primary">Create an admin account</h1>
+      <p className="mb-5 mt-1 text-sm text-ink-secondary">
+        Requires the one-time registration code issued by a superuser.
       </p>
 
       {errors.general && (
         <div
-          className="mb-5 flex items-start gap-2.5 rounded-xl px-4 py-3 text-sm"
-          style={{
-            background: 'rgba(240,96,96,0.1)',
-            border: '1px solid rgba(240,96,96,0.2)',
-            color: '#F06060',
-          }}>
-          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          role="alert"
+          className="mb-4 flex items-start gap-2 rounded-md border border-danger-line bg-danger-soft px-3 py-2.5 text-sm text-danger">
+          <AlertCircle size={15} className="mt-0.5 shrink-0" aria-hidden />
           <span>{errors.general}</span>
         </div>
       )}
 
       <form onSubmit={handleSubmit} noValidate>
         <AuthInput
+          label="Username"
           type="text"
-          placeholder="Username"
           autoComplete="username"
           autoFocus
           value={form.username}
           onChange={updateField('username')}
           error={errors.username}
-          icon={<User size={15} color="#7B82A0" />}
+          icon={<User size={15} />}
         />
 
         <AuthInput
+          label="Email"
           type="email"
-          placeholder="Email address"
           autoComplete="email"
           value={form.email}
           onChange={updateField('email')}
           error={errors.email}
-          icon={<Mail size={15} color="#7B82A0" />}
+          icon={<Mail size={15} />}
         />
 
-        <div className="relative">
-          <AuthInput
-            type={show ? 'text' : 'password'}
-            placeholder="Create a strong password"
-            autoComplete="new-password"
-            value={form.password}
-            onChange={updateField('password')}
-            error={errors.password}
-            icon={<Lock size={15} color="#7B82A0" />}
-          />
-          <button
-            type="button"
-            onClick={() => setShow((value) => !value)}
-            className="absolute right-3 top-2.5 flex h-8 w-8 items-center justify-center rounded-lg transition-colors"
-            style={{ color: '#7B82A0' }}
-            aria-label={show ? 'Hide password' : 'Show password'}
-            title={show ? 'Hide password' : 'Show password'}>
-            {show ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
-        </div>
+        <AuthInput
+          label="Password"
+          type={show ? 'text' : 'password'}
+          autoComplete="new-password"
+          value={form.password}
+          onChange={updateField('password')}
+          error={errors.password}
+          icon={<Lock size={15} />}
+          rightSlot={
+            <button
+              type="button"
+              onClick={() => setShow((value) => !value)}
+              aria-label={show ? 'Hide passwords' : 'Show passwords'}
+              aria-pressed={show}
+              className="flex h-8 items-center gap-1 rounded px-2 text-xs font-medium text-ink-secondary hover:bg-surface-elevated hover:text-ink-primary">
+              {show ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
+              {show ? 'Hide' : 'Show'}
+            </button>
+          }
+        />
 
         {form.password.length > 0 && (
-          <div className="-mt-2 mb-4">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-[11px] font-semibold" style={{ color: '#7B82A0' }}>
-                Password strength
-              </span>
-              <span className="text-[11px] font-semibold" style={{ color: strength.color }}>
+          <div className="-mt-2 mb-4" aria-live="polite">
+            <div className="mb-1.5 flex items-center justify-between text-xs">
+              <span className="text-ink-muted">Password strength</span>
+              <span className="font-medium" style={{ color: strength.color }}>
                 {strength.label}
               </span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full" style={{ background: '#21263A' }}>
+            <div className="h-1 overflow-hidden rounded-full bg-surface-elevated">
               <div
                 className="h-full rounded-full transition-all duration-300"
                 style={{ width: strength.width, background: strength.color }}
               />
             </div>
-            <div className="mt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+            <ul className="mt-2.5 grid grid-cols-1 gap-1 sm:grid-cols-2">
               {passwordRules.map((rule) => (
-                <div
+                <li
                   key={rule.label}
-                  className="flex items-center gap-1.5 text-[11px]"
-                  style={{ color: rule.passed ? '#22D3A0' : '#596077' }}>
-                  {rule.passed ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                  className={`flex items-center gap-1.5 text-xs ${rule.passed ? 'text-success' : 'text-ink-muted'}`}>
+                  {rule.passed ? <CheckCircle2 size={12} aria-hidden /> : <XCircle size={12} aria-hidden />}
                   {rule.label}
-                </div>
+                  <span className="sr-only">{rule.passed ? '(met)' : '(not met)'}</span>
+                </li>
               ))}
-            </div>
+            </ul>
           </div>
         )}
 
         <AuthInput
+          label="Confirm password"
           type={show ? 'text' : 'password'}
-          placeholder="Confirm password"
           autoComplete="new-password"
           value={form.confirm_password}
           onChange={updateField('confirm_password')}
           error={errors.confirm_password}
-          icon={<Lock size={15} color="#7B82A0" />}
+          icon={<Lock size={15} />}
         />
 
         <AuthInput
+          label="Registration code"
           type="text"
-          placeholder="Admin registration code"
           autoComplete="one-time-code"
           value={form.admin_code}
           onChange={updateField('admin_code')}
           error={errors.admin_code}
-          icon={<KeyRound size={15} color="#7B82A0" />}
+          icon={<KeyRound size={15} />}
           hint="One-time setup only. The code is never stored in the browser."
+          className="mono"
         />
 
-        <AuthButton type="submit" loading={registerMutation.isPending}>
-          {registerMutation.isPending ? 'Creating secure account...' : 'Create Admin Account'}
+        <AuthButton type="submit" loading={registerMutation.isPending} className="mt-1">
+          {registerMutation.isPending ? 'Creating account…' : 'Create admin account'}
         </AuthButton>
       </form>
 
-      <p className="mt-5 text-center text-sm" style={{ color: '#7B82A0' }}>
+      <p className="mt-5 text-center text-sm text-ink-secondary">
         Already have an account?{' '}
-        <Link to="/login" className="font-semibold" style={{ color: '#7C6FF7' }}>
+        <Link to="/login" className="font-medium text-brand-text hover:underline">
           Sign in
         </Link>
       </p>

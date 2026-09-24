@@ -1,142 +1,372 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { LifeBuoy, MessageCircle, Plus, Send, User, Clock } from 'lucide-react';
+import { CheckCircle2, ChevronRight, LifeBuoy, MessageSquarePlus, RotateCcw, Send } from 'lucide-react';
 import { Preferences } from '@capacitor/preferences';
 import { supportService } from '../services/api';
-import { useToast } from '../components/ui/Toast';
-import { BaseModal } from '../components/ui/BaseModal';
-import type { SupportCategory, SupportPriority, SupportStatus, SupportTicket } from '../types';
 import { resolveWsBaseUrl } from '../config/network';
+import type { SupportCategory, SupportPriority, SupportStatus, SupportTicket, SupportTicketMessage } from '../types';
+import { formatDateTime, formatRelativeTime } from '../lib/format';
+import { ScreenHeader } from '../components/ui/ScreenHeader';
+import { ListGroup } from '../components/ui/ListRow';
+import { IconTile, Pill, type Tone } from '../components/ui/Pill';
+import Button from '../components/ui/Button';
+import Input, { TextArea } from '../components/ui/Input';
+import { Sheet } from '../components/ui/Sheet';
+import { Segmented } from '../components/ui/Segmented';
+import { Skeleton } from '../components/ui/Skeleton';
+import { EmptyState } from '../components/ui/EmptyState';
+import { LoadError } from '../components/ui/ErrorState';
+import { useToast } from '../components/ui/Toast';
+import { apiErrorMessage } from '../components/settings/apiError';
+import { usePollInterval } from '../hooks/useDataSaver';
 
 const LIMIT = 20;
+
+const STATUS: Record<SupportStatus, { label: string; tone: Tone }> = {
+  open: { label: 'Open', tone: 'warning' },
+  in_progress: { label: 'In progress', tone: 'info' },
+  resolved: { label: 'Resolved', tone: 'success' },
+  closed: { label: 'Closed', tone: 'neutral' },
+};
+
+const PRIORITY: Record<SupportPriority, { label: string; tone: Tone }> = {
+  low: { label: 'Low', tone: 'neutral' },
+  medium: { label: 'Medium', tone: 'neutral' },
+  high: { label: 'High', tone: 'warning' },
+  urgent: { label: 'Urgent', tone: 'danger' },
+};
+
+const CATEGORIES: Array<{ value: SupportCategory; label: string }> = [
+  { value: 'general', label: 'General' },
+  { value: 'account', label: 'Account' },
+  { value: 'challenge', label: 'Challenge' },
+  { value: 'payment', label: 'Payment' },
+  { value: 'technical', label: 'Technical' },
+  { value: 'other', label: 'Other' },
+];
+
+const categoryLabel = (c: SupportCategory) => CATEGORIES.find((x) => x.value === c)?.label ?? c;
+
+const EMPTY_FORM = { subject: '', category: 'general' as SupportCategory, priority: 'medium' as SupportPriority, message: '' };
 
 export default function SupportScreen() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-
-  const [statusFilter, setStatusFilter] = useState<'' | SupportStatus>('');
   const [offset, setOffset] = useState(0);
-
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({
-    subject: '',
-    category: 'general' as SupportCategory,
-    priority: 'medium' as SupportPriority,
-    message: '',
-  });
-
+  const [showCreate, setShowCreate] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
-  const [replyText, setReplyText] = useState('');
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
+  const ticketsPoll = usePollInterval(10_000);
   const ticketsQuery = useQuery({
-    queryKey: ['support-tickets', statusFilter, offset],
-    queryFn: () => supportService.getMyTickets({ status: statusFilter || undefined, limit: LIMIT, offset }),
-    refetchInterval: 10000,
+    queryKey: ['support-tickets', '', offset],
+    queryFn: () => supportService.getMyTickets({ limit: LIMIT, offset }),
+    refetchInterval: ticketsPoll,
   });
 
-  const detailQuery = useQuery({
-    queryKey: ['support-ticket-detail', selectedTicketId],
-    queryFn: () => supportService.getTicketDetail(selectedTicketId as number),
-    enabled: selectedTicketId !== null,
-    refetchInterval: selectedTicketId ? 5000 : false,
-  });
-
-  const createMutation = useMutation({
-    mutationFn: () => supportService.createTicket(createForm),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['support-tickets'] });
-      setShowCreateModal(false);
-      setCreateForm({ subject: '', category: 'general', priority: 'medium', message: '' });
-      showToast({ message: 'Support ticket submitted successfully', type: 'success' });
-    },
-    onError: (error: any) => {
-      showToast({ message: error.response?.data?.error || 'Failed to submit ticket', type: 'error' });
-    },
-  });
-
-  const replyMutation = useMutation({
-    mutationFn: () => supportService.replyToTicket(selectedTicketId as number, replyText.trim()),
-    onSuccess: () => {
-      setReplyText('');
-      queryClient.invalidateQueries({ queryKey: ['support-ticket-detail', selectedTicketId] });
-      queryClient.invalidateQueries({ queryKey: ['support-tickets'] });
-      showToast({ message: 'Reply sent successfully', type: 'success' });
-    },
-    onError: (error: any) => {
-      showToast({ message: error.response?.data?.error || 'Failed to send reply', type: 'error' });
-    },
-  });
-
-  const updateStatusMutation = useMutation({
-    mutationFn: (newStatus: SupportStatus) => supportService.updateTicketStatus(selectedTicketId as number, newStatus),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['support-ticket-detail', selectedTicketId] });
-      queryClient.invalidateQueries({ queryKey: ['support-tickets'] });
-      showToast({ message: 'Ticket status updated successfully', type: 'success' });
-    },
-    onError: (error: any) => {
-      showToast({ message: error.response?.data?.error || 'Failed to update ticket status', type: 'error' });
-    },
-  });
-
-  const tickets = ticketsQuery.data?.results || [];
-  const total = ticketsQuery.data?.total || 0;
+  const tickets = ticketsQuery.data?.results ?? [];
+  const total = ticketsQuery.data?.total ?? 0;
   const currentPage = Math.floor(offset / LIMIT) + 1;
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
+  const openTickets = tickets.filter((t) => t.status === 'open' || t.status === 'in_progress');
+  const doneTickets = tickets.filter((t) => t.status === 'resolved' || t.status === 'closed');
 
-  const selectedTicket = detailQuery.data?.ticket;
-  const selectedMessages = detailQuery.data?.messages || [];
+  const openTicket = (id: number) => {
+    setSelectedTicketId(id);
+    setDetailOpen(true);
+  };
 
+  return (
+    <div className="pb-nav">
+      <ScreenHeader title="Support" back />
+
+      <div className="mx-auto w-full max-w-2xl space-y-6 px-5 pb-8 pt-2">
+        <section className="rounded-card border border-border-light bg-bg-card p-5 shadow-card">
+          <div className="flex items-start gap-3">
+            <IconTile icon={LifeBuoy} tone="brand" size="lg" />
+            <div className="min-w-0 flex-1">
+              <h2 className="text-headline text-text-primary">How can we help?</h2>
+              <p className="mt-1 text-callout text-text-secondary">
+                Questions about a challenge, a payment or your account? Send us a message — our team replies right here in the app.
+              </p>
+            </div>
+          </div>
+          <Button className="mt-4" fullWidth leftIcon={<MessageSquarePlus size={18} aria-hidden />} onClick={() => setShowCreate(true)}>
+            Contact support
+          </Button>
+        </section>
+
+        {ticketsQuery.isLoading ? (
+          <div aria-busy="true" aria-label="Loading tickets">
+            <Skeleton className="mb-2 h-3 w-24 rounded" />
+            <div className="overflow-hidden rounded-card border border-border-light bg-bg-card">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="space-y-2 border-b border-border-light px-4 py-4 last:border-b-0">
+                  <Skeleton className="h-4 w-2/3 rounded" />
+                  <Skeleton className="h-3 w-1/3 rounded" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : ticketsQuery.isError ? (
+          <LoadError resource="your tickets" onRetry={() => ticketsQuery.refetch()} isRetrying={ticketsQuery.isFetching} />
+        ) : tickets.length === 0 ? (
+          <EmptyState
+            icon={MessageSquarePlus}
+            title="No conversations yet"
+            description="When you contact support, your messages and our replies will appear here."
+          />
+        ) : (
+          <>
+            {openTickets.length > 0 && <TicketGroup title="Open" tickets={openTickets} onOpen={openTicket} />}
+            {doneTickets.length > 0 && <TicketGroup title="Resolved" tickets={doneTickets} onOpen={openTicket} />}
+            {totalPages > 1 && (
+              <nav className="flex items-center justify-between gap-3" aria-label="Ticket pages">
+                <Button variant="secondary" size="sm" className="!h-11" onClick={() => setOffset(Math.max(0, offset - LIMIT))} disabled={offset === 0}>
+                  Previous
+                </Button>
+                <span className="text-caption text-text-muted">
+                  Page <span className="num">{currentPage}</span> of <span className="num">{totalPages}</span>
+                </span>
+                <Button variant="secondary" size="sm" className="!h-11" onClick={() => setOffset(offset + LIMIT)} disabled={currentPage >= totalPages}>
+                  Next
+                </Button>
+              </nav>
+            )}
+          </>
+        )}
+      </div>
+
+      <CreateTicketSheet
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={() => {
+          queryClient.invalidateQueries({ queryKey: ['support-tickets'] });
+          showToast({ message: 'Message sent. We’ll reply here soon.', type: 'success' });
+        }}
+      />
+
+      <TicketThreadSheet ticketId={selectedTicketId} open={detailOpen} onClose={() => setDetailOpen(false)} />
+    </div>
+  );
+}
+
+function TicketGroup({ title, tickets, onOpen }: { title: string; tickets: SupportTicket[]; onOpen: (id: number) => void }) {
+  return (
+    <ListGroup title={title}>
+      {tickets.map((ticket) => {
+        const status = STATUS[ticket.status];
+        return (
+          <button
+            key={ticket.id}
+            type="button"
+            onClick={() => onOpen(ticket.id)}
+            className="flex min-h-[64px] w-full items-center gap-3 px-4 py-3 text-left hover:bg-bg-input/60 active:!scale-100 active:bg-bg-input"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-body font-medium text-text-primary">{ticket.subject}</p>
+              <p className="mt-0.5 truncate text-caption text-text-muted">
+                #{ticket.id} · {categoryLabel(ticket.category)} · <span className="num">{ticket.message_count}</span>{' '}
+                {ticket.message_count === 1 ? 'message' : 'messages'}
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <Pill tone={status.tone}>{status.label}</Pill>
+              <span className="text-micro text-text-muted">{formatRelativeTime(ticket.updated_at)}</span>
+            </div>
+            <ChevronRight size={18} className="shrink-0 text-text-muted" aria-hidden />
+          </button>
+        );
+      })}
+    </ListGroup>
+  );
+}
+
+/* ───────────── Create ticket ───────────── */
+
+function CreateTicketSheet({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [errors, setErrors] = useState<{ subject?: string; message?: string; form?: string }>({});
+  const [sent, setSent] = useState(false);
+
+  const createMutation = useMutation({
+    mutationFn: () => supportService.createTicket({ ...form, subject: form.subject.trim(), message: form.message.trim() }),
+    onSuccess: () => {
+      setSent(true);
+      onCreated();
+      window.setTimeout(() => {
+        setSent(false);
+        setForm(EMPTY_FORM);
+        onClose();
+      }, 800);
+    },
+    onError: (error: unknown) => setErrors({ form: apiErrorMessage(error, 'We couldn’t send your message. Please try again.') }),
+  });
+
+  const submit = () => {
+    const next: typeof errors = {};
+    if (!form.subject.trim()) next.subject = 'Add a short subject.';
+    if (!form.message.trim()) next.message = 'Tell us what’s happening.';
+    setErrors(next);
+    if (Object.keys(next).length === 0) createMutation.mutate();
+  };
+
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      dismissible={!createMutation.isPending}
+      title="Contact support"
+      description="Include dates, amounts or challenge names — it helps us sort it out faster."
+      footer={
+        <div className="flex gap-3 pb-3">
+          <Button variant="secondary" fullWidth onClick={onClose} disabled={createMutation.isPending}>
+            Cancel
+          </Button>
+          <Button fullWidth onClick={submit} isLoading={createMutation.isPending} loadingText="Sending" isSuccess={sent} successText="Sent" leftIcon={<Send size={16} aria-hidden />}>
+            Send
+          </Button>
+        </div>
+      }
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        noValidate
+      >
+        <Input
+          label="Subject"
+          value={form.subject}
+          onChange={(e) => setForm((p) => ({ ...p, subject: e.target.value }))}
+          placeholder="e.g. Withdrawal still pending"
+          error={errors.subject}
+          maxLength={200}
+        />
+
+        <fieldset className="mb-4">
+          <legend className="label">Topic</legend>
+          <div className="flex flex-wrap gap-2">
+            {CATEGORIES.map((c) => {
+              const active = form.category === c.value;
+              return (
+                <button
+                  key={c.value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setForm((p) => ({ ...p, category: c.value }))}
+                  className={[
+                    'h-11 rounded-full border px-4 text-callout font-semibold',
+                    active ? 'border-brand bg-brand-soft text-brand' : 'border-border bg-bg-card text-text-secondary hover:bg-bg-input',
+                  ].join(' ')}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+
+        <div className="mb-4">
+          <p className="label">
+            How urgent is it?
+          </p>
+          <Segmented<SupportPriority>
+            label="Priority"
+            value={form.priority}
+            onChange={(priority) => setForm((p) => ({ ...p, priority }))}
+            options={(Object.keys(PRIORITY) as SupportPriority[]).map((value) => ({ value, label: PRIORITY[value].label }))}
+          />
+        </div>
+
+        <TextArea
+          label="Message"
+          rows={5}
+          value={form.message}
+          onChange={(e) => setForm((p) => ({ ...p, message: e.target.value }))}
+          placeholder="Describe the problem and what you expected to happen."
+          error={errors.message}
+        />
+        {errors.form && (
+          <p className="rounded-control bg-danger-soft px-3 py-2 text-callout text-danger" role="alert">
+            {errors.form}
+          </p>
+        )}
+      </form>
+    </Sheet>
+  );
+}
+
+/* ───────────── Thread ───────────── */
+
+function TicketThreadSheet({ ticketId, open, onClose }: { ticketId: number | null; open: boolean; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const [replyText, setReplyText] = useState('');
+  const chatEndRef = useRef<HTMLLIElement | null>(null);
+
+  const threadPoll = usePollInterval(open && ticketId ? 5000 : false);
+  const detailQuery = useQuery({
+    queryKey: ['support-ticket-detail', ticketId],
+    queryFn: () => supportService.getTicketDetail(ticketId as number),
+    enabled: open && ticketId !== null,
+    refetchInterval: threadPoll,
+  });
+
+  const ticket = detailQuery.data?.ticket;
+  const messages = detailQuery.data?.messages ?? [];
+
+  const replyMutation = useMutation({
+    mutationFn: () => supportService.replyToTicket(ticketId as number, replyText.trim()),
+    onSuccess: () => {
+      setReplyText('');
+      queryClient.invalidateQueries({ queryKey: ['support-ticket-detail', ticketId] });
+      queryClient.invalidateQueries({ queryKey: ['support-tickets'] });
+    },
+    onError: (error: unknown) => showToast({ message: apiErrorMessage(error, 'Your reply didn’t send. Please try again.'), type: 'error' }),
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: (status: SupportStatus) => supportService.updateTicketStatus(ticketId as number, status),
+    onSuccess: (_d, status) => {
+      queryClient.invalidateQueries({ queryKey: ['support-ticket-detail', ticketId] });
+      queryClient.invalidateQueries({ queryKey: ['support-tickets'] });
+      showToast({ message: status === 'resolved' ? 'Marked as resolved.' : 'Conversation reopened.', type: 'success' });
+    },
+    onError: (error: unknown) => showToast({ message: apiErrorMessage(error, 'We couldn’t update this conversation.'), type: 'error' }),
+  });
+
+  // Keep the newest message in view.
   useEffect(() => {
-    if (selectedTicketId !== null) {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [selectedMessages, selectedTicketId]);
+    if (open) chatEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [messages.length, open]);
 
+  // Live updates while the thread is open.
   useEffect(() => {
-    if (!selectedTicketId) return;
-
+    if (!open || !ticketId) return;
     let socket: WebSocket | null = null;
     let cancelled = false;
 
-    const connectSocket = async () => {
+    const connect = async () => {
       const prefToken = (await Preferences.get({ key: 'access_token' })).value;
       const token = prefToken || localStorage.getItem('access_token');
       if (!token || cancelled) return;
-
-      const wsBase = resolveWsBaseUrl();
-      socket = new WebSocket(`${wsBase}/ws/support/tickets/${selectedTicketId}/?token=${encodeURIComponent(token)}`);
-      wsRef.current = socket;
-
+      socket = new WebSocket(`${resolveWsBaseUrl()}/ws/support/tickets/${ticketId}/?token=${encodeURIComponent(token)}`);
       socket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-
           if (data.type === 'support.message' && data.message) {
-            queryClient.setQueryData(['support-ticket-detail', selectedTicketId], (oldData: any) => {
-              if (!oldData) return oldData;
-              const exists = (oldData.messages || []).some((message: any) => message.id === data.message.id);
-              if (exists) return oldData;
-              return {
-                ...oldData,
-                messages: [...(oldData.messages || []), data.message],
-              };
+            queryClient.setQueryData(['support-ticket-detail', ticketId], (old: any) => {
+              if (!old) return old;
+              if ((old.messages || []).some((m: SupportTicketMessage) => m.id === data.message.id)) return old;
+              return { ...old, messages: [...(old.messages || []), data.message] };
             });
           }
-
           if (data.type === 'support.ticket' && data.ticket) {
-            queryClient.setQueryData(['support-ticket-detail', selectedTicketId], (oldData: any) => {
-              if (!oldData?.ticket) return oldData;
-              return {
-                ...oldData,
-                ticket: {
-                  ...oldData.ticket,
-                  ...data.ticket,
-                },
-              };
-            });
+            queryClient.setQueryData(['support-ticket-detail', ticketId], (old: any) =>
+              old?.ticket ? { ...old, ticket: { ...old.ticket, ...data.ticket } } : old,
+            );
             queryClient.invalidateQueries({ queryKey: ['support-tickets'] });
           }
         } catch {
@@ -144,354 +374,116 @@ export default function SupportScreen() {
         }
       };
     };
-
-    connectSocket();
-
+    void connect();
     return () => {
       cancelled = true;
       socket?.close();
-      wsRef.current = null;
     };
-  }, [queryClient, selectedTicketId]);
+  }, [open, queryClient, ticketId]);
 
-  const getStatusClass = (status: SupportStatus) => {
-    if (status === 'open') return 'bg-warning/20 text-warning border border-warning/30';
-    if (status === 'in_progress') return 'bg-accent-blue/20 text-accent-blue border border-accent-blue/30';
-    if (status === 'resolved') return 'bg-success/20 text-success border border-success/30';
-    return 'bg-text-muted/20 text-text-muted border border-border';
-  };
-
-  const getPriorityClass = (priority: SupportPriority) => {
-    if (priority === 'low') return 'bg-accent-blue/20 text-accent-blue border border-accent-blue/30';
-    if (priority === 'medium') return 'bg-warning/20 text-warning border border-warning/30';
-    if (priority === 'high') return 'bg-orange-100 text-orange-700 border border-orange-200';
-    return 'bg-error/20 text-error border border-error/30';
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  const handleCreateTicket = () => {
-    if (!createForm.subject.trim() || !createForm.message.trim()) {
-      showToast({ message: 'Subject and message are required', type: 'error' });
-      return;
-    }
-    createMutation.mutate();
-  };
-
-  const handleReply = () => {
-    if (!replyText.trim()) {
-      showToast({ message: 'Reply message is required', type: 'error' });
-      return;
-    }
+  const send = () => {
+    if (!replyText.trim() || replyMutation.isPending) return;
     replyMutation.mutate();
   };
 
-  const handleReplyKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      if (!replyMutation.isPending && replyText.trim()) {
-        handleReply();
-      }
+      send();
     }
   };
 
-  const handleMarkResolved = () => {
-    if (updateStatusMutation.isPending) return;
-    updateStatusMutation.mutate('resolved');
-  };
-
-  const handleReopenTicket = () => {
-    if (updateStatusMutation.isPending) return;
-    updateStatusMutation.mutate('in_progress');
-  };
+  const closed = ticket?.status === 'closed';
+  const status = ticket ? STATUS[ticket.status] : null;
 
   return (
-    <div className="screen-enter pb-nav bg-bg-page">
-      <div className="pt-safe px-4 pt-4 pb-3 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-text-primary flex items-center gap-2">
-            <LifeBuoy size={24} />
-            Support
-          </h1>
-          <p className="text-sm text-text-muted mt-1">Create and track your support tickets</p>
-        </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="btn-primary px-4 py-2.5 rounded-2xl text-sm flex items-center gap-2"
-        >
-          <Plus size={16} /> New
-        </button>
-      </div>
-
-      <div className="px-4 pb-4">
-        <div className="bg-bg-card rounded-2xl p-1.5 flex border border-border">
-          {[
-            { label: 'All', value: '' },
-            { label: 'Open', value: 'open' },
-            { label: 'In Progress', value: 'in_progress' },
-            { label: 'Resolved', value: 'resolved' },
-            { label: 'Closed', value: 'closed' },
-          ].map((item) => (
-            <button
-              key={item.label}
-              onClick={() => {
-                setStatusFilter(item.value as '' | SupportStatus);
-                setOffset(0);
-              }}
-              className={`flex-1 py-2 rounded-xl text-xs font-semibold ${
-                statusFilter === item.value ? 'bg-bg-elevated text-text-primary shadow-sm' : 'text-text-muted'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="px-4 pb-4">
-        {ticketsQuery.isLoading ? (
-          <div className="bg-bg-card rounded-3xl overflow-hidden shadow-sm border border-border">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="p-4 border-b border-border last:border-b-0">
-                <div className="skeleton h-5 rounded mb-2" />
-                <div className="skeleton h-4 rounded w-2/3" />
-              </div>
-            ))}
-          </div>
-        ) : tickets.length === 0 ? (
-          <div className="bg-bg-card rounded-3xl p-10 text-center shadow-sm border border-border">
-            <MessageCircle size={32} className="mx-auto text-text-muted mb-3" />
-            <p className="text-text-secondary text-sm">No support tickets found</p>
-          </div>
-        ) : (
-          <div className="bg-bg-card rounded-3xl overflow-hidden shadow-sm border border-border">
-            {tickets.map((ticket: SupportTicket, idx) => (
-              <button
-                key={ticket.id}
-                onClick={() => setSelectedTicketId(ticket.id)}
-                className={`w-full text-left p-4 ${idx < tickets.length - 1 ? 'border-b border-border' : ''}`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-text-primary font-semibold text-sm truncate">#{ticket.id} {ticket.subject}</p>
-                    <p className="text-text-muted text-xs mt-1 line-clamp-2">{ticket.message}</p>
-                    <div className="mt-2 flex items-center gap-2">
-                      <span className={`text-[11px] px-2 py-1 rounded-lg font-semibold ${getStatusClass(ticket.status)}`}>
-                        {ticket.status.replace('_', ' ')}
-                      </span>
-                      <span className={`text-[11px] px-2 py-1 rounded-lg font-semibold ${getPriorityClass(ticket.priority)}`}>
-                        {ticket.priority}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-text-muted text-xs">{formatDate(ticket.updated_at)}</p>
-                    <p className="text-text-muted text-xs mt-1">{ticket.message_count} msgs</p>
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {totalPages > 1 && (
-        <div className="px-4 pb-6 flex items-center justify-between">
-          <button
-            onClick={() => setOffset(Math.max(0, offset - LIMIT))}
-            disabled={offset === 0}
-            className="btn-secondary px-4 py-2 rounded-xl disabled:opacity-40"
-          >
-            Previous
-          </button>
-          <span className="text-xs text-text-muted">Page {currentPage} of {totalPages}</span>
-          <button
-            onClick={() => setOffset(offset + LIMIT)}
-            disabled={currentPage >= totalPages}
-            className="btn-secondary px-4 py-2 rounded-xl disabled:opacity-40"
-          >
-            Next
-          </button>
-        </div>
-      )}
-
-      <BaseModal open={showCreateModal} onClose={() => setShowCreateModal(false)}>
-        <h2 className="text-2xl font-black text-text-primary mb-2">New Support Ticket</h2>
-        <p className="text-sm text-text-muted mb-6">Tell us your issue and well respond in-app.</p>
-
-        <div className="space-y-4 mb-6">
-          <div>
-            <label className="block text-sm font-semibold text-text-secondary mb-2">Subject</label>
-            <input
-              type="text"
-              value={createForm.subject}
-              onChange={(e) => setCreateForm((prev) => ({ ...prev, subject: e.target.value }))}
-              className="input-field w-full"
-              placeholder="e.g. Withdrawal pending for too long"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-semibold text-text-secondary mb-2">Category</label>
-              <select
-                value={createForm.category}
-                onChange={(e) => setCreateForm((prev) => ({ ...prev, category: e.target.value as SupportCategory }))}
-                className="input-field w-full"
-              >
-                <option value="general">General</option>
-                <option value="account">Account</option>
-                <option value="challenge">Challenge</option>
-                <option value="payment">Payment</option>
-                <option value="technical">Technical</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-text-secondary mb-2">Priority</label>
-              <select
-                value={createForm.priority}
-                onChange={(e) => setCreateForm((prev) => ({ ...prev, priority: e.target.value as SupportPriority }))}
-                className="input-field w-full"
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-text-secondary mb-2">Message</label>
-            <textarea
-              rows={5}
-              value={createForm.message}
-              onChange={(e) => setCreateForm((prev) => ({ ...prev, message: e.target.value }))}
-              className="input-field w-full"
-              placeholder="Describe the issue with as much detail as possible"
-            />
-          </div>
-        </div>
-
-        <div className="flex gap-3">
-          <button
-            onClick={() => setShowCreateModal(false)}
-            className="flex-1 btn-secondary py-3 rounded-2xl"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleCreateTicket}
-            disabled={createMutation.isPending}
-            className="flex-1 btn-primary py-3 rounded-2xl disabled:opacity-40"
-          >
-            {createMutation.isPending ? 'Submitting...' : 'Submit Ticket'}
-          </button>
-        </div>
-      </BaseModal>
-
-      <BaseModal open={selectedTicketId !== null} onClose={() => setSelectedTicketId(null)}>
-        {detailQuery.isLoading || !selectedTicket ? (
-          <div className="py-8 text-center text-text-muted">Loading ticket</div>
-        ) : (
-          <>
-            <h2 className="text-xl font-black text-text-primary mb-2">#{selectedTicket.id} {selectedTicket.subject}</h2>
-            <div className="flex items-center gap-2 mb-4">
-              <span className={`text-[11px] px-2 py-1 rounded-lg font-semibold ${getStatusClass(selectedTicket.status)}`}>
-                {selectedTicket.status.replace('_', ' ')}
-              </span>
-              <span className={`text-[11px] px-2 py-1 rounded-lg font-semibold ${getPriorityClass(selectedTicket.priority)}`}>
-                {selectedTicket.priority}
-              </span>
-            </div>
-
-            {/* Status Action Buttons */}
-            {selectedTicket.status !== 'closed' && (
-              <div className="mb-4 pb-4 border-b border-border">
-                {selectedTicket.status === 'resolved' ? (
-                  <button
-                    onClick={handleReopenTicket}
-                    disabled={updateStatusMutation.isPending}
-                    className="w-full btn-secondary py-2.5 rounded-xl text-sm disabled:opacity-40"
-                  >
-                    {updateStatusMutation.isPending ? 'Updating...' : 'Reopen Ticket'}
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleMarkResolved}
-                    disabled={updateStatusMutation.isPending}
-                    className="w-full btn-primary py-2.5 rounded-xl text-sm disabled:opacity-40"
-                  >
-                    {updateStatusMutation.isPending ? 'Updating...' : 'Mark as Resolved'}
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div className="max-h-80 overflow-y-auto bg-bg-input rounded-2xl p-3 mb-4">
-              {selectedMessages.length === 0 ? (
-                <p className="text-text-muted text-sm">No messages yet.</p>
-              ) : (
-                <div className="space-y-3">
-                  {selectedMessages.map((message) => (
-                    <div key={message.id} className={`flex ${message.is_admin ? 'justify-start' : 'justify-end'}`}>
-                      <div className={`max-w-[85%] rounded-2xl p-3 ${message.is_admin ? 'bg-tint-blue' : 'bg-bg-elevated border border-border'}`}>
-                        <div className="flex items-center justify-between mb-1.5 gap-3">
-                          <span className="text-xs font-semibold text-text-secondary flex items-center gap-1.5">
-                            {message.is_admin ? <User size={13} /> : <Clock size={13} />}
-                            {message.is_admin ? 'Support' : 'You'}
-                          </span>
-                          <span className="text-[11px] text-text-muted">{formatDate(message.created_at)}</span>
-                        </div>
-                        <p className="text-sm text-text-primary whitespace-pre-wrap">{message.message}</p>
-                      </div>
-                    </div>
-                  ))}
-                  <div ref={chatEndRef} />
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-3">
+    <Sheet
+      open={open}
+      onClose={onClose}
+      size="lg"
+      title={ticket ? ticket.subject : 'Conversation'}
+      description={
+        ticket ? (
+          <span className="flex flex-wrap items-center gap-1.5">
+            {status && <Pill tone={status.tone}>{status.label}</Pill>}
+            <Pill tone={PRIORITY[ticket.priority].tone}>{`${PRIORITY[ticket.priority].label} priority`}</Pill>
+            <span className="text-caption text-text-muted">
+              #{ticket.id} · {categoryLabel(ticket.category)}
+            </span>
+          </span>
+        ) : undefined
+      }
+      footer={
+        ticket && !closed ? (
+          <div className="pb-3">
+            <div className="flex items-end gap-2">
+              <label htmlFor="support-reply" className="sr-only">
+                Reply
+              </label>
               <textarea
-                rows={3}
+                id="support-reply"
+                rows={1}
                 value={replyText}
                 onChange={(e) => setReplyText(e.target.value)}
-                onKeyDown={handleReplyKeyDown}
-                className="input-field w-full"
-                placeholder="Write a message... (Enter to send, Shift+Enter for new line)"
+                onKeyDown={onKeyDown}
+                placeholder="Write a reply…"
+                className="input-field max-h-32 min-h-[44px] flex-1 resize-none py-2.5"
               />
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setSelectedTicketId(null)}
-                  className="flex-1 btn-secondary py-3 rounded-2xl"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={handleReply}
-                  disabled={replyMutation.isPending || !replyText.trim()}
-                  className="flex-1 btn-primary py-3 rounded-2xl disabled:opacity-40 flex items-center justify-center gap-2"
-                >
-                  <Send size={16} />
-                  {replyMutation.isPending ? 'Sending...' : 'Send Reply'}
-                </button>
-              </div>
+              <Button onClick={send} isLoading={replyMutation.isPending} loadingText="" disabled={!replyText.trim()} aria-label="Send reply" className="!w-11 shrink-0 !px-0">
+                <Send size={18} aria-hidden />
+              </Button>
             </div>
-          </>
-        )}
-      </BaseModal>
-    </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-micro text-text-muted">Enter to send · Shift+Enter for a new line</p>
+              {ticket.status === 'resolved' ? (
+                <Button variant="ghost" size="sm" className="!h-11" leftIcon={<RotateCcw size={14} aria-hidden />} onClick={() => statusMutation.mutate('in_progress')} isLoading={statusMutation.isPending} loadingText="Updating">
+                  Reopen
+                </Button>
+              ) : (
+                <Button variant="ghost" size="sm" className="!h-11" leftIcon={<CheckCircle2 size={14} aria-hidden />} onClick={() => statusMutation.mutate('resolved')} isLoading={statusMutation.isPending} loadingText="Updating">
+                  Mark resolved
+                </Button>
+              )}
+            </div>
+          </div>
+        ) : ticket && closed ? (
+          <p className="pb-4 text-center text-caption text-text-muted">This conversation is closed. Contact support again if you still need help.</p>
+        ) : undefined
+      }
+    >
+      {detailQuery.isLoading || !ticket ? (
+        detailQuery.isError ? (
+          <LoadError resource="this conversation" onRetry={() => detailQuery.refetch()} isRetrying={detailQuery.isFetching} />
+        ) : (
+          <div className="space-y-3 py-2" aria-busy="true" aria-label="Loading conversation">
+            <Skeleton className="h-16 w-3/4 rounded-2xl" />
+            <Skeleton className="ml-auto h-12 w-2/3 rounded-2xl" />
+          </div>
+        )
+      ) : (
+        <ol className="space-y-3 py-1" aria-label="Messages">
+          {messages.length === 0 && <li className="py-6 text-center text-callout text-text-muted">No messages yet.</li>}
+          {messages.map((message) => (
+            <li key={message.id} className={`flex ${message.is_admin ? 'justify-start' : 'justify-end'}`}>
+              <div
+                className={[
+                  'max-w-[85%] rounded-2xl px-3.5 py-2.5',
+                  message.is_admin ? 'rounded-bl-md bg-bg-input text-text-primary' : 'rounded-br-md bg-brand text-brand-fg',
+                ].join(' ')}
+              >
+                <p className={`mb-0.5 text-micro font-semibold ${message.is_admin ? 'text-text-secondary' : 'text-brand-fg/80'}`}>
+                  {message.is_admin ? 'Step2Win support' : 'You'}
+                </p>
+                <p className="whitespace-pre-wrap break-words text-callout">{message.message}</p>
+                <p className={`mt-1 text-right text-micro ${message.is_admin ? 'text-text-muted' : 'text-brand-fg/70'}`}>
+                  <time dateTime={message.created_at}>{formatDateTime(message.created_at)}</time>
+                </p>
+              </div>
+            </li>
+          ))}
+          <li ref={chatEndRef} aria-hidden />
+        </ol>
+      )}
+    </Sheet>
   );
 }
-
-

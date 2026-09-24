@@ -17,15 +17,11 @@ import type {
   WithdrawalStats,
   FraudOverview,
 } from '../types/admin';
-import { useAuthStore, type AdminUser as StoreAdminUser } from '../store/authStore';
+import { refreshAccessToken, useAuthStore, type AdminUser as StoreAdminUser } from '../store/authStore';
 import { API_BASE } from '../config/network';
 
 function getAuthToken(): string | null {
   return useAuthStore.getState().accessToken;
-}
-
-function getRefreshToken(): string | null {
-  return localStorage.getItem('s2w_admin_refresh') || localStorage.getItem('admin_refresh');
 }
 
 function setAuthSession(payload: AdminAuthResponse) {
@@ -152,39 +148,9 @@ function extractErrorMessage(rawText: string): string {
   return typeof parsedRecord.error === 'string' ? parsedRecord.error : 'Request failed';
 }
 
-async function refreshAdminAccessToken(): Promise<string | null> {
-  const refresh = getRefreshToken();
-  if (!refresh) {
-    return null;
-  }
-
-  try {
-    const response = await fetch(`${API_BASE}/api/auth/refresh/`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ refresh }),
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const payload = await response.json();
-    if (!payload?.access) {
-      return null;
-    }
-
-    useAuthStore.getState().setToken(payload.access);
-    if (payload.refresh) {
-      localStorage.setItem('s2w_admin_refresh', payload.refresh);
-    }
-
-    return payload.access as string;
-  } catch {
-    return null;
-  }
+/** Single-flight refresh shared with every API helper (see store/authStore). */
+function refreshAdminAccessToken(): Promise<string | null> {
+  return refreshAccessToken();
 }
 
 async function request<T>(path: string, options?: RequestInit, hasRetried = false): Promise<T> {

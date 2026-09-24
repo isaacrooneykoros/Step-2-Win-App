@@ -40,8 +40,13 @@ const sqliteConnection = new SQLiteConnection(CapacitorSQLite);
 let sqliteReady: Promise<void> | null = null;
 let nativeDb: any = null;
 
+/** On-device SQLite in the Android and iOS apps; localStorage on the web (and as a fallback). */
+function usesNativeSqlite() {
+  return Capacitor.isNativePlatform() && ['android', 'ios'].includes(Capacitor.getPlatform());
+}
+
 async function ensureNativeSqliteReady() {
-  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+  if (!usesNativeSqlite()) {
     return;
   }
 
@@ -109,7 +114,7 @@ export async function upsertOutboxItem(args: {
     updatedAt: createdAt,
   };
 
-  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+  if (usesNativeSqlite()) {
     try {
       await ensureNativeSqliteReady();
       await nativeDb.run(
@@ -153,7 +158,7 @@ export async function upsertOutboxItem(args: {
 }
 
 async function getExistingOutboxItem(queueKey: string): Promise<SyncOutboxItem | null> {
-  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+  if (usesNativeSqlite()) {
     try {
       await ensureNativeSqliteReady();
       const result = await nativeDb.query(`SELECT * FROM ${SQLITE_TABLE_NAME} WHERE queue_key = ? LIMIT 1`, [queueKey]);
@@ -169,7 +174,7 @@ async function getExistingOutboxItem(queueKey: string): Promise<SyncOutboxItem |
 }
 
 export async function listOutboxItems(userId?: number): Promise<SyncOutboxItem[]> {
-  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+  if (usesNativeSqlite()) {
     try {
       await ensureNativeSqliteReady();
       const result = await nativeDb.query(
@@ -191,7 +196,7 @@ export async function listOutboxItems(userId?: number): Promise<SyncOutboxItem[]
 }
 
 export async function removeOutboxItem(queueKey: string): Promise<void> {
-  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+  if (usesNativeSqlite()) {
     try {
       await ensureNativeSqliteReady();
       await nativeDb.run(`DELETE FROM ${SQLITE_TABLE_NAME} WHERE queue_key = ?`, [queueKey]);
@@ -207,7 +212,7 @@ export async function removeOutboxItem(queueKey: string): Promise<void> {
 
 export async function touchOutboxRetry(queueKey: string): Promise<void> {
   const updatedAt = nowIso();
-  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+  if (usesNativeSqlite()) {
     try {
       await ensureNativeSqliteReady();
       await nativeDb.run(

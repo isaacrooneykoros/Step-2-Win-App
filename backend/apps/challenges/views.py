@@ -33,6 +33,8 @@ def challenge_config(request):
     """Public challenge configuration for the customer app."""
     from apps.admin_api.models import SystemSettings
 
+    from .serializers import ENTRY_FEE_MAX, ENTRY_FEE_MIN, ENTRY_FEE_SUGGESTIONS
+
     settings = SystemSettings.load()
     milestones = [
         {"value": milestone, "label": format_milestone_label(milestone)}
@@ -45,6 +47,9 @@ def challenge_config(request):
             "max_challenge_milestone": settings.max_challenge_milestone,
             "max_challenge_participants": settings.max_challenge_participants,
             "challenge_milestones": milestones,
+            "entry_fee_min": ENTRY_FEE_MIN,
+            "entry_fee_max": ENTRY_FEE_MAX,
+            "entry_fee_suggestions": ENTRY_FEE_SUGGESTIONS,
         }
     )
 
@@ -59,7 +64,9 @@ class ChallengeListView(generics.ListAPIView):
 
     def get_queryset(self):
         finalize_expired_challenges()
-        queryset = Challenge.objects.annotate(participant_count=Count("participants"))
+        queryset = Challenge.objects.select_related("creator").annotate(
+            participant_count=Count("participants")
+        )
 
         # Filter by status
         status_filter = self.request.query_params.get("status")
@@ -119,6 +126,12 @@ def create_challenge(request):
 
     logger = logging.getLogger(__name__)
 
+    from apps.admin_api.platform import feature_block
+
+    blocked = feature_block("challenges")
+    if blocked:
+        return blocked
+
     logger.info(f"Create challenge request data: {request.data}")
 
     serializer = CreateChallengeSerializer(data=request.data)
@@ -173,7 +186,8 @@ def create_challenge(request):
             )
 
         max_locked_pct = Decimal(str(getattr(settings, "MAX_LOCKED_BALANCE_PERCENT", 80)))
-        max_lockable = user.wallet_balance * (max_locked_pct / Decimal("100"))
+        # Cap is a share of the user's total funds. wallet_balance already excludes locked entries.
+        max_lockable = (user.wallet_balance + user.locked_balance) * (max_locked_pct / Decimal("100"))
         if user.locked_balance + entry_fee > max_lockable:
             return Response(
                 {
@@ -249,7 +263,7 @@ def join_challenge(request):
     try:
         with transaction.atomic():
             challenge = Challenge.objects.select_for_update().get(
-                invite_code=invite_code, status="active"
+                invite_code=invite_code, status__in=("pending", "active")
             )
             user = request.user.__class__.objects.select_for_update().get(
                 id=request.user.id
@@ -274,7 +288,8 @@ def join_challenge(request):
             max_locked_pct = Decimal(
                 str(getattr(settings, "MAX_LOCKED_BALANCE_PERCENT", 80))
             )
-            max_lockable = user.wallet_balance * (max_locked_pct / Decimal("100"))
+            # Cap is a share of the user's total funds. wallet_balance already excludes locked entries.
+            max_lockable = (user.wallet_balance + user.locked_balance) * (max_locked_pct / Decimal("100"))
             if user.locked_balance + challenge.entry_fee > max_lockable:
                 return Response(
                     {
@@ -380,9 +395,12 @@ class MyChallengesView(generics.ListAPIView):
 
     def get_queryset(self):
         finalize_expired_challenges()
-        # Don't annotate current_participants as it's already a property on the model
-        return Challenge.objects.filter(participants__user=self.request.user).order_by(
-            "-created_at"
+        # Optimize with select_related and prefetch_related to avoid N+1 queries
+        return (
+            Challenge.objects.filter(participants__user=self.request.user)
+            .select_related("creator")
+            .prefetch_related("participants__user")
+            .order_by("-created_at")
         )
 
 
@@ -393,12 +411,13 @@ class ChallengeDetailView(generics.RetrieveAPIView):
 
     serializer_class = ChallengeDetailSerializer
     permission_classes = [IsAuthenticated]
-    # Don't annotate current_participants as it's already a property on the model
-    queryset = Challenge.objects.all()
 
     def get_queryset(self):
         finalize_expired_challenges()
-        return super().get_queryset()
+        # Optimize with select_related and prefetch_related to avoid N+1 queries
+        return Challenge.objects.select_related("creator").prefetch_related(
+            "participants__user"
+        )
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -605,6 +624,12 @@ def rematch_challenge(request, pk):
     """
     Create a rematch from an existing completed challenge.
     """
+    from apps.admin_api.platform import feature_block
+
+    blocked = feature_block("challenges")
+    if blocked:
+        return blocked
+
     try:
         source = Challenge.objects.get(pk=pk)
     except Challenge.DoesNotExist:

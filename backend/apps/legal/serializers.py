@@ -49,6 +49,7 @@ class LegalDocumentAdminSerializer(serializers.ModelSerializer):
 
     last_edited_by_username = serializers.SerializerMethodField()
     history_count = serializers.SerializerMethodField()
+    has_unpublished_changes = serializers.SerializerMethodField()
 
     class Meta:
         model = LegalDocument
@@ -58,6 +59,8 @@ class LegalDocumentAdminSerializer(serializers.ModelSerializer):
             "title",
             "slug",
             "content_html",
+            "draft_html",
+            "has_unpublished_changes",
             "uploaded_file",
             "file_type",
             "version",
@@ -73,6 +76,8 @@ class LegalDocumentAdminSerializer(serializers.ModelSerializer):
             "history_count",
         ]
         read_only_fields = [
+            # Live content only changes through publish.
+            "content_html",
             "version",
             "version_label",
             "slug",
@@ -86,6 +91,9 @@ class LegalDocumentAdminSerializer(serializers.ModelSerializer):
 
     def get_history_count(self, obj) -> int:
         return obj.history.count()
+
+    def get_has_unpublished_changes(self, obj) -> bool:
+        return bool(obj.draft_html.strip()) and obj.draft_html != obj.content_html
 
 
 class LegalDocumentVersionSerializer(serializers.ModelSerializer):

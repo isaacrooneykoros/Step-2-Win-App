@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { stepsService } from '../services/api/steps';
 import { useToast } from '../components/ui/Toast';
@@ -7,6 +6,8 @@ import { useAuthStore } from '../store/authStore';
 import { v4 as uuidv4 } from 'uuid';
 import CryptoJS from 'crypto-js';
 import { DeviceStepCounter } from '../plugins/deviceStepCounter';
+import { openAppSettings } from '../plugins/appSystem';
+import { hasNativeStepCounter, permissionCopy } from '../utils/platform';
 import type { HourlyStep, LocationWaypoint, StepSyncForm, User } from '../types';
 import {
   listOutboxItems,
@@ -14,8 +15,12 @@ import {
   touchOutboxRetry,
   upsertOutboxItem,
 } from '../services/offlineSyncOutbox';
+import { DATA_SAVER_HOURLY_SYNC_INTERVAL_MS, HOURLY_SYNC_INTERVAL_MS, isDataSaverOn } from './useDataSaver';
 
-const HOURLY_SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000;
+function hourlySyncIntervalMs() {
+  return isDataSaverOn() ? DATA_SAVER_HOURLY_SYNC_INTERVAL_MS : HOURLY_SYNC_INTERVAL_MS;
+}
+
 const SILENT_SYNC_MIN_INTERVAL_MS = 30 * 1000;
 const PERMISSIONS_BOOTSTRAP_DONE_KEY = 'permissions_bootstrap_done_v1';
 
@@ -25,7 +30,7 @@ type ActiveStepSession = {
   expiresAt: string;
   nextSequenceNumber: number;
   deviceId: string;
-  platform: 'android';
+  platform: 'android' | 'ios';
   appVersion: string;
   mlModelVersion: string;
 };
@@ -133,7 +138,6 @@ export function useHealthSync() {
   const lastSyncedFingerprintRef = useRef('');
   const lastHourlySyncAtRef = useRef(0);
   const lastSilentSyncAtRef = useRef(0);
-  const hourlyBaselineRef = useRef<{ key: string; baselineSteps: number }>({ key: '', baselineSteps: 0 });
   const activeStepSessionRef = useRef<ActiveStepSession | null>(null);
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -154,7 +158,7 @@ export function useHealthSync() {
         expiresAt: nativeSession.expires_at,
         nextSequenceNumber: nativeSession.next_sequence_number ?? 1,
         deviceId: nativeSession.device_id,
-        platform: 'android',
+        platform: nativeSession.platform ?? 'android',
         appVersion: nativeSession.app_version,
         mlModelVersion: nativeSession.ml_model_version,
       };
@@ -164,7 +168,7 @@ export function useHealthSync() {
 
     const started = await stepsService.startSession({
       device_id: nativeSession.device_id,
-      platform: 'android',
+      platform: nativeSession.platform ?? 'android',
       app_version: nativeSession.app_version,
       ml_model_version: nativeSession.ml_model_version,
     });
@@ -175,7 +179,7 @@ export function useHealthSync() {
       expiresAt: started.expires_at,
       nextSequenceNumber: started.sequence_start ?? 1,
       deviceId: nativeSession.device_id,
-      platform: 'android',
+      platform: nativeSession.platform ?? 'android',
       appVersion: nativeSession.app_version,
       mlModelVersion: nativeSession.ml_model_version,
     };
@@ -291,15 +295,16 @@ export function useHealthSync() {
   }, [flushQueuedSync]);
 
   const refreshPermissionStatus = useCallback(async () => {
-    const platform = Capacitor.getPlatform();
-    if (platform !== 'android') {
+    if (!hasNativeStepCounter()) {
       setPermissionStatus('unavailable');
       return 'unavailable' as const;
     }
 
     try {
       const status = await DeviceStepCounter.checkPermissions();
-      setPermissionStatus(status.activityRecognition === 'granted' ? 'granted' : 'denied');
+      setPermissionStatus(
+        status.activityRecognition === 'granted' ? 'granted' : status.activityRecognition === 'unavailable' ? 'unavailable' : 'denied',
+      );
       return status.activityRecognition;
     } catch {
       setPermissionStatus('denied');
@@ -321,13 +326,11 @@ export function useHealthSync() {
   }, [refreshPermissionStatus]);
 
   const connectDevice = useCallback(async (options?: { silent?: boolean }) => {
-    const platform = Capacitor.getPlatform();
-
-    if (platform !== 'android') {
+    if (!hasNativeStepCounter()) {
       setPermissionStatus('unavailable');
       if (!options?.silent) {
         showToast({
-          message: 'Native step sensor tracking is currently available on Android only.',
+          message: 'Step counting needs the Step2Win app on your Android phone or iPhone.',
           type: 'error',
         });
       }
@@ -336,13 +339,23 @@ export function useHealthSync() {
 
     setIsConnectingDevice(true);
     try {
-      await ensureAndroidStepPermissions();
+      const current = await DeviceStepCounter.checkPermissions();
+      if (current.activityRecognition === 'denied' && !options?.silent) {
+        // Android stops showing the dialog after repeated denials; iOS only ever asks once.
+        const opened = await openAppSettings();
+        showToast({
+          message: opened ? permissionCopy().motionOpenedSettingsHint : permissionCopy().motionBlockedHint,
+          type: 'info',
+        });
+        return false;
+      }
+      await ensureStepPermissions();
       await DeviceStepCounter.startBackgroundCapture().catch(() => ({ running: false }));
       await DeviceStepCounter.getTodaySteps();
 
       await refreshPermissionStatus();
       if (!options?.silent) {
-        showToast({ message: 'Physical activity permission enabled. Step tracking is ready.', type: 'success' });
+        showToast({ message: `${permissionCopy().motionName} is allowed. Step tracking is ready.`, type: 'success' });
       }
       return true;
     } catch (error) {
@@ -356,7 +369,7 @@ export function useHealthSync() {
     }
   }, [refreshPermissionStatus, showToast]);
 
-  const runSyncHealth = useCallback(async (options?: { silent?: boolean }) => {
+  const runSyncHealth = useCallback(async (options?: { silent?: boolean; force?: boolean }) => {
     if (syncInFlightRef.current) {
       return;
     }
@@ -365,17 +378,17 @@ export function useHealthSync() {
     setIsSyncing(true);
     let latestHealthPayload: any = null;
     let latestHourlyPayload: any = null;
+    const waypointCursors: Array<{ date: string; upTo: string | null }> = [];
 
     try {
-      const platform = Capacitor.getPlatform();
       const isSilent = !!options?.silent;
       const permissionBootstrapDone = localStorage.getItem(PERMISSIONS_BOOTSTRAP_DONE_KEY) === 'true';
 
-      if (isSilent && Date.now() - lastSilentSyncAtRef.current < SILENT_SYNC_MIN_INTERVAL_MS) {
+      if (isSilent && !options?.force && Date.now() - lastSilentSyncAtRef.current < SILENT_SYNC_MIN_INTERVAL_MS) {
         return;
       }
 
-      if (platform !== 'android') {
+      if (!hasNativeStepCounter()) {
         setPermissionStatus('unavailable');
         return;
       }
@@ -396,21 +409,15 @@ export function useHealthSync() {
 
       if (permissionBootstrapDone && permissionStatus !== 'granted') {
         if (!isSilent) {
-          showToast({ message: 'Enable physical activity permission in Settings to sync steps.', type: 'warning' });
+          showToast({ message: `Allow ${permissionCopy().motionName} in ${permissionCopy().settingsName} to sync steps.`, type: 'warning' });
         }
         return;
       }
 
-      let data;
-
-      if (platform === 'android') {
-        const profile = queryClient.getQueryData<User>(['profile']);
-        const activeSession = await ensureActiveStepSession();
-        data = await readAndroidSensorSteps(profile, activeSession);
-        setPermissionStatus('granted');
-      } else {
-        return;
-      }
+      const profile = queryClient.getQueryData<User>(['profile']);
+      const activeSession = await ensureActiveStepSession();
+      const data = await readNativeSensorSteps(profile, activeSession);
+      setPermissionStatus('granted');
 
       const fingerprint = [
         data.date,
@@ -434,52 +441,31 @@ export function useHealthSync() {
         });
       }
 
+      // Hourly breakdown: every run updates the local per-hour ledger (cheap, no network) so no
+      // steps are lost at hour boundaries; the upload itself is batched (5 min, 30 min on data saver).
+      const hourlyLedger = userId ? recordHourlySteps(userId, data.steps, data.date) : null;
       const now = Date.now();
-      const shouldSyncHourly = !isSilent || now - lastHourlySyncAtRef.current >= HOURLY_SYNC_MIN_INTERVAL_MS;
-      if (shouldSyncHourly) {
+      const shouldSyncHourly = !isSilent || !!options?.force || now - lastHourlySyncAtRef.current >= hourlySyncIntervalMs();
+      if (shouldSyncHourly && userId && hourlyLedger) {
         try {
           const pendingWaypoints = await DeviceStepCounter.getPendingWaypoints().catch(() => ({
             date: data.date,
-            waypoints: [],
+            waypoints: [] as LocationWaypoint[],
           }));
-          const hourlySnapshot = buildHourlySnapshot(data, hourlyBaselineRef.current);
-          hourlyBaselineRef.current = {
-            key: `${data.date}:${hourlySnapshot.hour}`,
-            baselineSteps: hourlySnapshot.baselineSteps,
-          };
 
           latestHourlyPayload = {
-            date: data.date,
-            hourly: [{
-              hour: hourlySnapshot.hour,
-              steps: hourlySnapshot.steps,
-              distance_km: hourlySnapshot.distance_km,
-              calories: hourlySnapshot.calories,
-            }],
-            waypoints: pendingWaypoints.date === data.date ? pendingWaypoints.waypoints : [],
+            date: hourlyLedger.date,
+            hourly: ledgerToHourly(hourlyLedger, data),
+            waypoints: pendingWaypoints.date === hourlyLedger.date ? pendingWaypoints.waypoints : [],
           };
-          if (userId) {
-            await upsertOutboxItem({
-              userId,
-              kind: 'hourly',
-              payload: latestHourlyPayload,
-            });
+          await upsertHourlyMerged(userId, latestHourlyPayload);
+          if (latestHourlyPayload.waypoints.length > 0) {
+            waypointCursors.push({ date: latestHourlyPayload.date, upTo: lastRecordedAt(latestHourlyPayload.waypoints) });
           }
 
-          if (pendingWaypoints.waypoints.length > 0 && pendingWaypoints.date !== data.date) {
-            const legacyWaypointPayload = {
-              date: pendingWaypoints.date,
-              hourly: [],
-              waypoints: pendingWaypoints.waypoints,
-            };
-            if (userId) {
-              await upsertOutboxItem({
-                userId,
-                kind: 'hourly',
-                payload: legacyWaypointPayload,
-              });
-            }
-            await DeviceStepCounter.clearPendingWaypoints().catch(() => ({ cleared: false }));
+          if (pendingWaypoints.waypoints.length > 0 && pendingWaypoints.date !== hourlyLedger.date) {
+            await upsertHourlyMerged(userId, { date: pendingWaypoints.date, hourly: [], waypoints: pendingWaypoints.waypoints });
+            waypointCursors.push({ date: pendingWaypoints.date, upTo: lastRecordedAt(pendingWaypoints.waypoints) });
           }
 
           lastHourlySyncAtRef.current = now;
@@ -499,6 +485,14 @@ export function useHealthSync() {
 
       if (userId) {
         const remaining = await listOutboxItems(userId);
+        // Route points that reached the server can leave the native buffer (only up to the last
+        // uploaded point, so anything captured meanwhile is kept for the next upload).
+        for (const cursor of waypointCursors) {
+          const stillQueued = remaining.some((item) => item.kind === 'hourly' && item.payload?.date === cursor.date);
+          if (!stillQueued && cursor.upTo) {
+            await DeviceStepCounter.clearPendingWaypoints({ date: cursor.date, upTo: cursor.upTo }).catch(() => null);
+          }
+        }
         if (remaining.length === 0) {
           lastSyncedFingerprintRef.current = fingerprint;
           if (isSilent) {
@@ -517,10 +511,9 @@ export function useHealthSync() {
       }
     } catch (error) {
       console.error('Sync error:', error);
-      const platform = Capacitor.getPlatform();
-      if (platform === 'android') {
-        setPermissionStatus('denied');
-      }
+      // Only a real permission check may flip the status; network/server errors must not
+      // make the UI claim step counting is off.
+      void refreshPermissionStatus();
 
       if (userId && (latestHealthPayload || latestHourlyPayload)) {
         if (latestHealthPayload) {
@@ -553,12 +546,14 @@ export function useHealthSync() {
       syncInFlightRef.current = false;
       setIsSyncing(false);
     }
-  }, [connectDevice, flushQueuedSync, permissionStatus, queryClient, showToast, userId]);
+  }, [connectDevice, flushQueuedSync, permissionStatus, queryClient, refreshPermissionStatus, showToast, userId]);
 
   const syncHealth = useCallback(() => runSyncHealth(), [runSyncHealth]);
   const syncHealthSilent = useCallback(() => runSyncHealth({ silent: true }), [runSyncHealth]);
+  /** Silent sync that skips the 30 s throttle — for app resume. */
+  const syncHealthNow = useCallback(() => runSyncHealth({ silent: true, force: true }), [runSyncHealth]);
 
-  return { syncHealth, syncHealthSilent, connectDevice, isSyncing, isConnectingDevice, permissionStatus, refreshPermissionStatus };
+  return { syncHealth, syncHealthSilent, syncHealthNow, connectDevice, isSyncing, isConnectingDevice, permissionStatus, refreshPermissionStatus };
 }
 
 export function useAutoHealthSync(intervalMs: number = 1000) {
@@ -581,31 +576,40 @@ export function useAutoHealthSync(intervalMs: number = 1000) {
   return { isSyncing };
 }
 
-async function readAndroidSensorSteps(profile: User | undefined, session: ActiveStepSession) {
+/**
+ * Reads today's steps from the native plugin (Android sensor + GaitAnalyzer, or iOS CMPedometer)
+ * and builds the /sync payload. iOS has no gait/ML features (`gait_available: false`): those
+ * fields are sent as null so the backend skips those checks instead of scoring zeros.
+ */
+async function readNativeSensorSteps(profile: User | undefined, session: ActiveStepSession) {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
 
-  await ensureAndroidStepPermissions();
+  await ensureStepPermissions();
   await DeviceStepCounter.startBackgroundCapture().catch(() => ({ running: false }));
   const reading = await DeviceStepCounter.getTodaySteps();
   const steps = Math.max(0, Math.round(Number(reading.steps) || 0));
+  const hasGait = reading.gait_available !== false;
+  // Android keeps its existing neutral defaults; iOS (no gait features) sends null.
+  const gaitNum = (value: unknown, min: number, max: number) => (hasGait ? clampNumber(value, min, max, 0) : null);
+  const gaitInt = (value: unknown) => (hasGait ? Math.max(0, Math.round(Number(value) || 0)) : null);
 
   const strideCm = clampNumber(profile?.stride_length_cm, 40, 130, 78);
   const weightKg = clampNumber(profile?.weight_kg, 30, 220, 70);
   const cadenceSpm = clampNumber(reading.cadence_spm, 0, 400, 0);
   const burstSteps5s = Math.max(0, Math.round(Number(reading.burst_steps_5s) || 0));
-  const gaitConfidence = clampNumber(reading.gait_confidence, 0, 100, 0);
-  const gaitDominantFreqHz = clampNumber(reading.gait_dominant_freq_hz, 0, 10, 0);
-  const gaitAutocorr = clampNumber(reading.gait_autocorr, 0, 1, 0);
-  const gaitIntervalStdMs = clampNumber(reading.gait_interval_std_ms, 0, 5000, 0);
-  const gaitValidPeaks2s = Math.max(0, Math.round(Number(reading.gait_valid_peaks_2s) || 0));
-  const gaitGyroVariance = clampNumber(reading.gait_gyro_variance, 0, 1000, 0);
-  const gaitJerkRms = clampNumber(reading.gait_jerk_rms, 0, 1000, 0);
-  const gaitState = typeof reading.gait_state === 'string' ? reading.gait_state : 'idle';
-  const carryMode = typeof reading.carry_mode === 'string' ? reading.carry_mode : 'unknown';
-  const mlMotionLabel = typeof reading.ml_motion_label === 'string' ? reading.ml_motion_label : 'other';
-  const mlWalkProbability = clampNumber(reading.ml_walk_probability, 0, 1, 0);
-  const mlShakeProbability = clampNumber(reading.ml_shake_probability, 0, 1, 0);
+  const gaitConfidence = gaitNum(reading.gait_confidence, 0, 100);
+  const gaitDominantFreqHz = gaitNum(reading.gait_dominant_freq_hz, 0, 10);
+  const gaitAutocorr = gaitNum(reading.gait_autocorr, 0, 1);
+  const gaitIntervalStdMs = gaitNum(reading.gait_interval_std_ms, 0, 5000);
+  const gaitValidPeaks2s = gaitInt(reading.gait_valid_peaks_2s);
+  const gaitGyroVariance = gaitNum(reading.gait_gyro_variance, 0, 1000);
+  const gaitJerkRms = gaitNum(reading.gait_jerk_rms, 0, 1000);
+  const gaitState = typeof reading.gait_state === 'string' ? reading.gait_state : hasGait ? 'idle' : null;
+  const carryMode = typeof reading.carry_mode === 'string' ? reading.carry_mode : hasGait ? 'unknown' : null;
+  const mlMotionLabel = typeof reading.ml_motion_label === 'string' ? reading.ml_motion_label : hasGait ? 'other' : null;
+  const mlWalkProbability = gaitNum(reading.ml_walk_probability, 0, 1);
+  const mlShakeProbability = gaitNum(reading.ml_shake_probability, 0, 1);
   const mlModelVersion = typeof reading.ml_model_version === 'string' ? reading.ml_model_version : null;
 
   const distanceMeters = steps * (strideCm / 100);
@@ -651,11 +655,11 @@ async function readAndroidSensorSteps(profile: User | undefined, session: Active
     ml_walk_probability: mlWalkProbability,
     ml_shake_probability: mlShakeProbability,
     ml_model_version: mlModelVersion,
-    smoothed_walk_probability: clampNumber(reading.smoothed_walk_probability, 0, 1, mlWalkProbability),
-    smoothed_shake_probability: clampNumber(reading.smoothed_shake_probability, 0, 1, mlShakeProbability),
-    ml_window_count: Math.max(0, Math.round(Number(reading.ml_window_count) || 0)),
-    ml_confidence_stability: clampNumber(reading.ml_confidence_stability, 0, 1, 0),
-    motion_entropy: clampNumber(reading.motion_entropy, 0, 10, 0),
+    smoothed_walk_probability: hasGait ? clampNumber(reading.smoothed_walk_probability, 0, 1, mlWalkProbability ?? 0) : null,
+    smoothed_shake_probability: hasGait ? clampNumber(reading.smoothed_shake_probability, 0, 1, mlShakeProbability ?? 0) : null,
+    ml_window_count: gaitInt(reading.ml_window_count),
+    ml_confidence_stability: gaitNum(reading.ml_confidence_stability, 0, 1),
+    motion_entropy: gaitNum(reading.motion_entropy, 0, 10),
     device_id: typeof reading.device_id === 'string' ? reading.device_id : session.deviceId,
     session_id: session.sessionId,
     session_token: session.sessionToken,
@@ -680,43 +684,110 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   return Math.min(max, Math.max(min, n));
 }
 
-async function ensureAndroidStepPermissions() {
+async function ensureStepPermissions() {
   const status = await DeviceStepCounter.checkPermissions();
   if (status.activityRecognition === 'granted') {
     return;
   }
+  if (status.activityRecognition === 'unavailable') {
+    throw new Error('This phone doesn’t report steps to apps, so Step2Win can’t count them here.');
+  }
 
   const requested = await DeviceStepCounter.requestPermissions();
   if (requested.activityRecognition !== 'granted') {
-    throw new Error('Physical activity permission is required to count your steps.');
+    throw new Error(`${permissionCopy().motionName} permission is required to count your steps.`);
   }
 }
 
-function buildHourlySnapshot(data: {
-  date: string;
-  steps: number;
-  distance_km?: number | null;
-  calories_active?: number | null;
-}, state: { key: string; baselineSteps: number }) {
-  const hour = new Date().getHours();
-  const key = `${data.date}:${hour}`;
-  const totalSteps = Math.max(0, Math.round(Number(data.steps) || 0));
+type HourlyLedger = { date: string; lastTotal: number; hours: Record<string, number> };
 
-  let baselineSteps = state.baselineSteps;
-  if (state.key !== key) {
-    baselineSteps = totalSteps;
+const HOURLY_LEDGER_KEY = 'hourly_step_ledger_v1';
+
+/**
+ * Attributes new steps (since the previous reading) to the current local hour. The first
+ * reading of a day only sets the baseline — steps taken while the app was closed aren't
+ * guessed into an hour.
+ */
+function recordHourlySteps(userId: number, totalSteps: number, today: string): HourlyLedger {
+  const key = `${HOURLY_LEDGER_KEY}:${userId}`;
+  const total = Math.max(0, Math.round(Number(totalSteps) || 0));
+  let ledger: HourlyLedger | null = null;
+  try {
+    ledger = JSON.parse(localStorage.getItem(key) || 'null');
+  } catch {
+    ledger = null;
   }
+  if (!ledger || ledger.date !== today) {
+    ledger = { date: today, lastTotal: total, hours: {} };
+  } else {
+    const delta = total - ledger.lastTotal;
+    if (delta > 0) {
+      const hour = String(new Date().getHours());
+      ledger.hours[hour] = (ledger.hours[hour] || 0) + delta;
+    }
+    ledger.lastTotal = total; // also absorbs sensor resets (negative delta)
+  }
+  try {
+    localStorage.setItem(key, JSON.stringify(ledger));
+  } catch {
+    // Storage unavailable: the ledger lives for this run only.
+  }
+  return ledger;
+}
 
-  const hourlySteps = Math.max(0, totalSteps - baselineSteps);
-  const ratio = totalSteps > 0 ? hourlySteps / totalSteps : 0;
+function ledgerToHourly(
+  ledger: HourlyLedger,
+  data: { steps: number; distance_km?: number | null; calories_active?: number | null },
+): HourlyStep[] {
+  const totalSteps = Math.max(1, Math.round(Number(data.steps) || 0));
   const totalDistance = Math.max(0, Number(data.distance_km) || 0);
   const totalCalories = Math.max(0, Number(data.calories_active) || 0);
+  return Object.entries(ledger.hours)
+    .map(([hour, steps]) => {
+      const ratio = Math.min(1, steps / totalSteps);
+      return {
+        hour: Number(hour),
+        steps,
+        distance_km: Number((totalDistance * ratio).toFixed(3)),
+        calories: Number((totalCalories * ratio).toFixed(1)),
+      };
+    })
+    .filter((h) => Number.isFinite(h.hour) && h.hour >= 0 && h.hour <= 23)
+    .sort((a, b) => a.hour - b.hour) as HourlyStep[];
+}
 
-  return {
-    hour: Number.isFinite(hour) ? hour : 0,
-    steps: hourlySteps,
-    distance_km: Number((totalDistance * ratio).toFixed(3)),
-    calories: Number((totalCalories * ratio).toFixed(1)),
-    baselineSteps,
-  };
+function lastRecordedAt(waypoints: LocationWaypoint[]): string | null {
+  let latest: string | null = null;
+  let latestMs = -Infinity;
+  for (const w of waypoints) {
+    const ms = Date.parse(String(w.recorded_at));
+    if (Number.isFinite(ms) && ms > latestMs) {
+      latestMs = ms;
+      latest = String(w.recorded_at);
+    }
+  }
+  return latest;
+}
+
+/** One outbox row per day: merge with any not-yet-uploaded row so nothing is overwritten. */
+async function upsertHourlyMerged(
+  userId: number,
+  payload: { date: string; hourly: HourlyStep[]; waypoints: LocationWaypoint[] },
+) {
+  const existing = (await listOutboxItems(userId)).find((item) => item.kind === 'hourly' && item.payload?.date === payload.date);
+  let merged = payload;
+  if (existing) {
+    const prev = existing.payload as { hourly?: HourlyStep[]; waypoints?: LocationWaypoint[] };
+    const hours = new Map<number, HourlyStep>();
+    (prev.hourly || []).forEach((h) => hours.set(h.hour, h));
+    payload.hourly.forEach((h) => hours.set(h.hour, h));
+    const points = new Map<string, LocationWaypoint>();
+    [...(prev.waypoints || []), ...payload.waypoints].forEach((w) => points.set(String(w.recorded_at), w));
+    merged = {
+      date: payload.date,
+      hourly: [...hours.values()].sort((a, b) => a.hour - b.hour),
+      waypoints: [...points.values()],
+    };
+  }
+  await upsertOutboxItem({ userId, kind: 'hourly', payload: merged });
 }

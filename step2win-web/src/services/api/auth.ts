@@ -94,10 +94,25 @@ export const authService = {
   },
 
   /**
-   * Login/Register with Google OAuth token
+   * Sign in / sign up with a Google ID token or an Apple identity token.
+   * The raw nonce lets the server check the token was minted for this attempt.
    */
-  googleSignIn: async (credential: string): Promise<AuthResponse> => {
-    const response = await api.post<AuthResponse>('/api/auth/google/', { token: credential });
+  socialSignIn: async (
+    provider: 'google' | 'apple',
+    payload: {
+      id_token: string;
+      nonce: string;
+      given_name?: string;
+      family_name?: string;
+      device_type?: string;
+      device_name?: string;
+      app_version?: string;
+    },
+  ): Promise<AuthResponse & { session_id?: string; created?: boolean }> => {
+    const response = await api.post<AuthResponse & { session_id?: string; created?: boolean }>(
+      `/api/auth/${provider}/`,
+      payload,
+    );
     return response.data;
   },
 

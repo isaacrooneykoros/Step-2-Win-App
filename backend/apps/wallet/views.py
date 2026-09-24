@@ -188,6 +188,12 @@ def withdraw(request):
     Instantly initiate M-Pesa withdrawal to user's phone number.
     Includes automated security checks (rate limiting, velocity, amount caps).
     """
+    from apps.admin_api.platform import feature_block
+
+    blocked = feature_block("withdrawals")
+    if blocked:
+        return blocked
+
     try:
         idem_key = request.headers.get("X-Idempotency-Key")
         if not acquire_idempotency_slot(
