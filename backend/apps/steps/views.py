@@ -1,5 +1,6 @@
 import logging
 import math
+import uuid
 from datetime import timedelta
 
 import redis as redis_client
@@ -10,7 +11,6 @@ from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import Avg, Max, Sum
 from django.utils import timezone
-from django_ratelimit.decorators import ratelimit
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers
 from rest_framework.decorators import (api_view, permission_classes,
@@ -19,7 +19,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.admin_api.realtime import broadcast_admin_steps_update
-from apps.core.throttles import DashboardReadRateThrottle
+from apps.core.throttles import (DashboardReadRateThrottle,
+                                 StepHourlySyncRateThrottle,
+                                 StepSyncGlobalThrottle, StepSyncRateThrottle,
+                                 StepSyncSustainedThrottle)
 
 from .anti_cheat import (DAILY_STEP_CAP, VerificationConfig,
                          decision_to_check_result, evaluate_daily_submission,
@@ -40,6 +43,9 @@ WAYPOINT_MIN_DISTANCE_M = 2.0
 WAYPOINT_MAX_SPEED_MPS = 8.0
 ROUTE_DISTANCE_PER_STEP_MIN_KM = 0.0002
 ROUTE_DISTANCE_PER_STEP_MAX_KM = 0.0030
+HOURLY_MAX_ENTRIES = 24
+HOURLY_MAX_STEPS = 50_000
+WAYPOINT_MAX_PER_REQUEST = 1000
 
 
 def _get_redis_client():
@@ -78,6 +84,40 @@ def _allow_sync_tick(user_id: int, min_seconds: int = 1) -> bool:
         return _redis.set(redis_key, "1", nx=True, ex=max(1, min_seconds)) is not None
     except Exception:
         return cache.add(redis_key, "1", timeout=max(1, min_seconds))
+
+
+def _rejection_event_id(client_event_id: str) -> str:
+    """
+    Audit id for a *rejected* sync event. Rejections never claim the client's own
+    client_event_id: (user, client_event_id) is unique, so claiming it would (a) crash
+    with an IntegrityError when the rejected event is itself a duplicate and (b) make the
+    phone's legitimate retry of the same reading (e.g. after renewing an expired
+    session) look like a replay forever.
+    """
+    return f"{(client_event_id or 'event')[:200]}:rejected:{uuid.uuid4().hex[:12]}"
+
+
+def _current_state_response(user, day, submitted_steps: int, **flags):
+    """
+    Cheap 200 for uploads that change nothing (idempotent retry, out-of-order older
+    reading): one indexed lookup, no anti-cheat run, no writes.
+    """
+    record = HealthRecord.objects.filter(user=user, date=day).first()
+    payload = (
+        HealthRecordSerializer(record).data
+        if record
+        else {"date": str(day), "steps": 0}
+    )
+    payload.update(
+        {
+            "accepted": True,
+            "approved_steps": record.steps if record else 0,
+            "submitted_steps": submitted_steps,
+            "user_id": user.id,
+            **flags,
+        }
+    )
+    return Response(payload)
 
 
 def _acquire_periodic_lock(lock_key: str, ttl_seconds: int) -> bool:
@@ -307,7 +347,11 @@ def _encode_polyline(points: list[tuple[float, float]]) -> str:
 )
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-@ratelimit(key="user", rate="3600/h", method="POST", block=True)
+# 429 + (jittered) Retry-After instead of django-ratelimit's 403, so phones back off
+# instead of treating a busy server as a permission problem.
+@throttle_classes(
+    [StepSyncGlobalThrottle, StepSyncRateThrottle, StepSyncSustainedThrottle]
+)
 def sync_health(request):
     """
     Receives steps + distance + calories + active minutes from device.
@@ -358,6 +402,26 @@ def sync_health(request):
     now = timezone.now()
     date = data.get("date", now.date())
 
+    # Idempotent resubmission: the phone retries a reading whose first upload reached the
+    # server but whose response was lost (timeout, network drop, app killed). Same
+    # client_event_id + same reading => answer with the current state, change nothing.
+    # (Session and sequence may differ on the retry, so compare the reading itself.)
+    if client_event_id:
+        prior = (
+            StepSyncEvent.objects.filter(user=user, client_event_id=client_event_id)
+            .only("accepted", "raw_steps_total", "timestamp_client")
+            .first()
+        )
+        if (
+            prior is not None
+            and prior.accepted
+            and prior.raw_steps_total == (data.get("steps_total") or submitted_steps)
+            and prior.timestamp_client == timestamp_client
+        ):
+            return _current_state_response(
+                user, date, submitted_steps, duplicate=True
+            )
+
     # Optional session-based replay protection. Legacy clients continue through.
     if session_id and session_token:
         try:
@@ -367,7 +431,7 @@ def sync_health(request):
                 user=user,
                 session=None,
                 device=None,
-                client_event_id=client_event_id or str(session_id),
+                client_event_id=_rejection_event_id(client_event_id or str(session_id)),
                 sequence_number=sequence_number or 0,
                 timestamp_client=timestamp_client,
                 payload_hash=payload_hash,
@@ -404,7 +468,7 @@ def sync_health(request):
                 user=user,
                 session=session,
                 device=session.device,
-                client_event_id=client_event_id or str(session_id),
+                client_event_id=_rejection_event_id(client_event_id or str(session_id)),
                 sequence_number=sequence_number or 0,
                 timestamp_client=timestamp_client,
                 payload_hash=payload_hash,
@@ -437,7 +501,7 @@ def sync_health(request):
                 user=user,
                 session=session,
                 device=session.device,
-                client_event_id=client_event_id or str(session_id),
+                client_event_id=_rejection_event_id(client_event_id or str(session_id)),
                 sequence_number=sequence_number or 0,
                 timestamp_client=timestamp_client,
                 payload_hash=payload_hash,
@@ -480,7 +544,7 @@ def sync_health(request):
                 user=user,
                 session=session,
                 device=session.device,
-                client_event_id=client_event_id or str(session_id),
+                client_event_id=_rejection_event_id(client_event_id or str(session_id)),
                 sequence_number=sequence_number or 0,
                 timestamp_client=timestamp_client,
                 payload_hash=payload_hash,
@@ -519,11 +583,26 @@ def sync_health(request):
 
     if not _allow_sync_tick(user.id, min_seconds=1):
         return Response(
-            {"error": "Sync too frequent. Maximum 1 request per second."}, status=429
+            {"error": "Sync too frequent. Maximum 1 request per second."},
+            status=429,
+            headers={"Retry-After": "2"},
         )
 
     existing_record = HealthRecord.objects.filter(user=user, date=date).first()
     if existing_record:
+        last_ts = existing_record.last_client_timestamp
+        if (
+            timestamp_client is not None
+            and last_ts is not None
+            and timestamp_client <= last_ts
+        ):
+            # Out-of-order delivery: a reading taken *before* the one already applied
+            # arrived late (e.g. a queued retry landing after a newer background upload).
+            # A day's counter only grows, so it carries nothing new; applying it would
+            # lower the stored total. Not tampering either, so no flag. (The stored day
+            # total is the anti-cheat *approved* figure, so the order has to come from the
+            # reading's own timestamp, not from comparing step counts.)
+            return _current_state_response(user, date, submitted_steps, stale=True)
         if submitted_steps < existing_record.steps:
             FraudFlag.objects.create(
                 user=user,
@@ -730,10 +809,23 @@ def sync_health(request):
 
             previous_steps = existing_record.steps if existing_record else None
 
+            newest_client_ts = timestamp_client
+            if newest_client_ts is not None:
+                # A phone clock set ahead must not freeze the day: never remember a
+                # reading time more than a few minutes past the server clock.
+                newest_client_ts = min(newest_client_ts, now + timedelta(minutes=5))
+            if existing_record and existing_record.last_client_timestamp:
+                if (
+                    newest_client_ts is None
+                    or existing_record.last_client_timestamp > newest_client_ts
+                ):
+                    newest_client_ts = existing_record.last_client_timestamp
+
             record, _ = HealthRecord.objects.update_or_create(
                 user=user,
                 date=date,
                 defaults={
+                    "last_client_timestamp": newest_client_ts,
                     "source": data.get("source", "device_sensor"),
                     "steps": approved_steps,
                     "distance_km": data.get("distance_km"),
@@ -860,24 +952,31 @@ def sync_health(request):
         except Exception:
             logger.exception("Step XP award failed for user=%s date=%s", user.id, date)
 
-    from apps.challenges.models import Challenge, Participant
+    from apps.challenges.models import Participant
     from apps.challenges.services import finalize_expired_challenges
 
     if _acquire_periodic_lock("step2win:finalize_expired_challenges", 60):
-        finalize_expired_challenges(today=date)
+        # The phone's `date` may be a day ahead of the server (time zones) or simply
+        # wrong; never let a client date finalize challenges early. With the server's
+        # (UTC) date, phones east of UTC also get a grace window after local midnight
+        # for their final end-day uploads to land.
+        finalize_expired_challenges(today=min(date, timezone.now().date()))
 
     should_recompute_challenges = (
         previous_steps is None or approved_steps != previous_steps
     ) and _acquire_periodic_lock(f"step2win:participant_recompute:{user.id}", 15)
 
     if should_recompute_challenges:
-        active_challenges = Challenge.objects.filter(
-            participants__user=user,
-            status="active",
-            start_date__lte=date,
-            end_date__gte=date,
-        )
-        for challenge in active_challenges:
+        # One query for the user's active entries (challenge joined in), then one
+        # aggregate + one save per entry (was 4 queries per challenge).
+        active_entries = Participant.objects.filter(
+            user=user,
+            challenge__status="active",
+            challenge__start_date__lte=date,
+            challenge__end_date__gte=date,
+        ).select_related("challenge")
+        for participant in active_entries:
+            challenge = participant.challenge
             total = (
                 HealthRecord.objects.filter(
                     user=user,
@@ -888,14 +987,10 @@ def sync_health(request):
                 or 0
             )
 
-            Participant.objects.filter(challenge=challenge, user=user).update(
-                steps=total,
-                qualified=total >= challenge.milestone,
-            )
-
-            # ── Update tiebreaker tracking fields ─────────────────────────────
+            # ── Totals + tiebreaker tracking fields ───────────────────────────
             try:
-                participant = Participant.objects.get(challenge=challenge, user=user)
+                participant.steps = total
+                participant.qualified = total >= challenge.milestone
 
                 milestone_just_reached = False
                 if (
@@ -910,6 +1005,8 @@ def sync_health(request):
 
                 participant.save(
                     update_fields=[
+                        "steps",
+                        "qualified",
                         "milestone_reached_at",
                         "best_day_steps",
                     ]
@@ -1287,6 +1384,7 @@ def day_detail(request, date_str):
 )
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+@throttle_classes([StepSyncGlobalThrottle, StepHourlySyncRateThrottle])
 def sync_hourly_steps(request):
     """
     Syncs hourly step data from Google Fit / Apple Health.
@@ -1318,22 +1416,65 @@ def sync_hourly_steps(request):
         day = datetime.date.fromisoformat(date_str)
     except (ValueError, TypeError):
         return Response({"error": "Invalid date"}, status=400)
+    if day > timezone.now().date() + timedelta(days=1):
+        return Response({"error": "Date is in the future."}, status=400)
+    if not isinstance(hourly, list) or not isinstance(waypoints, list):
+        return Response({"error": "hourly and waypoints must be lists."}, status=400)
+    # Payload caps: one day has 24 hours, and the phone keeps at most 500 route points
+    # per day. Anything bigger is a bug or abuse; reject before touching the database.
+    if len(hourly) > HOURLY_MAX_ENTRIES or len(waypoints) > WAYPOINT_MAX_PER_REQUEST:
+        return Response({"error": "Payload too large."}, status=413)
 
-    # Upsert hourly records
+    # Upsert hourly records in bulk (was 2 queries per hour). A bucket never goes down:
+    # an older upload arriving after a newer one (retry, out-of-order) can't erase steps.
+    incoming = {}
     for h in hourly:
-        hour = h.get("hour")
-        if hour is None or not (0 <= hour <= 23):
+        if not isinstance(h, dict):
             continue
-        HourlyStepRecord.objects.update_or_create(
-            user=user,
-            date=day,
-            hour=hour,
-            defaults={
-                "steps": max(0, int(h.get("steps", 0))),
-                "distance_km": max(0.0, float(h.get("distance_km", 0))),
-                "calories": max(0.0, float(h.get("calories", 0))),
-            },
-        )
+        try:
+            hour = int(h.get("hour"))
+            steps_value = max(0, min(HOURLY_MAX_STEPS, int(h.get("steps", 0) or 0)))
+            distance_value = max(0.0, float(h.get("distance_km", 0) or 0))
+            calories_value = max(0.0, float(h.get("calories", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= hour <= 23):
+            continue
+        incoming[hour] = (steps_value, distance_value, calories_value)
+
+    if incoming:
+        existing_hours = {
+            rec.hour: rec
+            for rec in HourlyStepRecord.objects.filter(
+                user=user, date=day, hour__in=list(incoming)
+            )
+        }
+        to_create, to_update = [], []
+        for hour, (steps_value, distance_value, calories_value) in incoming.items():
+            rec = existing_hours.get(hour)
+            if rec is None:
+                to_create.append(
+                    HourlyStepRecord(
+                        user=user,
+                        date=day,
+                        hour=hour,
+                        steps=steps_value,
+                        distance_km=distance_value,
+                        calories=calories_value,
+                    )
+                )
+            elif steps_value > rec.steps:
+                rec.steps = steps_value
+                rec.distance_km = distance_value
+                rec.calories = calories_value
+                to_update.append(rec)
+        if to_create:
+            # ignore_conflicts: a concurrent upload for the same hour already won.
+            HourlyStepRecord.objects.bulk_create(to_create, ignore_conflicts=True)
+        if to_update:
+            HourlyStepRecord.objects.bulk_update(
+                to_update, ["steps", "distance_km", "calories"]
+            )
 
     stored_waypoints = 0
     waypoint_quality = {
@@ -1347,22 +1488,35 @@ def sync_hourly_steps(request):
     # Store waypoints with quality filtering — keeps route realistic and prevents teleport spikes.
     if waypoints:
         filtered, waypoint_quality = _filter_waypoints_for_storage(day, waypoints)
-        existing_count = LocationWaypoint.objects.filter(user=user, date=day).count()
-        budget = max(0, 500 - existing_count)
-        for wp in filtered[:budget]:
-            _, created = LocationWaypoint.objects.get_or_create(
-                user=user,
-                date=day,
-                recorded_at=wp["recorded_at"],
-                defaults={
-                    "hour": wp["hour"],
-                    "latitude": wp["latitude"],
-                    "longitude": wp["longitude"],
-                    "accuracy_m": wp["accuracy_m"],
-                },
+        # One query for what's already stored, one bulk insert (was 2 queries per point).
+        # Re-sent points (retries) are recognised by their timestamp and skipped.
+        existing_times = set(
+            LocationWaypoint.objects.filter(user=user, date=day).values_list(
+                "recorded_at", flat=True
             )
-            if created:
-                stored_waypoints += 1
+        )
+        budget = max(0, 500 - len(existing_times))
+        new_points = []
+        for wp in filtered:
+            if len(new_points) >= budget:
+                break
+            if wp["recorded_at"] in existing_times:
+                continue
+            existing_times.add(wp["recorded_at"])
+            new_points.append(
+                LocationWaypoint(
+                    user=user,
+                    date=day,
+                    recorded_at=wp["recorded_at"],
+                    hour=wp["hour"],
+                    latitude=wp["latitude"],
+                    longitude=wp["longitude"],
+                    accuracy_m=wp["accuracy_m"],
+                )
+            )
+        if new_points:
+            LocationWaypoint.objects.bulk_create(new_points)
+        stored_waypoints = len(new_points)
 
         # Route plausibility check: compare route distance against synced steps.
         route_km = _route_distance_km(filtered)

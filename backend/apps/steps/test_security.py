@@ -79,8 +79,8 @@ class SessionTokenSecurityTests(TestCase):
         """Modified hashes should not verify."""
         token = create_session_token()
         stored_hash = hash_session_token(token)
-        # Modify one character
-        modified_hash = "a" + stored_hash[1:]
+        # Modify one character (always to a different one: the hash may already start with "a")
+        modified_hash = ("b" if stored_hash[0] == "a" else "a") + stored_hash[1:]
         self.assertFalse(verify_session_token(token, modified_hash))
 
 

@@ -391,17 +391,31 @@ class HealthSyncSerializerV2(serializers.Serializer):
         allow_null=True,
         allow_blank=True,
     )
+    # A background upload after hours offline can carry most of a day's steps as one
+    # delta (a day is capped at 100000 steps, same as `steps`).
     steps_delta = serializers.IntegerField(
         min_value=0,
-        max_value=10000,
+        max_value=100000,
         required=False,
         allow_null=True,
     )
     steps_total = serializers.IntegerField(
         min_value=0,
+        max_value=100000,
         required=False,
         allow_null=True,
     )
+
+    def validate_date(self, value):
+        # A phone in UTC+14 can be one calendar day ahead of the (UTC) server; anything
+        # later is a wrong clock or tampering and must not create future records.
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        if value > timezone.now().date() + timedelta(days=1):
+            raise serializers.ValidationError("Date is in the future.")
+        return value
 
 
 class UserTrustProfileSerializer(serializers.Serializer):

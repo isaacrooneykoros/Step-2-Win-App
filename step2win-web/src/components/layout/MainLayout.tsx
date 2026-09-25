@@ -5,9 +5,8 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Home, Trophy, Wallet, User, Footprints, Bell, Camera, MapPin, Navigation, Activity } from 'lucide-react';
 import { useStepsWebSocket } from '../../hooks/useStepsWebSocket';
-import { useHealthSync } from '../../hooks/useHealthSync';
+import { useHealthSync, useSmartStepSync } from '../../hooks/useHealthSync';
 import { usePermissionStatus } from '../../hooks/usePermissionStatus';
-import { useDataSaver } from '../../hooks/useDataSaver';
 import { authService } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
 import { Sheet } from '../ui/Sheet';
@@ -62,8 +61,7 @@ function readNotificationPreferences() {
 export default function MainLayout() {
   const location = useLocation();
   useStepsWebSocket();
-  const { syncHealthSilent, syncHealthNow, connectDevice, isConnectingDevice, permissionStatus } = useHealthSync();
-  const { stepSyncIntervalMs } = useDataSaver();
+  const { syncHealthSilent, syncHealthNow, requestSync, connectDevice, isConnectingDevice, permissionStatus } = useHealthSync();
   const queryClient = useQueryClient();
   const [permissionsVersion, setPermissionsVersion] = useState(0);
   const { permissionStatus: globalPermissionStatus } = usePermissionStatus();
@@ -107,18 +105,14 @@ export default function MainLayout() {
     return isNative && locationPermission !== 'granted';
   }, [isNative, locationPermission]);
 
-  // Background step sync: every 30 s, or every 5 min with data saver on (switches instantly).
+  // Step sync while the app is open: event-driven (new steps / walking), not a timer.
+  // With the app closed, Android's WorkManager job and iOS's CoreMotion history take over.
+  const launchSyncRef = useRef(syncHealthNow);
+  launchSyncRef.current = syncHealthNow;
   useEffect(() => {
-    syncHealthSilent();
-
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        syncHealthSilent();
-      }
-    }, stepSyncIntervalMs);
-
-    return () => window.clearInterval(interval);
-  }, [stepSyncIntervalMs, syncHealthSilent]);
+    void launchSyncRef.current();
+  }, []);
+  useSmartStepSync(requestSync);
 
   // App resume: sync steps immediately (even with data saver), refresh what's on screen if the
   // app was away for a while, and re-read permissions the user may have changed in Settings.

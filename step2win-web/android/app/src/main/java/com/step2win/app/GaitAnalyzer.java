@@ -5,6 +5,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class GaitAnalyzer {
+    /**
+     * One analyzer per process: fed by the plugin while the app is open and by the walking
+     * service while it runs in the background, read by the sync engine for the upload.
+     */
+    public static final GaitAnalyzer SHARED = new GaitAnalyzer();
+
     private static final long WINDOW_MS = 3_000L;
     private static final long BUFFER_MS = 6_000L;
     private static final long EVAL_INTERVAL_MS = 500L;
@@ -94,6 +100,11 @@ public class GaitAnalyzer {
 
     public synchronized Snapshot getSnapshot() {
         return snapshot;
+    }
+
+    /** Wall time (ms) of the last motion sample, or -1 if none yet. */
+    public synchronized long getLastSampleTsMs() {
+        return lastSampleTsMs;
     }
 
     private void detectCandidatePeak(long tsMs, float value) {

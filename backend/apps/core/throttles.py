@@ -5,9 +5,12 @@ Rates are registered in settings.py REST_FRAMEWORK.DEFAULT_THROTTLE_RATES.
 """
 
 import hashlib
+import math
+import random
+import time
 
-from rest_framework.throttling import (AnonRateThrottle, SimpleRateThrottle,
-                                       UserRateThrottle)
+from rest_framework.throttling import (AnonRateThrottle, BaseThrottle,
+                                       SimpleRateThrottle, UserRateThrottle)
 
 
 class LoginRateThrottle(AnonRateThrottle):
@@ -69,10 +72,111 @@ class PasswordResetConfirmRateThrottle(AnonRateThrottle):
     scope = "password_reset_confirm"
 
 
-class StepSyncRateThrottle(UserRateThrottle):
-    """10 step syncs per minute per user — prevents anti-cheat bypass attempts."""
+class _DefaultRateMixin:
+    """
+    Use the rate from settings.DEFAULT_THROTTLE_RATES when present, else `default_rate`.
+    New sync scopes therefore work without a settings change, and ops can still tune
+    them from settings.
+    """
+
+    default_rate: str | None = None
+
+    def get_rate(self):
+        rates = getattr(self, "THROTTLE_RATES", {}) or {}
+        return rates.get(self.scope) or self.default_rate
+
+
+class _JitteredWaitMixin:
+    """
+    Adds a random spread to Retry-After so that phones throttled in the same second do
+    not all come back in the same second (thundering herd).
+    """
+
+    wait_jitter_fraction = 0.3
+
+    def wait(self):
+        base = super().wait()
+        if base is None:
+            return None
+        return math.ceil(base * (1 + random.uniform(0, self.wait_jitter_fraction)))
+
+
+class StepSyncRateThrottle(_DefaultRateMixin, _JitteredWaitMixin, UserRateThrottle):
+    """
+    Burst limit on daily step syncs per user (settings `step_sync`, 10/minute).
+    The app syncs at most about once a minute while walking with the app open and
+    every 15+ minutes in the background; a 7-day catch-up is paced to stay under this.
+    """
 
     scope = "step_sync"
+    default_rate = "10/minute"
+
+
+class StepSyncSustainedThrottle(_DefaultRateMixin, _JitteredWaitMixin, UserRateThrottle):
+    """Sustained per-user ceiling for daily step syncs (normal use is < 100/hour)."""
+
+    scope = "step_sync_sustained"
+    default_rate = "600/hour"
+
+
+class StepHourlySyncRateThrottle(_DefaultRateMixin, _JitteredWaitMixin, UserRateThrottle):
+    """Burst limit for hourly-bucket / route uploads per user."""
+
+    scope = "step_sync_hourly"
+    default_rate = "10/minute"
+
+
+class StepSyncGlobalThrottle(BaseThrottle):
+    """
+    Whole-server load shedding for step syncs: a fixed-window counter shared by every user.
+    When the fleet exceeds `step_sync_global` (default 1200 per minute, i.e. ~20/s on the
+    single web instance) the extra requests get 429 with a *randomised* Retry-After
+    (window remainder + up to 60 s) so the herd spreads out instead of retrying in lockstep.
+    Phones keep the data and retry later, so shedding never loses steps.
+    """
+
+    scope = "step_sync_global"
+    default_rate = "1200/minute"
+    max_extra_spread_seconds = 60
+
+    def __init__(self):
+        self._wait = None
+
+    def _limits(self):
+        from django.conf import settings
+
+        rates = (getattr(settings, "REST_FRAMEWORK", {}) or {}).get(
+            "DEFAULT_THROTTLE_RATES", {}
+        ) or {}
+        rate = rates.get(self.scope) or self.default_rate
+        num, period = rate.split("/")
+        duration = {"s": 1, "m": 60, "h": 3600, "d": 86400}[period[0]]
+        return int(num), duration
+
+    def allow_request(self, request, view):
+        from django.core.cache import cache
+
+        limit, duration = self._limits()
+        now = time.time()
+        window = int(now // duration)
+        key = f"throttle_step_sync_global_{window}"
+        try:
+            if cache.add(key, 1, timeout=duration + 5):
+                count = 1
+            else:
+                count = cache.incr(key)
+        except Exception:
+            return True  # cache trouble must never block syncing
+        if count <= limit:
+            return True
+        remaining = duration - (now - window * duration)
+        self._wait = math.ceil(
+            remaining + random.uniform(0, self.max_extra_spread_seconds)
+        )
+        return False
+
+    def wait(self):
+        return self._wait
 
 
 class ChatMessageRateThrottle(UserRateThrottle):

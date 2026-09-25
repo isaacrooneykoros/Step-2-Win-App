@@ -31,6 +31,8 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -76,7 +78,14 @@ public class DeviceStepCounterPlugin extends Plugin {
     private boolean hasAccelerometer = false;
     private float latestGyroMagnitude = 0f;
 
-    private final GaitAnalyzer gaitAnalyzer = new GaitAnalyzer();
+    private final GaitAnalyzer gaitAnalyzer = GaitAnalyzer.SHARED;
+    private final ExecutorService syncExecutor = Executors.newSingleThreadExecutor();
+    private long lastLedgerWriteAtMs = 0L;
+    private long lastStepsEventAtMs = 0L;
+    private int lastEmittedSteps = -1;
+    private long lastMovementAtMs = 0L;
+    private static final long LEDGER_WRITE_EVERY_MS = 15_000L;
+    private static final long STEPS_EVENT_EVERY_MS = 3_000L;
 
     private float latestSensorSteps = -1f;
     private float lastSensorValue = -1f;
@@ -96,28 +105,39 @@ public class DeviceStepCounterPlugin extends Plugin {
                 float raw = event.values[0];
 
                 long nowMs = System.currentTimeMillis();
-                if (latestSensorSteps < 0f || lastSensorValue < 0f || raw < lastSensorValue) {
-                    latestSensorSteps = raw;
+                if (lastSensorValue < 0f || raw < lastSensorValue) {
                     stepTimesMillis.clear();
-                } else if (raw >= lastSensorValue) {
+                } else {
                     int delta = Math.round(raw - lastSensorValue);
                     if (delta > 0) {
+                        // Same 4-steps-per-second clamp as before, for the cadence/burst numbers.
                         long elapsedMs = Math.max(1L, nowMs - lastSensorEventAtMs);
                         int maxDelta = Math.max(1, (int) Math.ceil(elapsedMs / 250.0));
                         int acceptedDelta = Math.min(delta, maxDelta);
-                        latestSensorSteps = Math.max(0f, latestSensorSteps) + acceptedDelta;
                         for (int i = 0; i < acceptedDelta; i++) {
                             stepTimesMillis.addLast(nowMs);
                         }
+                        lastMovementAtMs = nowMs;
                     }
                 }
 
+                // Keep the true hardware value: the ledger turns readings into per-hour steps
+                // (with the same 4-steps/s clamp) and handles reboots and midnight.
+                latestSensorSteps = raw;
                 lastSensorValue = raw;
                 lastSensorEventAtMs = nowMs;
                 trimOldStepTimes(nowMs);
+                StepSyncEngine.liveCadenceSpm = stepTimesMillis.size();
+                StepSyncEngine.liveBurst5s = countStepsInWindow(nowMs, 5_000L);
+                StepSyncEngine.liveUpdatedAt = nowMs;
 
-                SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-                prefs.edit().putFloat(KEY_LATEST_RAW, latestSensorSteps).apply();
+                if (nowMs - lastLedgerWriteAtMs >= LEDGER_WRITE_EVERY_MS) {
+                    lastLedgerWriteAtMs = nowMs;
+                    StepLedger.record(getContext(), raw);
+                    getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                        .putFloat(KEY_LATEST_RAW, raw).apply();
+                }
+                maybeEmitSteps(nowMs, raw);
                 return;
             }
 
@@ -363,7 +383,7 @@ public class DeviceStepCounterPlugin extends Plugin {
 
         if (stepCounterSensor == null || sensorManager == null) {
             JSObject ret = new JSObject();
-            ret.put("steps", 0);
+            ret.put("steps", StepLedger.todayTotal(getContext()));
             ret.put("date", today());
             long nowMs = System.currentTimeMillis();
             ret.put("timestamp", nowMs);
@@ -384,27 +404,22 @@ public class DeviceStepCounterPlugin extends Plugin {
 
         float raw = latestSensorSteps;
         if (raw < 0f) {
-            raw = prefs.getFloat(KEY_LATEST_RAW, -1f);
-            latestSensorSteps = raw;
+            // Listener just registered (or the app isn't in front): read the counter directly.
+            raw = StepCounterReader.readOnce(getContext(), 2_500L);
+            if (raw >= 0f) latestSensorSteps = raw;
         }
-
-        if (raw < 0f) {
+        if (raw >= 0f) {
+            StepLedger.record(getContext(), raw);
+            lastLedgerWriteAtMs = System.currentTimeMillis();
+        } else if (StepLedger.lastReadingAt(getContext()) == 0L) {
             call.reject("Step sensor is warming up. Try again in a moment.");
             return;
         }
 
-        String baselineDate = prefs.getString(KEY_DATE, "");
-        float baselineValue = prefs.getFloat(KEY_BASELINE, -1f);
-
-        if (!today.equals(baselineDate) || baselineValue < 0f) {
-            baselineValue = raw;
-            prefs.edit()
-                .putString(KEY_DATE, today)
-                .putFloat(KEY_BASELINE, baselineValue)
-                .apply();
-        }
-
-        int stepsToday = Math.max(0, Math.round(raw - baselineValue));
+        // Today's steps from the durable ledger: survives reboots and app kills, and
+        // includes the steps taken while the app was closed (the old per-day baseline
+        // dropped everything before the first read of the day, and zeroed a day on reboot).
+        int stepsToday = StepLedger.todayTotal(getContext());
         long nowMs = System.currentTimeMillis();
         trimOldStepTimes(nowMs);
         int cadenceSpm = stepTimesMillis.size();
@@ -427,8 +442,10 @@ public class DeviceStepCounterPlugin extends Plugin {
             lastReportedTotal = -1;
         }
 
+        // Reading steps no longer consumes a sequence number: numbers are claimed only when
+        // an upload is actually sent (StepSyncEngine / claimSequence()), so two readers can
+        // never hand the server a repeated or decreasing sequence.
         int stepsDelta = lastReportedTotal >= 0 ? Math.max(0, stepsToday - lastReportedTotal) : stepsToday;
-        prefsForSession.edit().putInt(KEY_SESSION_LAST_TOTAL, stepsToday).putInt(KEY_SESSION_NEXT_SEQUENCE, Math.max(1, nextSequence + 1)).apply();
 
         int cadenceOut = cadenceSpm;
         if (gait.validatedCadenceSpm > 0) {
@@ -477,32 +494,35 @@ public class DeviceStepCounterPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * Enables smart background capture. It does NOT start a foreground service: the
+     * hardware counter counts by itself, WorkManager uploads, and the walking service only
+     * starts when the user actually walks during a challenge day.
+     */
     @PluginMethod
     public void startBackgroundCapture(PluginCall call) {
         if (activityRecognitionState() != PermissionState.GRANTED) {
             call.reject("Activity recognition permission not granted.");
             return;
         }
-
         Context context = getContext();
-        Intent intent = new Intent(context, StepCaptureForegroundService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(context, intent);
-        } else {
-            context.startService(intent);
+        SyncPolicy.prefs(context).edit().putBoolean(SyncPolicy.KEY_CAPTURE_ENABLED, true).apply();
+        if (!SyncPolicy.apiBase(context).isEmpty()) {
+            StepSyncScheduler.ensurePeriodic(context);
         }
-
+        MotionTriggers.refresh(context);
         JSObject ret = new JSObject();
-        ret.put("running", true);
+        ret.put("running", StepCaptureForegroundService.isRunning());
+        ret.put("smart", true);
         call.resolve(ret);
     }
 
     @PluginMethod
     public void stopBackgroundCapture(PluginCall call) {
         Context context = getContext();
-        Intent intent = new Intent(context, StepCaptureForegroundService.class);
-        context.stopService(intent);
-
+        SyncPolicy.prefs(context).edit().putBoolean(SyncPolicy.KEY_CAPTURE_ENABLED, false).apply();
+        StepCaptureForegroundService.stop(context);
+        MotionTriggers.refresh(context);
         JSObject ret = new JSObject();
         ret.put("running", false);
         call.resolve(ret);
@@ -510,25 +530,93 @@ public class DeviceStepCounterPlugin extends Plugin {
 
     @PluginMethod
     public void getBackgroundStatus(PluginCall call) {
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         JSObject ret = new JSObject();
-        ret.put("running", prefs.getBoolean(KEY_BACKGROUND_RUNNING, false));
+        ret.put("running", StepCaptureForegroundService.isRunning());
+        ret.put("motionTriggers", MotionTriggers.isRegistered(getContext()));
+        ret.put("backgroundIntervalMinutes", StepSyncScheduler.currentIntervalMinutes(getContext()));
+        call.resolve(ret);
+    }
+
+    /**
+     * Web layer -> native sync settings: API URL, stride/weight (distance and calories),
+     * Data Saver, and the user's active challenge date ranges (15-min cadence on challenge
+     * days, the walking service, and the deadline boost).
+     */
+    @PluginMethod
+    public void configureSync(PluginCall call) {
+        Context context = getContext();
+        SharedPreferences.Editor editor = SyncPolicy.prefs(context).edit();
+        String apiBase = call.getString("apiBaseUrl", null);
+        if (apiBase != null && !apiBase.trim().isEmpty()) editor.putString(SyncPolicy.KEY_API_BASE, apiBase.trim());
+        Double stride = call.getDouble("strideCm");
+        if (stride != null && stride > 0) editor.putFloat(SyncPolicy.KEY_STRIDE_CM, stride.floatValue());
+        Double weight = call.getDouble("weightKg");
+        if (weight != null && weight > 0) editor.putFloat(SyncPolicy.KEY_WEIGHT_KG, weight.floatValue());
+        Boolean dataSaver = call.getBoolean("dataSaver");
+        if (dataSaver != null) editor.putBoolean(SyncPolicy.KEY_DATA_SAVER, dataSaver);
+        com.getcapacitor.JSArray windows = call.getArray("challengeWindows");
+        if (windows != null) editor.putString(SyncPolicy.KEY_CHALLENGES, windows.toString());
+        editor.commit();
+        StepSyncScheduler.ensurePeriodic(context);
+        MotionTriggers.refresh(context);
+        JSObject ret = new JSObject();
+        ret.put("backgroundIntervalMinutes", StepSyncScheduler.currentIntervalMinutes(context));
+        ret.put("challengeActiveToday", SyncPolicy.challengeActiveToday(context));
+        ret.put("nearDeadline", SyncPolicy.nearDeadline(context));
+        ret.put("motionTriggers", MotionTriggers.isRegistered(context));
+        call.resolve(ret);
+    }
+
+    /** Runs the native uploader now (off the UI thread). Honours Retry-After / backoff. */
+    @PluginMethod
+    public void syncNow(PluginCall call) {
+        final boolean force = Boolean.TRUE.equals(call.getBoolean("force", false));
+        final String reason = call.getString("reason", "app");
+        final Context context = getContext();
+        final float raw = latestSensorSteps;
+        syncExecutor.execute(() -> {
+            if (raw >= 0f) {
+                StepLedger.record(context, raw);
+            } else {
+                StepCounterReader.readAndRecord(context, 2_500L);
+            }
+            StepSyncEngine.Options options = new StepSyncEngine.Options();
+            options.force = force;
+            options.foreground = SyncPolicy.appInForeground;
+            options.reason = reason;
+            StepSyncEngine.Result result = StepSyncEngine.run(context, options);
+            try {
+                call.resolve(JSObject.fromJSONObject(result.toJson()));
+            } catch (Exception error) {
+                call.reject("Sync result unavailable");
+            }
+        });
+    }
+
+    @PluginMethod
+    public void getSyncStatus(PluginCall call) {
+        try {
+            call.resolve(JSObject.fromJSONObject(StepSyncEngine.status(getContext())));
+        } catch (Exception error) {
+            call.reject("Sync status unavailable");
+        }
+    }
+
+    /** Claims the next sequence number of the active step session (strictly increasing). */
+    @PluginMethod
+    public void claimSequence(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("sequence_number", StepSyncEngine.claimSequence(getContext()));
         call.resolve(ret);
     }
 
     @PluginMethod
     public void getPendingWaypoints(PluginCall call) {
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        String raw = prefs.getString(StepCaptureForegroundService.KEY_WAYPOINTS_JSON, "[]");
-        String date = prefs.getString(StepCaptureForegroundService.KEY_WAYPOINTS_DATE, today());
-
+        JSONObject pending = StepCaptureForegroundService.readPendingWaypoints(getContext());
         JSObject ret = new JSObject();
-        ret.put("date", date);
-
-        JSONArray source;
-        try {
-            source = new JSONArray(raw);
-        } catch (Exception ignored) {
+        ret.put("date", pending.optString("date", today()));
+        JSONArray source = pending.optJSONArray("waypoints");
+        if (source == null) {
             source = new JSONArray();
         }
 
@@ -554,6 +642,7 @@ public class DeviceStepCounterPlugin extends Plugin {
     @PluginMethod
     public void clearPendingWaypoints(PluginCall call) {
         SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        // Note: the native uploader clears uploaded points itself; this stays for the web layer.
         // Optional `date` + `upTo` (recorded_at of the last uploaded point): only drop points that
         // were uploaded, so a point captured between read and clear is never lost.
         String date = call.getString("date", null);
@@ -606,19 +695,56 @@ public class DeviceStepCounterPlugin extends Plugin {
     @Override
     protected void handleOnPause() {
         super.handleOnPause();
+        SyncPolicy.appInForeground = false;
+        if (latestSensorSteps >= 0f) {
+            StepLedger.record(getContext(), latestSensorSteps);
+        }
         unregisterListener();
+        // Leaving the app mid-walk on a challenge day: hand gait analysis to the walking
+        // service (starting it now, while the activity is still visible, is allowed).
+        boolean walkingNow = System.currentTimeMillis() - lastMovementAtMs < 90_000L;
+        if (walkingNow && SyncPolicy.captureEnabled(getContext())) {
+            StepCaptureForegroundService.start(getContext(), "app_left_while_walking");
+        }
     }
 
     @Override
     protected void handleOnResume() {
         super.handleOnResume();
+        SyncPolicy.appInForeground = true;
+        // The open app analyses motion itself; the walking service isn't needed now.
+        StepCaptureForegroundService.stop(getContext());
         if (activityRecognitionState() == PermissionState.GRANTED) {
             ensureListenerRegistered();
         }
     }
 
+    /** "stepsChanged" events so the web layer syncs on meaningful change instead of polling. */
+    private void maybeEmitSteps(long nowMs, float raw) {
+        if (nowMs - lastStepsEventAtMs < STEPS_EVENT_EVERY_MS) {
+            return;
+        }
+        lastStepsEventAtMs = nowMs;
+        if (nowMs - lastLedgerWriteAtMs > 1_000L) {
+            lastLedgerWriteAtMs = nowMs;
+            StepLedger.record(getContext(), raw);
+        }
+        int steps = StepLedger.todayTotal(getContext());
+        if (steps == lastEmittedSteps) {
+            return;
+        }
+        lastEmittedSteps = steps;
+        JSObject data = new JSObject();
+        data.put("steps", steps);
+        data.put("date", today());
+        data.put("cadence_spm", stepTimesMillis.size());
+        notifyListeners("stepsChanged", data);
+    }
+
     @Override
     protected void handleOnDestroy() {
+        SyncPolicy.appInForeground = false;
+        syncExecutor.shutdown();
         unregisterListener();
         synchronized (this) {
             if (sensorThread != null) {

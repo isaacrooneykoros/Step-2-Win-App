@@ -2,8 +2,10 @@ import { loadPreferences, usePreference } from '../components/settings/preferenc
 
 /**
  * Data saver — one switch in Settings, applied everywhere the app spends mobile data:
- * - background step sync every 5 minutes instead of every 30 seconds (resume / manual sync stay immediate)
- * - hourly + route (waypoint) uploads batched to every 30 minutes instead of every 5
+ * - step sync: uploads after 300 new steps / every 5 min while walking (instead of 75 / 1 min),
+ *   background every 60 min instead of 30 (challenge days stay at 15), route points skipped;
+ *   resume / manual sync stay immediate (see useSmartStepSync and SyncPolicy.java)
+ * - hourly uploads batched to every 30 minutes instead of every 5
  * - no automatic polling (React Query `refetchInterval`) — screens refresh on open, pull and resume
  * - live step updates socket paused
  * - activity maps show a "Load map" button instead of downloading tiles automatically

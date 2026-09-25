@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DEBUG BUILDS ONLY: merged into the debug APK; release builds never contain this receiver. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name=".DebugSyncReceiver"
+            android:exported="true" />
+    </application>
+</manifest>

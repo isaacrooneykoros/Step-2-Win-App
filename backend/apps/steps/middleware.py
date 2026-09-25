@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import time
 
 from django.conf import settings
@@ -23,6 +24,12 @@ class HMACSignatureMiddleware:
 
     def __call__(self, request):
         if request.path in self.PROTECTED_PATHS and request.method == "POST":
+            if not request.headers.get("X-App-Signature") and self._has_session_credentials(request):
+                # Session-authenticated sync (the app's current protocol): the view verifies
+                # the server-issued session token hash, session ownership/expiry, sequence
+                # monotonicity and replay before accepting anything. An invalid or foreign
+                # session is rejected there (400/401) and recorded as a replay event.
+                return self.get_response(request)
             result = self._verify(request)
             if not result["valid"]:
                 return JsonResponse(
@@ -56,6 +63,18 @@ class HMACSignatureMiddleware:
             return {"valid": False, "code": "INVALID_SIGNATURE"}
 
         return {"valid": True, "code": "OK"}
+
+    @staticmethod
+    def _has_session_credentials(request) -> bool:
+        try:
+            body = json.loads(request.body or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            return False
+        if not isinstance(body, dict):
+            return False
+        session_id = str(body.get("session_id") or "").strip()
+        session_token = str(body.get("session_token") or "").strip()
+        return bool(session_id and session_token)
 
     @staticmethod
     def _resolve_user_id(request) -> str:

@@ -38,7 +38,9 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
         CAPPluginMethod(name: "stopBackgroundCapture", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getBackgroundStatus", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getPendingWaypoints", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "clearPendingWaypoints", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "clearPendingWaypoints", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "claimSequence", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getStepHistory", returnType: CAPPluginReturnPromise)
     ]
 
     // Same key names as the Android SharedPreferences file.
@@ -350,8 +352,8 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
                 let lastTotal = defaults.integer(forKey: DeviceStepCounterPlugin.keySessionLastTotal)
                 stepsDelta = max(0, steps - lastTotal)
             }
-            defaults.set(steps, forKey: DeviceStepCounterPlugin.keySessionLastTotal)
-            defaults.set(sequence + 1, forKey: DeviceStepCounterPlugin.keySessionNextSequence)
+            // Reading steps no longer consumes a sequence number: the web layer claims one
+            // per upload (claimSequence), so sequence numbers only ever increase.
 
             trimStepTimes(now)
             let lastMinute = stepTimes.count
@@ -404,6 +406,71 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
             // No foreground service on iOS; CoreMotion records steps while the app is closed.
             "background_running": false
         ]
+    }
+
+    /// Next sequence number of the active step session (strictly increasing).
+    @objc func claimSequence(_ call: CAPPluginCall) {
+        let next = stateQueue.sync { () -> Int in
+            let value = max(1, defaults.integer(forKey: DeviceStepCounterPlugin.keySessionNextSequence))
+            defaults.set(value + 1, forKey: DeviceStepCounterPlugin.keySessionNextSequence)
+            return value
+        }
+        call.resolve(["sequence_number": next])
+    }
+
+    /// Per-day totals and 24 hourly buckets for the last `days` days (max 7, what CoreMotion
+    /// keeps), so steps taken while the app was closed or offline are caught up on return.
+    @objc func getStepHistory(_ call: CAPPluginCall) {
+        guard CMPedometer.isStepCountingAvailable(), CMPedometer.authorizationStatus() == .authorized else {
+            call.resolve(["days": []])
+            return
+        }
+        let dayCount = min(7, max(1, call.getInt("days") ?? 7))
+        let calendar = Calendar.current
+        let now = Date()
+        let todayStart = calendar.startOfDay(for: now)
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var totals: [String: Int] = [:]
+        var hours: [String: [Int]] = [:]
+
+        for offset in 0..<dayCount {
+            guard let dayStart = calendar.date(byAdding: .day, value: -offset, to: todayStart) else { continue }
+            let key = localDateString(dayStart)
+            let dayEnd = min(now, calendar.date(byAdding: .day, value: 1, to: dayStart) ?? now)
+            lock.lock()
+            totals[key] = 0
+            hours[key] = Array(repeating: 0, count: 24)
+            lock.unlock()
+
+            group.enter()
+            pedometer.queryPedometerData(from: dayStart, to: dayEnd) { data, _ in
+                lock.lock()
+                totals[key] = max(0, data?.numberOfSteps.intValue ?? 0)
+                lock.unlock()
+                group.leave()
+            }
+            for hour in 0..<24 {
+                guard let hourStart = calendar.date(byAdding: .hour, value: hour, to: dayStart), hourStart < dayEnd else { break }
+                let hourEnd = min(dayEnd, calendar.date(byAdding: .hour, value: 1, to: hourStart) ?? dayEnd)
+                group.enter()
+                pedometer.queryPedometerData(from: hourStart, to: hourEnd) { data, _ in
+                    lock.lock()
+                    hours[key]?[hour] = max(0, data?.numberOfSteps.intValue ?? 0)
+                    lock.unlock()
+                    group.leave()
+                }
+            }
+        }
+
+        group.notify(queue: DispatchQueue.global(qos: .utility)) {
+            lock.lock()
+            let result: [[String: Any]] = totals.keys.sorted().map { key in
+                ["date": key, "steps": totals[key] ?? 0, "hours": hours[key] ?? []]
+            }
+            lock.unlock()
+            call.resolve(["days": result])
+        }
     }
 
     // MARK: "Background capture" (Android foreground service) — iOS equivalents

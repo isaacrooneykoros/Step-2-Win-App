@@ -79,6 +79,70 @@ export interface DeviceStepCounterPendingWaypoints {
   waypoints: DeviceStepCounterWaypoint[];
 }
 
+/** Android native uploader outcome (DeviceStepCounter.syncNow). */
+export type NativeSyncStatus =
+  | 'ok'
+  | 'nothing'
+  | 'pending'
+  | 'busy'
+  | 'offline'
+  | 'backoff'
+  | 'throttled'
+  | 'auth'
+  | 'signed_out'
+  | 'not_configured'
+  | 'rejected'
+  | 'error';
+
+export interface NativeSyncResult {
+  status: NativeSyncStatus;
+  uploaded: number;
+  pendingDays: number;
+  /** ISO time before which the server asked not to retry (Retry-After / backoff). */
+  retryAt: string | null;
+  message?: string;
+}
+
+export interface NativeSyncPendingDay {
+  date: string;
+  steps: number;
+  ackedSteps: number;
+  retries: number;
+  nextAttemptAt: string | null;
+}
+
+export interface NativeSyncStatusReport {
+  pending: NativeSyncPendingDay[];
+  signedIn: boolean;
+  todaySteps: number;
+  lastSuccessAt: string | null;
+  lastAttemptAt: string | null;
+  nextAllowedAt: string | null;
+  failureCount: number;
+  lastStatus: string;
+  lastReadingAt: string | null;
+  saverMode: boolean;
+  nearDeadline: boolean;
+  challengeActiveToday: boolean;
+  backgroundIntervalMinutes: number;
+}
+
+export interface SyncConfiguration {
+  apiBaseUrl: string;
+  strideCm?: number;
+  weightKg?: number;
+  dataSaver?: boolean;
+  /** Active challenges the user is in: local-date ranges (YYYY-MM-DD, inclusive). */
+  challengeWindows?: Array<{ start: string; end: string }>;
+}
+
+export interface StepHistoryDay {
+  date: string;
+  steps: number;
+  /** 24 hourly buckets (local time). */
+  hours: number[];
+}
+
 export interface DeviceStepCounterPlugin {
   checkPermissions(): Promise<DeviceStepCounterPermissionStatus>;
   requestPermissions(): Promise<DeviceStepCounterPermissionStatus>;
@@ -110,6 +174,26 @@ export interface DeviceStepCounterPlugin {
   getPendingWaypoints(): Promise<DeviceStepCounterPendingWaypoints>;
   /** Without options clears everything; with `date` + `upTo` only points recorded at or before `upTo`. */
   clearPendingWaypoints(options?: { date: string; upTo: string }): Promise<{ cleared: boolean; remaining?: number }>;
+  /** Next sequence number of the active step session (strictly increasing, shared with native uploads). */
+  claimSequence(): Promise<{ sequence_number: number }>;
+
+  // ── Android: native smart sync (WorkManager + walking service + one uploader) ──
+  configureSync(config: SyncConfiguration): Promise<{
+    backgroundIntervalMinutes: number;
+    challengeActiveToday: boolean;
+    nearDeadline: boolean;
+    motionTriggers: boolean;
+  }>;
+  syncNow(options?: { force?: boolean; reason?: string }): Promise<NativeSyncResult>;
+  getSyncStatus(): Promise<NativeSyncStatusReport>;
+  /** Android: fires (at most every 3 s) when today's step total changes while the app is open. */
+  addListener(
+    eventName: 'stepsChanged',
+    listener: (data: { steps: number; date: string; cadence_spm: number }) => void,
+  ): Promise<{ remove: () => Promise<void> }>;
+
+  // ── iOS: CoreMotion history for offline catch-up (the phone keeps ~7 days) ──
+  getStepHistory(options: { days: number }): Promise<{ days: StepHistoryDay[] }>;
 }
 
 /** Android: DeviceStepCounterPlugin.java (sensor + foreground service). iOS: DeviceStepCounterPlugin.swift (CMPedometer). */

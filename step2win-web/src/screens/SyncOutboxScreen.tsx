@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, CloudOff, Footprints, RefreshCw, Route, UploadCloud, type LucideIcon } from 'lucide-react';
@@ -6,6 +6,9 @@ import api from '../services/api/client';
 import { useAuthStore } from '../store/authStore';
 import { useHealthSync } from '../hooks/useHealthSync';
 import { listOutboxItems, type SyncOutboxItem } from '../services/offlineSyncOutbox';
+import { DeviceStepCounter, type NativeSyncStatusReport } from '../plugins/deviceStepCounter';
+import { useSyncState } from '../services/stepSyncCoordinator';
+import { isAndroidApp } from '../utils/platform';
 import { formatDateTime, formatRelativeTime, formatSteps } from '../lib/format';
 import { ScreenHeader, IconButton } from '../components/ui/ScreenHeader';
 import { ListGroup } from '../components/ui/ListRow';
@@ -27,6 +30,23 @@ function dayLabel(date: unknown) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+/** Android: a day the phone counted but the server hasn't confirmed yet (native ledger). */
+function nativePendingAsItems(status: NativeSyncStatusReport | undefined): SyncOutboxItem[] {
+  if (!status?.pending?.length) return [];
+  const at = status.lastAttemptAt || status.lastReadingAt || new Date().toISOString();
+  return status.pending.map((day) => ({
+    id: `native-${day.date}`,
+    queueKey: `native:${day.date}`,
+    userId: 0,
+    kind: 'health' as const,
+    payload: { date: day.date, steps: day.steps, acked_steps: day.ackedSteps, next_attempt_at: day.nextAttemptAt },
+    idempotencyKey: `day-${day.date}`,
+    retryCount: day.retries,
+    createdAt: at,
+    updatedAt: at,
+  }));
+}
+
 /** What's in a queued item, in plain words. */
 function describeItem(item: SyncOutboxItem): { icon: LucideIcon; title: string; detail: string } {
   if (item.kind === 'health') {
@@ -38,6 +58,8 @@ function describeItem(item: SyncOutboxItem): { icon: LucideIcon; title: string; 
     if (distance > 0) parts.push(`${distance.toFixed(2)} km`);
     if (activeMinutes > 0) parts.push(`${activeMinutes} active min`);
     if (calories > 0) parts.push(`${calories} kcal`);
+    const acked = Number(item.payload?.acked_steps ?? NaN);
+    if (Number.isFinite(acked) && acked > 0) parts.push(`${formatSteps(acked)} already on your account`);
     return { icon: Footprints, title: `Daily steps · ${dayLabel(item.payload?.date)}`, detail: parts.join(' · ') };
   }
   const hourly = Array.isArray(item.payload?.hourly) ? item.payload.hourly : [];
@@ -67,10 +89,12 @@ function useOnline() {
 
 export default function SyncOutboxScreen() {
   const storeUserId = useAuthStore((state) => state.user?.id);
-  const { syncHealthSilent, isSyncing } = useHealthSync();
+  const { syncHealthNow, isSyncing } = useHealthSync();
   const { showToast } = useToast();
   const isOnline = useOnline();
   const isNativeApp = Capacitor.isNativePlatform() && ['android', 'ios'].includes(Capacitor.getPlatform());
+  const nativeSync = isAndroidApp();
+  const { retryAt } = useSyncState();
 
   const statusPoll = usePollInterval(30_000);
   const statusQuery = useQuery<DeviceStatus>({
@@ -83,18 +107,35 @@ export default function SyncOutboxScreen() {
   const profileId = queryClient.getQueryData<{ id: number }>(['profile'])?.id;
   const userId = storeUserId ?? profileId;
 
+  // Android: step data waits in the native ledger until the server confirms it.
+  const nativeStatusQuery = useQuery({
+    queryKey: ['native-sync-status'],
+    queryFn: () => DeviceStepCounter.getSyncStatus(),
+    enabled: nativeSync,
+    refetchInterval: 10_000,
+  });
+
   const {
-    data: queue = [],
+    data: webQueue = [],
     isLoading,
     isFetching,
-    refetch,
+    refetch: refetchWebQueue,
   } = useQuery({
     queryKey: ['sync-outbox', userId],
     queryFn: () => listOutboxItems(userId),
     enabled: !!userId,
-    refetchInterval: 5000,
-    refetchIntervalInBackground: true,
+    refetchInterval: 10_000,
   });
+
+  const queue = useMemo(
+    () => [...nativePendingAsItems(nativeStatusQuery.data), ...webQueue],
+    [nativeStatusQuery.data, webQueue],
+  );
+  const refetchNativeStatus = nativeStatusQuery.refetch;
+  const refetch = useCallback(async () => {
+    if (nativeSync) await refetchNativeStatus();
+    return refetchWebQueue();
+  }, [nativeSync, refetchNativeStatus, refetchWebQueue]);
 
   useEffect(() => {
     const onOnline = () => void refetch();
@@ -114,15 +155,18 @@ export default function SyncOutboxScreen() {
 
   const handleSyncNow = async () => {
     const before = summary.pending;
-    await syncHealthSilent();
-    const result = await refetch();
+    await syncHealthNow();
+    await refetch();
     void statusQuery.refetch();
-    const after = result.data?.length ?? before;
+    const nativeAfter = nativeSync ? (await DeviceStepCounter.getSyncStatus().catch(() => null))?.pending?.length ?? 0 : 0;
+    const after = nativeAfter + (await listOutboxItems(userId)).length;
     if (before > 0 && after === 0) showToast({ message: 'Everything is synced.', type: 'success' });
     else if (before > 0 && after > 0) showToast({ message: `${after} update${after === 1 ? '' : 's'} still waiting. We’ll keep retrying.`, type: 'info' });
   };
 
-  const lastSync = statusQuery.data?.last_sync_time;
+  const lastSync = statusQuery.data?.last_sync_time ?? nativeStatusQuery.data?.lastSuccessAt ?? null;
+  const nextRetryAt = Math.max(retryAt, Date.parse(nativeStatusQuery.data?.nextAllowedAt ?? '') || 0);
+  const waitingForServer = nextRetryAt > Date.now();
   const synced = summary.pending === 0;
 
   const headline = synced
@@ -135,9 +179,11 @@ export default function SyncOutboxScreen() {
     ? 'Your steps are safely on your account. If you lose connection, new step data waits here until it can upload.'
     : !isOnline
       ? 'Your steps are stored on this phone and will upload automatically when you’re back online. Nothing is lost.'
-      : summary.retrying > 0
-        ? 'Some uploads didn’t go through yet. They’re kept on this phone and retried automatically — you can also retry now.'
-        : 'These will upload in the next few moments. Your steps are stored on this phone until the server confirms them.';
+      : waitingForServer
+        ? `The server asked us to wait a moment. Your steps are stored on this phone and will upload after ${new Date(nextRetryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`
+        : summary.retrying > 0
+          ? 'Some uploads didn’t go through yet. They’re kept on this phone and retried automatically — you can also retry now.'
+          : 'These will upload in the next few moments. Your steps are stored on this phone until the server confirms them.';
 
   return (
     <div className="pb-nav">
@@ -213,6 +259,13 @@ export default function SyncOutboxScreen() {
             Your phone counts steps, and Step2Win uploads them to your account. If an upload can’t get through, it’s kept on this phone and
             retried when you reconnect. Each item is removed only after the server confirms it, so the same steps are never counted twice.
           </p>
+          {nativeSync && (
+            <p className="mt-2 text-callout text-text-secondary">
+              Counting keeps going when the app is closed. Step2Win uploads while you walk with the app open, and in the background about every{' '}
+              {nativeStatusQuery.data?.backgroundIntervalMinutes || 30} minutes — more often in the last two hours of a challenge, less often
+              with Data Saver or Battery Saver on. A short “Recording your challenge walk” notification appears only while you walk on a challenge day.
+            </p>
+          )}
           {!isNativeApp && (
             <p className="mt-2 text-caption text-text-muted">In the browser, queued items are kept in local storage; the phone app uses an on-device database.</p>
           )}

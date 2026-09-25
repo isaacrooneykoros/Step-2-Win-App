@@ -29,6 +29,10 @@ class HealthRecord(models.Model):
 
     is_suspicious = models.BooleanField(default=False)
     synced_at = models.DateTimeField(auto_now=True)
+    # Phone clock time of the newest reading applied to this day. Lets the sync endpoint
+    # recognise an older upload arriving late (out-of-order retry) and ignore it instead
+    # of treating the lower total as tampering.
+    last_client_timestamp = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ["user", "date"]
