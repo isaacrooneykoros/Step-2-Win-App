@@ -170,18 +170,24 @@ def check_step_milestones(user_id):
 @shared_task(name="gamification.reset_weekly_xp")
 def reset_weekly_xp():
     """
-    Reset weekly XP counter every Monday
-    Runs once weekly via Celery Beat
+    Reset the weekly XP counter at the start of each ISO week (Monday 00:00 UTC).
+
+    Scheduled for Mondays 00:00. Safe to run late, twice or on any day: it only resets
+    profiles whose last reset (``weekly_reset``) is before this week's Monday, so a
+    run that was missed on Monday catches up on the next run, and a second run in the
+    same week changes nothing (it never wipes XP earned after this week's reset).
     """
-    from django.utils import timezone
+    from datetime import datetime, time
+    from datetime import timezone as dt_timezone
 
     now = timezone.now()
-
-    # Only run on Mondays
-    if now.weekday() != 0:
-        return "Not Monday, skipping weekly reset"
-
-    updated = UserXP.objects.all().update(xp_this_week=0, weekly_reset=now)
+    week_start = timezone.make_aware(
+        datetime.combine(now.date() - timedelta(days=now.weekday()), time.min),
+        dt_timezone.utc,
+    )
+    updated = UserXP.objects.filter(weekly_reset__lt=week_start).update(
+        xp_this_week=0, weekly_reset=now
+    )
 
     return f"Reset weekly XP for {updated} users"
 

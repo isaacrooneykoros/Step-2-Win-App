@@ -2,6 +2,9 @@ import logging
 
 from celery import shared_task
 
+# Celery registers the scheduled-job wrapper through this module (autodiscover).
+from apps.admin_api.scheduler import run_scheduled_job  # noqa: E402,F401
+
 logger = logging.getLogger(__name__)
 
 

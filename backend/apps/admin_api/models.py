@@ -430,3 +430,41 @@ class SupportReplyTemplate(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class ScheduledJobState(models.Model):
+    """Durable run state for one scheduled job (see apps/admin_api/scheduler.py).
+
+    One row per job name from settings.CELERY_BEAT_SCHEDULE. The row doubles as the
+    job's lease: a runner may start the job only after atomically moving
+    ``lease_until`` into the future (conditional UPDATE), so the same job never runs
+    twice at once across threads, processes or instances.
+    """
+
+    STATUS_OK = "ok"
+    STATUS_ERROR = "error"
+    STATUS_SKIPPED = "skipped"
+    STATUS_CHOICES = [
+        (STATUS_OK, "OK"),
+        (STATUS_ERROR, "Error"),
+        (STATUS_SKIPPED, "Skipped"),
+    ]
+
+    name = models.CharField(max_length=100, unique=True)
+    last_started_at = models.DateTimeField(null=True, blank=True)
+    last_finished_at = models.DateTimeField(null=True, blank=True)
+    last_status = models.CharField(max_length=10, choices=STATUS_CHOICES, blank=True)
+    last_duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    last_result = models.CharField(max_length=255, blank=True)
+    run_count = models.PositiveIntegerField(default=0)
+    lease_until = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Scheduled job state"
+        verbose_name_plural = "Scheduled job states"
+
+    def __str__(self):
+        return f"{self.name} ({self.last_status or 'never run'})"

@@ -107,6 +107,20 @@ def update_streak(user):
     return current_streak
 
 
+def streak_from_days(qualified_days, today) -> int:
+    """
+    Current streak from the set of dates that qualify (>= MIN_STEPS_FOR_STREAK).
+    Same rule as update_streak: count back from today, or from yesterday when today
+    does not qualify yet.
+    """
+    checking_date = today if today in qualified_days else today - timedelta(days=1)
+    streak = 0
+    while checking_date in qualified_days:
+        streak += 1
+        checking_date -= timedelta(days=1)
+    return streak
+
+
 def should_extend_streak(user, new_steps: int) -> bool:
     """
     Determine if the given step count should extend/maintain the streak.

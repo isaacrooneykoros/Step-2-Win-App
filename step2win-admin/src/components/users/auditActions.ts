@@ -1,7 +1,7 @@
 import type { ElementType } from 'react'
 import {
   AlertTriangle, Ban, CheckCircle2, CircleDot, Flag, FlagOff, KeyRound, LogIn, LogOut, PauseCircle, Pencil,
-  PlayCircle, Plus, ScanSearch, Settings, ShieldAlert, ShieldCheck, ShieldOff, Trash2, UserCheck, XCircle,
+  Play, PlayCircle, Plus, ScanSearch, Settings, ShieldAlert, ShieldCheck, ShieldOff, Trash2, UserCheck, XCircle,
 } from 'lucide-react'
 import type { BadgeTone } from '../../lib/status'
 import { humanize } from './utils'
@@ -31,6 +31,7 @@ export const AUDIT_ACTIONS: Record<string, { label: string; tone: BadgeTone; ico
   dismiss_flag: { label: 'Flag dismissed', tone: 'neutral', icon: FlagOff },
   confirm_flag: { label: 'Flag confirmed', tone: 'danger', icon: Flag },
   session_review: { label: 'Session reviewed', tone: 'info', icon: ScanSearch },
+  run_job: { label: 'Job run', tone: 'info', icon: Play },
 }
 
 export function auditAction(code: string) {

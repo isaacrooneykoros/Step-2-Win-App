@@ -107,6 +107,13 @@ services:
         sync: false
       - key: OPS_ALERT_WEBHOOK_URL
         sync: false
+      # Scheduled jobs (backend/SCHEDULED_JOBS.md). JOB_RUNNER defaults to "builtin"
+      # (in-process ticker + GitHub Actions trigger); set it to "celery" only when a
+      # Celery worker with beat runs the jobs. CRON_SECRET must equal the GitHub secret.
+      - key: JOB_RUNNER
+        sync: false
+      - key: CRON_SECRET
+        sync: false
       - key: RECON_MAX_STUCK_PROCESSING
         value: "10"
       - key: RECON_MAX_UNPROCESSED_CALLBACKS
@@ -136,6 +143,9 @@ services:
 
   # ── Celery worker (requires paid Starter plan ~$7/mo on Render) ───────────
   # Background task processing: fraud scan, challenge finalization, etc.
+  # Not needed on the free setup: the web service runs the jobs itself (JOB_RUNNER=builtin).
+  # To move to Celery, see backend/SCHEDULED_JOBS.md (one worker with `-B` is enough) and
+  # set JOB_RUNNER=celery on the web service and on the worker.
   - type: worker
     name: step2win-celery-worker
     env: python

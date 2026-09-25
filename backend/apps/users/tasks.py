@@ -9,6 +9,7 @@ from decimal import Decimal
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
@@ -192,12 +193,23 @@ def check_wallet_balance_consistency():
         )
 
     # Check 2: orphaned locked balances (locked money but no unresolved challenge).
-    locked_users = User.objects.filter(locked_balance__gt=Decimal("0.00"))
-    for user in locked_users:
-        open_participations = Participant.objects.filter(
-            user=user, challenge__status__in=open_statuses
-        ).count()
-        if open_participations == 0:
+    locked_ids = list(
+        User.objects.filter(locked_balance__gt=Decimal("0.00")).values_list("id", flat=True)
+    )
+    for user_id in locked_ids:
+        if Participant.objects.filter(
+            user_id=user_id, challenge__status__in=open_statuses
+        ).exists():
+            continue
+        with transaction.atomic():
+            # Re-check under the user's row lock: a join/finalize running right now
+            # changes both balances, and saving a stale copy would undo it. Running the
+            # job twice is a no-op the second time (locked_balance is already 0).
+            user = User.objects.select_for_update().get(id=user_id)
+            if user.locked_balance <= Decimal("0.00") or Participant.objects.filter(
+                user_id=user_id, challenge__status__in=open_statuses
+            ).exists():
+                continue
             released = user.locked_balance
             issues.append(
                 f"User {user.username} has locked balance KES {released} but no pending/active challenges"
@@ -205,10 +217,10 @@ def check_wallet_balance_consistency():
             # Fix: release the orphaned lock back to the spendable wallet.
             user.wallet_balance += released
             user.locked_balance = Decimal("0.00")
-            user.save(update_fields=["wallet_balance", "locked_balance"])
-            fixes.append(
-                f"Fixed {user.username}: released orphaned locked balance KES {released}"
-            )
+            user.save(update_fields=["wallet_balance", "locked_balance", "updated_at"])
+        fixes.append(
+            f"Fixed {user.username}: released orphaned locked balance KES {released}"
+        )
 
     # Check 3: locked_balance should cover every unresolved entry. Report only.
     expected_locks = (

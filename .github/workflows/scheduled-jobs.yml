@@ -1,0 +1,93 @@
+name: Scheduled jobs
+
+# Runs Step2Win's scheduled backend jobs for free (see backend/SCHEDULED_JOBS.md).
+#
+# Every 10 minutes, 24/7, this workflow calls POST /api/internal/jobs/run-due/ with the
+# X-Cron-Token header. The API runs whatever is due (payment reconciliation, callback
+# retries, 00:05 UTC challenge finalization, nightly checks...) and answers with a
+# summary. The call also wakes the Render free instance, which replaces the old
+# keep-warm ping; while the server is awake its built-in ticker runs jobs every minute.
+#
+# Setup: add a repository secret CRON_SECRET (Settings > Secrets and variables >
+# Actions) with the same value as the CRON_SECRET env var on the Render web service.
+# Without the secret this workflow only pings /api/health/?deep=1 and warns that no
+# jobs ran.
+#
+# Cost: keeping the free instance awake 24/7 uses ~744 instance hours a month; Render's
+# free plan allows 750 per workspace, so keep other free services in this workspace
+# asleep. GitHub Actions minutes are free for public repositories.
+# Note: GitHub pauses scheduled workflows after 60 days without repository activity;
+# re-enable it from the Actions tab (or push a commit) if that happens. GitHub may also
+# start scheduled runs a few minutes late under load; the jobs catch up on the next run.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: scheduled-jobs
+  cancel-in-progress: false
+
+env:
+  API_BASE: https://step-2-win-app.onrender.com
+
+jobs:
+  run-due:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run due jobs (wakes the server)
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::warning::CRON_SECRET is not configured; pinging health only, scheduled jobs did not run"
+            for attempt in 1 2 3 4 5 6; do
+              code=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 60 \
+                "$API_BASE/api/health/?deep=1" || true)
+              if [ "$code" = "200" ]; then
+                echo "API is up: $(cat /tmp/health.json)"
+                exit 0
+              fi
+              echo "Attempt $attempt got HTTP $code, retrying"
+              sleep 15
+            done
+            echo "::warning::API did not answer the health check"
+            exit 0
+          fi
+
+          # Cold start on Render free takes ~30-60 s: retry for up to ~90 s.
+          deadline=$(( $(date +%s) + 90 ))
+          attempt=0
+          while :; do
+            attempt=$((attempt + 1))
+            code=$(curl -s -o /tmp/jobs.json -w '%{http_code}' --max-time 90 \
+              -X POST -H "X-Cron-Token: $CRON_SECRET" -H "Content-Type: application/json" \
+              "$API_BASE/api/internal/jobs/run-due/" || true)
+            case "$code" in
+              200)
+                echo "Jobs run: $(cat /tmp/jobs.json)"
+                if grep -q '"error":[1-9]' /tmp/jobs.json; then
+                  echo "::warning::At least one scheduled job failed; see Ops monitoring > Scheduled jobs"
+                fi
+                exit 0 ;;
+              409)
+                echo "::notice::$(cat /tmp/jobs.json) - another runner (Celery) owns the jobs"
+                exit 0 ;;
+              403|404)
+                echo "::error::The API rejected the cron token (HTTP $code). CRON_SECRET must match on GitHub and Render."
+                exit 1 ;;
+              429)
+                echo "::notice::Throttled (another trigger just ran); skipping this run"
+                exit 0 ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::warning::API did not run the jobs after $attempt attempts (last HTTP $code)"
+              exit 0
+            fi
+            echo "Attempt $attempt got HTTP $code, retrying"
+            sleep 10
+          done

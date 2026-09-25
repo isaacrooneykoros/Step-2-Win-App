@@ -19,7 +19,8 @@ def process_unprocessed_callbacks():
     This handles cases where payment processing failed after logging the webhook.
     """
     from .models import CallbackLog
-    from .services import process_deposit_callback, process_payout_callback
+    from .services import (process_deposit_callback, process_payout_callback,
+                           process_withdrawal_callback)
 
     # Find unprocessed callbacks older than 1 minute
     cutoff = timezone.now() - timedelta(minutes=1)
@@ -38,6 +39,9 @@ def process_unprocessed_callbacks():
                 process_deposit_callback(log.raw_payload)
             elif log.type == "payout":
                 process_payout_callback(log.raw_payload)
+            elif log.type == "withdrawal":
+                # Idempotent: re-reads the withdrawal under lock and skips final states.
+                process_withdrawal_callback(log.raw_payload)
             else:
                 logger.warning(f"Unknown callback type: {log.type}")
                 log.processed = True
@@ -103,19 +107,28 @@ def reconcile_pending_payments():
             first_txn = transactions[0] if transactions else {}
 
             if status == "COMPLETE":
+                completed = False
                 with db_transaction.atomic():
-                    withdrawal.status = "completed"
-                    withdrawal.mpesa_reference = first_txn.get("mpesa_reference", "")
-                    withdrawal.callback_received_at = timezone.now()
-                    withdrawal.save(
-                        update_fields=[
-                            "status",
-                            "mpesa_reference",
-                            "callback_received_at",
-                            "updated_at",
-                        ]
+                    # Re-read under lock: a callback may have settled it (and refunded a
+                    # failure) while we were querying the gateway.
+                    locked = WithdrawalRequest.objects.select_for_update().get(
+                        id=withdrawal.id
                     )
-                logger.info(f"Reconciled withdrawal {withdrawal.id} as completed")
+                    if locked.status == "processing":
+                        locked.status = "completed"
+                        locked.mpesa_reference = first_txn.get("mpesa_reference", "")
+                        locked.callback_received_at = timezone.now()
+                        locked.save(
+                            update_fields=[
+                                "status",
+                                "mpesa_reference",
+                                "callback_received_at",
+                                "updated_at",
+                            ]
+                        )
+                        completed = True
+                if completed:
+                    logger.info(f"Reconciled withdrawal {withdrawal.id} as completed")
 
             elif status == "FAILED":
                 from apps.wallet.models import WalletTransaction
@@ -239,35 +252,46 @@ def _reconcile_payout(txn, result):
                 {'tracking_id': '...', 'status': 'COMPLETE|FAILED|PENDING',
                  'transactions': [...]}
     """
+    from django.db import transaction as db_transaction
     from django.utils import timezone
 
+    from .models import PaymentTransaction
     from .services import refund_failed_payout
 
     status = result.get("status", "")
     transactions = result.get("transactions", [])
     first_txn = transactions[0] if transactions else {}
+    if status not in ("COMPLETE", "FAILED"):
+        return
 
-    if status == "COMPLETE":
-        txn.status = "completed"
-        txn.mpesa_reference = first_txn.get("mpesa_reference", "")
-        txn.callback_received_at = timezone.now()
-        txn.save(
-            update_fields=[
-                "status",
-                "mpesa_reference",
-                "callback_received_at",
-                "updated_at",
-            ]
-        )
-        logger.info(f"Reconciled payout {txn.tracking_reference} as completed")
+    with db_transaction.atomic():
+        # Re-read under lock and act only on a still-pending payout: the payout callback
+        # (or an earlier reconciliation run) may have settled it while we were querying
+        # the gateway, and settling it twice would refund a failed payout twice.
+        txn = PaymentTransaction.objects.select_for_update().get(id=txn.id)
+        if txn.status != "pending":
+            return
 
-    elif status == "FAILED":
-        txn.status = "failed"
-        txn.fail_reason = first_txn.get("failed_reason", "") or result.get(
-            "failed_reason", ""
-        )
-        txn.save(update_fields=["status", "fail_reason", "updated_at"])
-        refund_failed_payout(txn, txn.fail_reason or "Payout failed")
+        if status == "COMPLETE":
+            txn.status = "completed"
+            txn.mpesa_reference = first_txn.get("mpesa_reference", "")
+            txn.callback_received_at = timezone.now()
+            txn.save(
+                update_fields=[
+                    "status",
+                    "mpesa_reference",
+                    "callback_received_at",
+                    "updated_at",
+                ]
+            )
+            logger.info(f"Reconciled payout {txn.tracking_reference} as completed")
+        else:
+            txn.status = "failed"
+            txn.fail_reason = first_txn.get("failed_reason", "") or result.get(
+                "failed_reason", ""
+            )
+            txn.save(update_fields=["status", "fail_reason", "updated_at"])
+            refund_failed_payout(txn, txn.fail_reason or "Payout failed")
 
 
 @shared_task

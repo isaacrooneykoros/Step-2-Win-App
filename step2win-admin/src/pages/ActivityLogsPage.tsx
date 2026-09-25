@@ -23,7 +23,7 @@ import { downloadCsv, humanize, useDebounced } from '../components/users/utils'
 const RESOURCES = [
   { value: 'user', label: 'User' }, { value: 'challenge', label: 'Challenge' }, { value: 'transaction', label: 'Transaction' },
   { value: 'withdrawal', label: 'Withdrawal' }, { value: 'badge', label: 'Badge' }, { value: 'settings', label: 'System settings' },
-  { value: 'support', label: 'Support' }, { value: 'auth', label: 'Authentication' },
+  { value: 'support', label: 'Support' }, { value: 'auth', label: 'Authentication' }, { value: 'system', label: 'System' },
 ]
 const PAGE_SIZE = 50
 

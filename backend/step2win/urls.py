@@ -7,6 +7,7 @@ from drf_spectacular.views import (SpectacularAPIView, SpectacularRedocView,
                                    SpectacularSwaggerView)
 from rest_framework import permissions
 
+from apps.admin_api.jobs_views import run_due_jobs_endpoint
 from apps.admin_api.platform import app_config
 from apps.users.account_views import account_delete_page
 from step2win.health import health_check
@@ -28,6 +29,8 @@ urlpatterns = [
     path("api/legal/", include("apps.legal.urls")),
     path("api/health/", health_check, name="health_check"),
     path("api/app/config/", app_config, name="app_config"),
+    # Scheduled jobs trigger (GitHub Actions, X-Cron-Token). See SCHEDULED_JOBS.md.
+    path("api/internal/jobs/run-due/", run_due_jobs_endpoint, name="internal_run_due_jobs"),
     # Public account-deletion page (Google Play "delete account" web link). Not under
     # /api/, so maintenance mode never blocks it.
     path("account/delete/", account_delete_page, name="account_delete_page"),

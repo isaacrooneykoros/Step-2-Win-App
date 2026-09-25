@@ -104,6 +104,8 @@ KIND_SPECS: dict[str, KindSpec] = {
     "trust.score": KindSpec(SLOW_WINDOW, 100, "user_id"),
     # Staff actions
     "audit.logged": KindSpec(SLOW_WINDOW, 50, "id"),
+    # Scheduled jobs (apps/admin_api/scheduler.py): one entry per finished run
+    "jobs.updated": KindSpec(SLOW_WINDOW, 50, "name"),
 }
 
 

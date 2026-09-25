@@ -337,6 +337,8 @@ REST_FRAMEWORK = {
         "device_bind": "10/hour",
         # Legacy
         "wallet": "10/minute",
+        # Internal cron trigger (one global bucket, not per user)
+        "internal_jobs": "20/minute",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
@@ -483,7 +485,25 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.admin_api.tasks.escalate_overdue_support_tickets",
         "schedule": crontab(minute="*/15"),  # every 15 minutes
     },
+    "reset-weekly-xp": {
+        "task": "apps.gamification.tasks.reset_weekly_xp",
+        "schedule": crontab(hour=0, minute=0, day_of_week=1),  # Mondays 00:00
+    },
+    "cleanup-old-suspicious-activities": {
+        "task": "apps.steps.tasks.cleanup_old_suspicious_activities",
+        "schedule": crontab(hour=3, minute=30),  # 3:30 AM every night
+    },
 }
+
+# ── Scheduled jobs runner (see SCHEDULED_JOBS.md) ─────────────────────────────
+# CELERY_BEAT_SCHEDULE above is the single list of jobs for every runner.
+#   builtin (default): an in-process ticker in the daphne web process plus
+#                      POST /api/internal/jobs/run-due/ (GitHub Actions, X-Cron-Token)
+#   celery:            both disabled; `celery -A step2win worker -B` runs the jobs
+#   off:               nothing runs automatically
+JOB_RUNNER = os.getenv("JOB_RUNNER", "builtin").strip().lower() or "builtin"
+# Shared secret for /api/internal/jobs/run-due/. Unset = the endpoint answers 404.
+CRON_SECRET = os.getenv("CRON_SECRET", "").strip()
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -787,6 +807,12 @@ LOGGING = {
             "propagate": True,
         },
         "apps.core.realtime": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        # Scheduled jobs: one line per job run (SCHEDULED_JOBS.md)
+        "apps.admin_api.scheduler": {
             "handlers": ["console"],
             "level": "INFO",
             "propagate": False,

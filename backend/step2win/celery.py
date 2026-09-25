@@ -18,6 +18,18 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 
 
+@app.on_after_finalize.connect
+def _use_scheduled_job_wrapper(sender, **kwargs):
+    """Beat runs every CELERY_BEAT_SCHEDULE entry through scheduler.run_scheduled_job,
+    so Celery shares the built-in runner's lease and job state (no double runs, same
+    admin visibility). Only used with JOB_RUNNER=celery; see SCHEDULED_JOBS.md."""
+    from apps.admin_api.scheduler import celery_beat_schedule
+
+    # Namespaced key: with namespace="CELERY" the Django setting name wins over
+    # conf.beat_schedule.
+    sender.conf.update(CELERY_BEAT_SCHEDULE=celery_beat_schedule())
+
+
 @app.task(bind=True)
 def debug_task(self):
     print(f"Request: {self.request!r}")

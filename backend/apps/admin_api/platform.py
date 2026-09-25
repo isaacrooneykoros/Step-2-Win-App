@@ -219,6 +219,7 @@ MAINTENANCE_ALLOWED_PREFIXES = (
     "/api/health/",
     "/api/app/config/",  # lets the customer app learn when maintenance ends
     "/api/payments/mpesa/",  # IntaSend deposit / payout / withdrawal callbacks
+    "/api/internal/jobs/",  # scheduled jobs (token-protected) keep running, e.g. payment reconciliation
 )
 
 

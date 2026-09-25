@@ -1,8 +1,8 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from apps.admin_api import (finance_views, support_views, system_views,
-                            trust_views)
+from apps.admin_api import (finance_views, jobs_views, support_views,
+                            system_views, trust_views)
 
 from apps.admin_api.views import (AdminBadgeViewSet, AdminChallengeViewSet,
                                   AdminDashboardViewSet,
@@ -140,5 +140,8 @@ urlpatterns = [
     path("trust/moderation/history/", trust_views.moderation_history, name="trust-moderation-history"),
     path("trust/users/<int:user_id>/moderate/", trust_views.moderate_user, name="trust-moderate-user"),
     path("monitoring/ops/history/", trust_views.ops_history, name="ops-monitoring-history"),
+    # Scheduled jobs (apps/admin_api/jobs_views.py)
+    path("monitoring/jobs/", jobs_views.scheduled_jobs, name="scheduled-jobs"),
+    path("monitoring/jobs/<str:name>/run/", jobs_views.run_scheduled_job_now, name="scheduled-job-run"),
     path("", include(router.urls)),
 ]

@@ -63,3 +63,10 @@ application = RealtimeLoopBinder(
         }
     )
 )
+
+# Built-in scheduled-job runner (JOB_RUNNER=builtin, the default): a daemon thread that
+# runs due jobs every ~60 s. It only starts when this process is the daphne server.
+# See backend/SCHEDULED_JOBS.md.
+from apps.admin_api.job_ticker import start_ticker_if_enabled  # noqa: E402
+
+start_ticker_if_enabled()

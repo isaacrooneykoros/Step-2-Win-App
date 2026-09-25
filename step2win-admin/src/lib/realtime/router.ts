@@ -49,6 +49,7 @@ const K = {
   trust: ['admin', 'trust'],
   ops: ['admin', 'ops-monitoring'],
   audit: ['admin', 'audit-logs'],
+  jobs: ['admin', 'scheduled-jobs'],
   supportQueue: ['support', 'queue'],
   conversation: ['support', 'conversation'],
 } as const
@@ -145,6 +146,9 @@ function targetsFor(entry: EventEntry): Target[] {
     case 'audit.logged':
     case 'audit.*bulk':
       return [t(K.audit, LIST), t(K.notifications, LIST)]
+    case 'jobs.updated':
+    case 'jobs.*bulk':
+      return [t(K.jobs, LIST)]
     default:
       return []
   }

@@ -16,6 +16,7 @@ import { cn } from '../lib/cn'
 import { formatDateTime, formatNumber, formatPercent, formatRelative, sumBy } from '../lib/format'
 import { trustApi } from '../components/trust/api'
 import { formatAge } from '../components/trust/rules'
+import { ScheduledJobsPanel } from '../components/system/ScheduledJobsPanel'
 import type { OpsMonitoringResponse } from '../types/admin'
 
 type CheckState = 'breach' | 'near' | 'ok' | 'watch' | 'info' | 'nodata'
@@ -296,6 +297,8 @@ export function OpsMonitoringPage() {
           </>
         )}
       </Panel>
+
+      <ScheduledJobsPanel />
 
       {d && d.metrics.duplicate_gateway_references?.length > 0 && (
         <Panel title="Duplicate gateway references" description="Completed payments that share an M-Pesa reference">
