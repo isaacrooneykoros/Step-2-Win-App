@@ -106,6 +106,44 @@ def sanitize_amount(value, min_amount=None, max_amount=None) -> float:
     return round(amount, 2)
 
 
+ALLOWED_HTML_TAGS = [
+    "p", "b", "i", "strong", "em", "u", "s", "strike",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li", "br", "hr",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "a", "span", "div", "blockquote",
+]
+
+ALLOWED_HTML_ATTRIBUTES = {
+    "a": ["href", "title", "target", "rel"],
+    "span": ["class"],
+    "div": ["class"],
+    "p": ["class"],
+    "td": ["colspan", "rowspan"],
+    "th": ["colspan", "rowspan"],
+}
+
+ALLOWED_HTML_PROTOCOLS = ["http", "https", "mailto"]
+
+
+def sanitize_html(value: str) -> str:
+    """
+    Sanitizes HTML content (e.g., for legal policies) while allowing safe formatting tags.
+    Strips dangerous tags (script, iframe, style, object, etc.) and event handlers to prevent XSS.
+    """
+    if not value:
+        return value or ""
+
+    cleaned = bleach.clean(
+        str(value),
+        tags=ALLOWED_HTML_TAGS,
+        attributes=ALLOWED_HTML_ATTRIBUTES,
+        protocols=ALLOWED_HTML_PROTOCOLS,
+        strip=True,
+    )
+    return cleaned.strip()
+
+
 def sanitize_username(value: str) -> str:
     """
     Validates a username.

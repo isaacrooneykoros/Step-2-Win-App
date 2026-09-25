@@ -9,6 +9,7 @@ from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
 from .models import LegalDocument, LegalDocumentVersion, UserDocumentAck
+from apps.core.sanitizers import sanitize_html
 from .serializers import (LegalDocumentAdminSerializer,
                           LegalDocumentPublicSerializer,
                           LegalDocumentVersionSerializer)
@@ -162,13 +163,15 @@ def document_detail_admin(request, pk):
     if "content_html" in data:
         staged = data.get("content_html")
         del data["content_html"]
-        data["draft_html"] = staged or ""
+        data["draft_html"] = sanitize_html(staged or "")
+    elif "draft_html" in data:
+        data["draft_html"] = sanitize_html(data.get("draft_html") or "")
 
     if uploaded_file:
         # Convert file to HTML automatically
         try:
             html, file_type = process_uploaded_file(uploaded_file, uploaded_file.name)
-            data["draft_html"] = html
+            data["draft_html"] = sanitize_html(html)
             data["file_type"] = file_type
             # Save the original file
             doc.uploaded_file = uploaded_file
@@ -201,7 +204,15 @@ def create_document_admin(request):
     Create a new legal document (e.g. a Cookie Policy).
     POST /api/legal/admin/documents/create/
     """
-    serializer = LegalDocumentAdminSerializer(data=request.data)
+    data = request.data.copy()
+    if "content_html" in data:
+        staged = data.get("content_html")
+        del data["content_html"]
+        data["draft_html"] = sanitize_html(staged or "")
+    elif "draft_html" in data:
+        data["draft_html"] = sanitize_html(data.get("draft_html") or "")
+
+    serializer = LegalDocumentAdminSerializer(data=data)
     if serializer.is_valid():
         doc = serializer.save(last_edited_by=request.user)
         return Response(LegalDocumentAdminSerializer(doc).data, status=201)
@@ -278,7 +289,7 @@ def publish_document(request, pk):
 
     doc.notify_users = notify
     doc.change_summary = change_summary
-    doc.content_html = staged
+    doc.content_html = sanitize_html(staged)
     doc.draft_html = ""
     doc.publish(user=request.user)
 
