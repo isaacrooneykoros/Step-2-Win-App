@@ -24,6 +24,7 @@ urlpatterns = [
     path("api/steps/", include("apps.steps.urls")),
     path("api/gamification/", include("apps.gamification.urls")),
     path("api/admin/realtime/", include("apps.core.urls")),
+    path("api/admin/risk-ml/", include("apps.risk_ml.urls")),
     path("api/admin/", include("apps.admin_api.urls")),
     path("api/payments/", include("apps.payments.urls")),
     path("api/legal/", include("apps.legal.urls")),
