@@ -11,6 +11,7 @@ import { formatKESShort } from '../lib/format';
 import type { Transaction, User } from '../types';
 import { BalanceHero, BalanceHeroSkeleton } from '../components/wallet/BalanceHero';
 import { DepositSheet } from '../components/wallet/DepositSheet';
+import { PayoutReviewNotice } from '../components/wallet/PayoutReviewNotice';
 import { WithdrawSheet } from '../components/wallet/WithdrawSheet';
 import { DepositStatusStrip, TransactionList, WithdrawalList } from '../components/wallet/ActivityLists';
 import { IN_FLIGHT_WITHDRAWAL, formatPhoneDisplay, toAmount, type WithdrawalItem } from '../components/wallet/walletModel';
@@ -119,6 +120,10 @@ export default function WalletScreen() {
             onWithdraw={openWithdraw}
             onShowWithdrawals={() => showActivity('withdrawals')}
           />
+        )}
+
+        {walletData?.payouts_under_review && walletData.payouts_under_review.length > 0 && (
+          <PayoutReviewNotice items={walletData.payouts_under_review} />
         )}
 
         {depositStrip && deposit.attempt && (

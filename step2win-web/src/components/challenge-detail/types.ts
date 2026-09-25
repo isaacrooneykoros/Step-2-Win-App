@@ -1,3 +1,5 @@
+import type { PayoutReview, PayoutStatus } from '../../types';
+
 /** Shape of GET /api/challenges/<id>/results/ (inspected from the live API). */
 export interface ChallengeResultEntry {
   username: string;
@@ -11,6 +13,9 @@ export interface ChallengeResultEntry {
   tiebreaker_label: string;
   gps_verified_pct?: number;
   milestone_reached_at?: string | null;
+  /** Own result only: whether the payout was credited or is under review. */
+  payout_status?: PayoutStatus;
+  payout_review?: PayoutReview | null;
 }
 
 export interface ChallengeResults {

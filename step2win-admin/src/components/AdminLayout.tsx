@@ -9,6 +9,7 @@ import { LiveIndicator } from './LiveIndicator'
 import { useAdminRealtime, useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
 import { IconButton } from './ui/Button'
 import { adminApi } from '../services/adminApi'
+import { financeApi } from './finance/api'
 import type { AdminNotificationItem } from '../types/admin'
 import { routeLabel, SIDEBAR_WIDTH } from '../lib/nav'
 import { formatRelative } from '../lib/format'
@@ -114,6 +115,11 @@ export function AdminLayout() {
     queryFn: () => adminApi.getFraudOverview(),
     refetchInterval: layoutRefetch,
   })
+  const { data: payoutReviews } = useQuery({
+    queryKey: ['admin', 'payout-reviews', 'list', 'held', ''],
+    queryFn: () => financeApi.payoutReviews('held'),
+    refetchInterval: layoutRefetch,
+  })
   const { data: ops } = useQuery({
     queryKey: ['admin', 'ops-monitoring'],
     queryFn: () => adminApi.getOpsMonitoring(),
@@ -127,6 +133,7 @@ export function AdminLayout() {
 
   const badges: Record<string, number> = {
     pendingWithdrawals: withdrawalStats?.pending_count ?? 0,
+    heldPayouts: payoutReviews?.counts.held ?? 0,
     openFraudFlags: fraud?.open_flags ?? 0,
     openSupport: notifications?.summary.open_support_tickets ?? 0,
     opsBreaches: (ops?.breaches?.length ?? 0) + (ops?.anti_cheat_drift?.breaches?.length ?? 0),

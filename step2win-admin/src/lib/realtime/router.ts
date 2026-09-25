@@ -51,6 +51,7 @@ const K = {
   audit: ['admin', 'audit-logs'],
   supportQueue: ['support', 'queue'],
   conversation: ['support', 'conversation'],
+  payoutReviews: ['admin', 'payout-reviews'],
 } as const
 
 const t = (key: QueryKey, gap = FAST): Target => ({ key, gap })
@@ -145,6 +146,11 @@ function targetsFor(entry: EventEntry): Target[] {
     case 'audit.logged':
     case 'audit.*bulk':
       return [t(K.audit, LIST), t(K.notifications, LIST)]
+    case 'payout.held':
+    case 'payout.decided':
+      return [t(K.payoutReviews), ...perEntity(K.userOverview, users)]
+    case 'payout.*bulk':
+      return [t(K.payoutReviews, HEAVY), t(K.userOverview, HEAVY)]
     default:
       return []
   }

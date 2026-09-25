@@ -1,11 +1,11 @@
 import type { ElementType } from 'react'
 import {
   Activity, ArrowLeftRight, Award, Banknote, BarChart3, FileBarChart, FileText, Footprints,
-  Gauge, HeadphonesIcon, LayoutDashboard, Settings, ShieldAlert, ShieldCheck, Trophy, Users,
+  Gauge, HeadphonesIcon, LayoutDashboard, Scale, Settings, ShieldAlert, ShieldCheck, Trophy, Users,
 } from 'lucide-react'
 
 /** Keys the layout fills with live counts (queues that need an operator). */
-export type NavBadgeKey = 'pendingWithdrawals' | 'openFraudFlags' | 'openSupport' | 'opsBreaches'
+export type NavBadgeKey = 'pendingWithdrawals' | 'heldPayouts' | 'openFraudFlags' | 'openSupport' | 'opsBreaches'
 
 export interface NavItem {
   to: string
@@ -51,6 +51,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/transactions', label: 'Transactions', icon: ArrowLeftRight, keywords: 'wallet ledger deposits payouts mpesa' },
       { to: '/withdrawals', label: 'Withdrawals', icon: Banknote, badgeKey: 'pendingWithdrawals', keywords: 'payout queue approve mpesa' },
+      { to: '/payout-reviews', label: 'Payout reviews', icon: Scale, badgeKey: 'heldPayouts', keywords: 'held payouts winnings review release forfeit anti-cheat' },
     ],
   },
   {

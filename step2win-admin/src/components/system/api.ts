@@ -32,6 +32,9 @@ export interface SystemSettings {
   support_category_assignees: Record<string, number>
   support_escalation_enabled: boolean
   support_escalation_raise_priority: boolean
+  payout_holds_enabled: boolean
+  payout_hold_trust_score_max: number
+  payout_hold_large_win_kes: string
   updated_at: string | null
   updated_by: string | null
 }
