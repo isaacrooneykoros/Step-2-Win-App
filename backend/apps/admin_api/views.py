@@ -2799,29 +2799,9 @@ def action_flag(request, flag_id):
     flag.save(update_fields=["reviewed", "actioned", "details"])
 
     trust, _ = TrustScore.objects.get_or_create(user=flag.user)
-
-    if action == "dismiss":
-        trust.recover(10)
-    elif action == "warn":
-        trust.deduct(5)
-    elif action == "restrict":
-        trust.score = 35
-        trust.save(update_fields=["score", "updated_at"])
-    elif action == "suspend":
-        trust.score = 10
-        trust.save(update_fields=["score", "updated_at"])
-    elif action == "ban":
-        trust.score = 0
-        trust.save(update_fields=["score", "updated_at"])
-    elif action == "unrestrict":
-        trust.score = max(trust.score, 65)
-        trust.save(update_fields=["score", "updated_at"])
-    elif action == "unsuspend":
-        trust.score = max(trust.score, 45)
-        trust.save(update_fields=["score", "updated_at"])
-    elif action == "unban":
-        trust.score = max(trust.score, 35)
-        trust.save(update_fields=["score", "updated_at"])
+    # Same semantics as the trust console (TrustScore.apply_admin_action): an admin
+    # restrict / suspend / ban is locked and not undone by automatic recovery.
+    trust.apply_admin_action(action)
 
     return Response({"status": f"Flag {action}ed"})
 
