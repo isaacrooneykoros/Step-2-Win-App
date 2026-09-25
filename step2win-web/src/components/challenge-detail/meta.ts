@@ -63,6 +63,11 @@ export function winConditionRule(winCondition: string | undefined, milestone: nu
         title: 'Winner takes all',
         body: `The participant with the most steps who also reaches ${goal} receives the whole net pool.`,
       };
+    case 'top_3':
+      return {
+        title: 'Top 3 split',
+        body: `The three participants with the most steps who also reach ${goal} share the net pool 50% / 30% / 20%.`,
+      };
     case 'qualification_only':
       return {
         title: 'Qualification only',

@@ -35,6 +35,8 @@ def challenge_config(request):
                                          entry_fee_range, entry_fee_suggestions,
                                          max_challenge_participants)
 
+    from .payout_policy import allowed_win_conditions
+
     settings = current_settings()
     fee_min, fee_max = entry_fee_range()
     milestones = [
@@ -53,6 +55,8 @@ def challenge_config(request):
             "entry_fee_suggestions": entry_fee_suggestions(fee_min, fee_max),
             # Public challenges wait for admin approval before going live.
             "public_challenges_need_approval": challenge_needs_approval(True),
+            # Payout rules a private challenge may use (rank payouts are paused for now).
+            "allowed_win_conditions": allowed_win_conditions(),
         }
     )
 

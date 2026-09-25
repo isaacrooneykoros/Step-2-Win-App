@@ -306,6 +306,23 @@ class AdminChallengeSerializer(serializers.ModelSerializer):
         """Get current number of entries"""
         return obj.current_participants
 
+    def validate(self, data):
+        # Rank-based payouts are paused (apps/challenges/payout_policy.py). A challenge that
+        # already has one keeps it; switching to one is refused until they're re-enabled.
+        from apps.challenges.payout_policy import (PAUSED_MESSAGE, RANK_PAYOUT_STRUCTURES,
+                                                   UNAVAILABLE_WIN_CONDITIONS,
+                                                   rank_payouts_enabled)
+
+        if not rank_payouts_enabled():
+            current = self.instance
+            structure = data.get("payout_structure")
+            if structure in RANK_PAYOUT_STRUCTURES and getattr(current, "payout_structure", None) != structure:
+                raise serializers.ValidationError({"payout_structure": PAUSED_MESSAGE})
+            condition = data.get("win_condition")
+            if condition in UNAVAILABLE_WIN_CONDITIONS and getattr(current, "win_condition", None) != condition:
+                raise serializers.ValidationError({"win_condition": PAUSED_MESSAGE})
+        return data
+
 
 class AdminTransactionSerializer(serializers.ModelSerializer):
     """

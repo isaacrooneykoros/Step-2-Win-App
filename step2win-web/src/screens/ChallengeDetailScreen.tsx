@@ -240,7 +240,8 @@ export default function ChallengeDetailScreen() {
   const platformFee = toNumber(stats?.platform_fee ?? challenge.platform_fee);
   const netPool = toNumber(stats?.net_pool ?? challenge.net_pool);
   const feePct = totalPool > 0 ? Math.round((platformFee / totalPool) * 100) : null;
-  const rule = winConditionRule(challenge.win_condition, milestone);
+  // payout_structure is what the payout actually uses; win_condition is only the creator's pick.
+  const rule = winConditionRule(challenge.payout_structure ?? challenge.win_condition, milestone);
 
   const canLeave = !!userParticipant && (status === 'pending' || (status === 'active' && localToday() <= challenge.start_date));
   const canInvite = !!challenge.invite_code && status === 'active' && !challenge.is_full;

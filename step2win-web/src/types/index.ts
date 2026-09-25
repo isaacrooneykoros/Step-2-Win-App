@@ -59,6 +59,8 @@ export interface ChallengeConfig {
   entry_fee_suggestions?: number[];
   /** When true, new public challenges wait for admin approval before going live. */
   public_challenges_need_approval?: boolean;
+  /** Payout rules a private challenge may use right now (rank payouts are paused). */
+  allowed_win_conditions?: ChallengeWinCondition[];
 }
 
 export interface Challenge {
@@ -84,6 +86,8 @@ export interface Challenge {
   is_private: boolean;
   win_condition: ChallengeWinCondition;
   win_condition_display?: string;
+  /** The rule the payout actually uses (source of truth over win_condition). */
+  payout_structure?: 'proportional' | 'winner_takes_all' | 'top_3';
   theme_emoji: string;
   theme: 'blue' | 'green' | 'purple' | 'orange' | 'pink';
   days_remaining: number;

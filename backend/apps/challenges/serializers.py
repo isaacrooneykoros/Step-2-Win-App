@@ -11,6 +11,7 @@ from apps.admin_api.platform import (ENTRY_FEE_DEFAULT_MAX, ENTRY_FEE_DEFAULT_MI
 from apps.core.sanitizers import sanitize_text
 
 from .models import Challenge, ChallengeMessage, Participant, format_milestone_label, get_configured_milestones
+from .payout_policy import PAUSED_MESSAGE, allowed_win_conditions, payout_structure_for
 
 # Challenge entry contribution (KES). Users type any whole amount in the range the
 # admin sets (SystemSettings min/max_challenge_entry_fee, read via
@@ -81,6 +82,7 @@ class ChallengeSerializer(serializers.ModelSerializer):
             "is_private",
             "win_condition",
             "win_condition_display",
+            "payout_structure",
             "theme",
             "theme_emoji",
             "days_remaining",
@@ -94,6 +96,7 @@ class ChallengeSerializer(serializers.ModelSerializer):
             "current_participants",
             "status",
             "invite_code",
+            "payout_structure",
             "created_at",
         ]
 
@@ -283,6 +286,8 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
                         "win_condition": "Public challenges only support proportional payout"
                     }
                 )
+        elif win_condition not in allowed_win_conditions():
+            raise serializers.ValidationError({"win_condition": PAUSED_MESSAGE})
 
         return data
 
@@ -298,6 +303,11 @@ class CreateChallengeSerializer(serializers.ModelSerializer):
         # Public challenges always use proportional payout mode
         if is_public:
             validated_data["win_condition"] = "proportional"
+        # The resolver pays by payout_structure: keep it in step with the chosen rule, so the
+        # app never promises one rule while the payout uses another.
+        validated_data["payout_structure"] = payout_structure_for(
+            validated_data.get("win_condition", "proportional")
+        )
 
         # Set dates: start today, end based on duration
         validated_data["start_date"] = date.today()

@@ -80,6 +80,8 @@ export function CreateChallengeSheet({
   );
 
   const feeMin = config?.entry_fee_min ?? FALLBACK_FEE_MIN;
+  // Only rules the server accepts right now; a single option needs no picker.
+  const payoutOptions = config?.allowed_win_conditions?.length ? config.allowed_win_conditions : (['proportional'] as ChallengeWinCondition[]);
   const feeMax = config?.entry_fee_max ?? FALLBACK_FEE_MAX;
   const feeSuggestions = (config?.entry_fee_suggestions ?? FALLBACK_FEE_SUGGESTIONS).filter((s) => s >= feeMin && s <= feeMax);
   const maxPlayers = config?.max_challenge_participants ?? 1000;
@@ -91,7 +93,7 @@ export function CreateChallengeSheet({
   endDate.setDate(endDate.getDate() + duration);
   const endLabel = formatDay(endDate.toISOString());
   const insufficient = availableBalance !== null && entry > availableBalance;
-  const payoutRule = form.isPublic ? 'proportional' : form.winCondition;
+  const payoutRule = form.isPublic || !payoutOptions.includes(form.winCondition) ? 'proportional' : form.winCondition;
   const needsApproval = form.isPublic && config?.public_challenges_need_approval === true;
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -322,11 +324,11 @@ export function CreateChallengeSheet({
             containerClassName="!mb-0"
           />
 
-          {!form.isPublic && (
+          {!form.isPublic && payoutOptions.length > 1 && (
             <fieldset>
               <legend className="label">How the pool is paid out</legend>
               <div role="radiogroup" aria-label="How the pool is paid out" className="space-y-2">
-                {(Object.keys(WIN_CONDITION_COPY) as ChallengeWinCondition[]).map((key) => {
+                {payoutOptions.map((key) => {
                   const active = form.winCondition === key;
                   return (
                     <button
