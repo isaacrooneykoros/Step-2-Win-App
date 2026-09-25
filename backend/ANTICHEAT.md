@@ -43,8 +43,11 @@ cadence/burst/gait/ML fields describing a ~3 s sensor snapshot.
 
 The legacy `STEP_ANTICHEAT_V2_ENABLED` / `_SHADOW_MODE` flags now only label the stored
 `DailyVerificationSummary`/`IntervalVerificationResult` rows ("active" vs "shadow"); both
-modes run the same engine. With V2 disabled (the default) a RESTRICT account still gets
-its credited delta halved (legacy behaviour, kept).
+modes run the same engine. The legacy rule that halved a RESTRICT account's credited
+delta (with V2 disabled) is **removed**: a low trust score already lowers confidence
+(table below), and payout holds (`apps/challenges/payout_holds.py`) stop a REVIEW-or-worse
+winner's money reaching the wallet until staff review it, so halving on top was a double
+penalty.
 
 ## Confidence (how much of a plausible delta is credited)
 

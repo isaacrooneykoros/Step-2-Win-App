@@ -1027,9 +1027,12 @@ def sync_health(request):
             elif not has_high_hits and not result.strong_evidence:
                 trust.recover(1)
 
+            # No extra RESTRICT halving here: a low trust score already lowers the
+            # confidence multiplier (REVIEW 0.90, RESTRICT 0.75, ...), and payout holds
+            # (apps/challenges/payout_holds.py) keep a restricted user's winnings from
+            # reaching the wallet until staff review them. Halving on top was a double
+            # penalty for users who are only under review.
             credited_delta = int(v2_decision.verified_steps_total)
-            if trust.status == "RESTRICT" and not anti_v2_enabled:
-                credited_delta = int(credited_delta * 0.5)
             prev_credit = 0 if fresh_day else int(existing_record.steps)
             uncapped = prev_credit + credited_delta
             # Plausible daily maximum: credit stops at DAILY_STEP_CAP; the rest is kept

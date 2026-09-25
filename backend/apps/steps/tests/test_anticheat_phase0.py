@@ -15,7 +15,7 @@ from unittest.mock import patch
 from django.apps import apps as django_apps
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -552,6 +552,28 @@ class TrustDeductionTests(Phase0SyncBase):
         self.assertEqual(cap_trust_deduction(requested=8, has_critical=False, already_today=8, current_score=90), 0)
         self.assertEqual(cap_trust_deduction(requested=15, has_critical=True, already_today=8, current_score=90), 7)
         self.assertEqual(cap_trust_deduction(requested=8, has_critical=False, already_today=0, current_score=24), 3)
+
+
+class RestrictNoDoublePenaltyTests(Phase0SyncBase):
+    """A RESTRICT account is credited plausible x confidence (trust factor 0.75),
+    not halved again: payout holds protect the money instead."""
+
+    @override_settings(STEP_ANTICHEAT_V2_ENABLED=False)
+    def test_restricted_honest_sync_is_not_halved(self):
+        TrustScore.objects.create(user=self.user, score=30)
+        day = self.yesterday()
+        response = self.sync(8_000, day=day)
+        self.assertEqual(response.status_code, 200, response.content)
+        # trust factor RESTRICT = 0.75; the removed legacy rule would have made it 3,000.
+        self.assertEqual(self.record(day).steps, 6_000)
+        self.assertEqual(response.json()["approved_steps"], 6_000)
+
+    @override_settings(STEP_ANTICHEAT_V2_ENABLED=True)
+    def test_same_credit_with_v2_flag_on(self):
+        TrustScore.objects.create(user=self.user, score=30)
+        day = self.yesterday()
+        self.assertEqual(self.sync(8_000, day=day).status_code, 200)
+        self.assertEqual(self.record(day).steps, 6_000)
 
 
 # ── Fix 10: hourly route check ────────────────────────────────────────────────
