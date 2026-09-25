@@ -12,6 +12,7 @@ urlpatterns = [
     path("weekly/", views.weekly_steps, name="weekly_steps"),
     path("day/<str:date_str>/", views.day_detail, name="day_detail"),
     path("sync/hourly/", views.sync_hourly_steps, name="sync_hourly_steps"),
+    path("verification/", views.step_verification, name="step_verification"),
     # Security endpoints
     path("session/start/", security_endpoints.start_step_session, name="session_start"),
     path("session/end/", security_endpoints.end_step_session, name="session_end"),

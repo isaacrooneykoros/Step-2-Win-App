@@ -1,7 +1,9 @@
+import dataclasses
 import logging
 import math
 import uuid
 from datetime import timedelta
+from datetime import timezone as dt_timezone
 
 import redis as redis_client
 from asgiref.sync import async_to_sync
@@ -24,10 +26,13 @@ from apps.core.throttles import (DashboardReadRateThrottle,
                                  StepSyncGlobalThrottle, StepSyncRateThrottle,
                                  StepSyncSustainedThrottle)
 
-from .anti_cheat import (DAILY_STEP_CAP, VerificationConfig,
-                         decision_to_check_result, evaluate_daily_submission,
-                         run_anti_cheat)
+from .anti_cheat import (ANTICHEAT_DAY_VERSION, DAILY_STEP_CAP,
+                         SHAKE_POSITIVE_RULES, VerificationConfig,
+                         assess_velocity,
+                         cap_trust_deduction, decision_to_check_result,
+                         evaluate_daily_submission, resolve_source_key)
 from .daily_reset import update_streak
+from .verification import build_breakdown
 from .models import (DailyVerificationSummary, FraudFlag, HealthRecord,
                      HourlyStepRecord, IntervalVerificationResult,
                      LocationWaypoint, StepSession, StepSyncEvent,
@@ -84,6 +89,96 @@ def _allow_sync_tick(user_id: int, min_seconds: int = 1) -> bool:
         return _redis.set(redis_key, "1", nx=True, ex=max(1, min_seconds)) is not None
     except Exception:
         return cache.add(redis_key, "1", timeout=max(1, min_seconds))
+
+
+_PAYLOAD_SECRET_KEYS = ("session_token",)
+
+
+def _redact_payload(data) -> dict | None:
+    """Copy of the request body safe to store: bearer secrets are never persisted."""
+    try:
+        payload = dict(data.items()) if hasattr(data, "items") else None
+    except Exception:
+        payload = None
+    if payload is None:
+        return None
+    for key in _PAYLOAD_SECRET_KEYS:
+        if payload.get(key):
+            payload[key] = "[redacted]"
+    return payload
+
+
+_SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+
+def _record_flag(user, day, flag_type: str, severity: str, details: dict) -> FraudFlag:
+    """
+    One open FraudFlag per (user, day, rule): repeated hits from later syncs update the
+    open flag (occurrence count, latest evidence, highest severity) instead of piling
+    up a new row every few minutes. Reviewed flags are left alone (a new one opens).
+    """
+    existing = (
+        FraudFlag.objects.filter(
+            user=user, date=day, flag_type=flag_type, reviewed=False
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if existing is None:
+        return FraudFlag.objects.create(
+            user=user,
+            date=day,
+            flag_type=flag_type,
+            severity=severity,
+            details={**(details or {}), "occurrences": 1},
+        )
+    merged = dict(existing.details or {})
+    occurrences = int(merged.get("occurrences", 1) or 1) + 1
+    merged.update(details or {})
+    merged["occurrences"] = occurrences
+    existing.details = merged
+    if _SEVERITY_RANK.get(severity, 0) > _SEVERITY_RANK.get(existing.severity, 0):
+        existing.severity = severity
+    existing.save(update_fields=["details", "severity"])
+    return existing
+
+
+def _legacy_day_has_strong_flags(user, day) -> bool:
+    """Open flags on a pre-Phase-0 day that would count as strong evidence today."""
+    open_flags = FraudFlag.objects.filter(user=user, date=day, reviewed=False)
+    if open_flags.filter(severity="critical").exists():
+        return True
+    if open_flags.filter(flag_type__in=SHAKE_POSITIVE_RULES).exists():
+        return True
+    high_types = set(
+        open_flags.filter(severity="high")
+        .exclude(
+            flag_type__in=[
+                "step_velocity_spike",
+                "non_monotonic_steps",
+                "route_step_mismatch_low_distance",
+                "burst_impossible",
+                "baseline_spike_hard",
+                "gait_confidence_very_low",
+            ]
+        )
+        .values_list("flag_type", flat=True)
+    )
+    return len(high_types) >= 2
+
+
+def _trust_deducted_today(user, today_key: str) -> int:
+    """Trust points already deducted from sync evidence on this server day."""
+    total = 0
+    since = timezone.now() - timedelta(days=2)
+    for meta in HealthRecord.objects.filter(user=user, synced_at__gte=since).values_list(
+        "anticheat", flat=True
+    ):
+        try:
+            total += int(((meta or {}).get("trust_deductions") or {}).get(today_key, 0))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return total
 
 
 def _rejection_event_id(client_event_id: str) -> str:
@@ -219,6 +314,27 @@ def _haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
     return radius_m * c
 
 
+def _waypoint_on_local_day(day, recorded_at, local_hour) -> bool:
+    """
+    Is this GPS fix on the device's local `day`? The fix time is an absolute instant;
+    the phone's ledger attributes it to a local hour. The UTC offset implied by the two
+    (whole hours, in the real-world range -12..+14) gives the local date, trusted only
+    within +-1 day of the UTC date. Without a client hour, fall back to the UTC date.
+    """
+    utc = recorded_at.astimezone(dt_timezone.utc)
+    if local_hour is None:
+        return utc.date() == day
+    if abs((utc.date() - day).days) > 1:
+        return False
+    base = (int(local_hour) - utc.hour) % 24  # 0..23
+    for offset in (base - 24, base, base + 24):
+        if -12 <= offset <= 14:
+            local = utc + timedelta(hours=offset)
+            if local.date() == day and local.hour == int(local_hour):
+                return True
+    return False
+
+
 def _filter_waypoints_for_storage(day, waypoints: list) -> tuple[list[dict], dict]:
     accepted: list[dict] = []
     dropped_accuracy = 0
@@ -235,14 +351,17 @@ def _filter_waypoints_for_storage(day, waypoints: list) -> tuple[list[dict], dic
                 str(wp["recorded_at"]).replace("Z", "+00:00")
             )
             if timezone.is_naive(recorded_at):
-                recorded_at = timezone.make_aware(recorded_at, timezone.utc)
-            hour = int(wp.get("hour", recorded_at.hour))
+                recorded_at = timezone.make_aware(recorded_at, dt_timezone.utc)
+            client_hour = wp.get("hour")
+            hour = int(client_hour if client_hour is not None else recorded_at.hour)
             hour = min(23, max(0, hour))
         except Exception:
             dropped_malformed += 1
             continue
 
-        if recorded_at.date() != day:
+        if not _waypoint_on_local_day(
+            day, recorded_at, hour if client_hour is not None else None
+        ):
             continue
 
         if accuracy > WAYPOINT_MAX_ACCURACY_M:
@@ -293,6 +412,66 @@ def _route_distance_km(points: list[dict]) -> float:
             prev["latitude"], prev["longitude"], curr["latitude"], curr["longitude"]
         )
     return meters / 1000.0
+
+
+ROUTE_CHECK_MIN_STEPS = 1_000
+ROUTE_CHECK_MIN_POINTS = 5
+
+
+def _check_route_against_hours(user, day, points: list[dict]) -> None:
+    """
+    Route vs steps over the hours the uploaded waypoints cover.
+
+    - Little or no GPS movement for many steps (treadmill, indoor walking, GPS off
+      part of the hour) is legitimate: at most an informational LOW note.
+    - A route far longer than those hours' steps allow (vehicle) is MEDIUM.
+    One open flag per user per day and type (later uploads update it).
+    Never a HIGH flag, never trust or suspicion on its own.
+    """
+    if len(points) < ROUTE_CHECK_MIN_POINTS:
+        return
+    hours = sorted({int(p["hour"]) for p in points})
+    span_steps = (
+        HourlyStepRecord.objects.filter(user=user, date=day, hour__in=hours).aggregate(
+            total=Sum("steps")
+        )["total"]
+        or 0
+    )
+    route_km = _route_distance_km(points)
+    if span_steps < ROUTE_CHECK_MIN_STEPS:
+        return
+    ratio_km_per_step = route_km / span_steps
+    details = {
+        "hours": hours,
+        "span_steps": span_steps,
+        "route_km": round(route_km, 3),
+        "ratio_km_per_step": round(ratio_km_per_step, 6),
+    }
+    if ratio_km_per_step < ROUTE_DISTANCE_PER_STEP_MIN_KM:
+        _record_flag(
+            user,
+            day,
+            "route_step_mismatch_low_distance",
+            "low",
+            {
+                **details,
+                "min_expected_km_per_step": ROUTE_DISTANCE_PER_STEP_MIN_KM,
+                "note": "Little GPS movement for these hours' steps (treadmill/indoor "
+                "walking is legitimate). Informational only.",
+            },
+        )
+    elif ratio_km_per_step > ROUTE_DISTANCE_PER_STEP_MAX_KM:
+        _record_flag(
+            user,
+            day,
+            "route_step_mismatch_high_distance",
+            "medium",
+            {
+                **details,
+                "max_expected_km_per_step": ROUTE_DISTANCE_PER_STEP_MAX_KM,
+                "note": "Route distance is unusually long for these hours' steps.",
+            },
+        )
 
 
 def _encode_polyline(points: list[tuple[float, float]]) -> str:
@@ -384,8 +563,6 @@ def sync_health(request):
     )
 
     if not request.user.device_id:
-        import uuid
-
         with transaction.atomic():
             user = request.user.__class__.objects.select_for_update().get(
                 id=request.user.id
@@ -446,7 +623,7 @@ def sync_health(request):
                 interval_risk_score=100.0,
                 accepted=False,
                 rejection_reason="session_not_found",
-                raw_payload=request.data,
+                raw_payload=_redact_payload(request.data),
             )
             return Response(
                 {
@@ -483,7 +660,7 @@ def sync_health(request):
                 interval_risk_score=100.0,
                 accepted=False,
                 rejection_reason="invalid_or_expired_session",
-                raw_payload=request.data,
+                raw_payload=_redact_payload(request.data),
             )
             return Response(
                 {
@@ -516,7 +693,7 @@ def sync_health(request):
                 interval_risk_score=100.0,
                 accepted=False,
                 rejection_reason="invalid_session_token",
-                raw_payload=request.data,
+                raw_payload=_redact_payload(request.data),
             )
             return Response(
                 {
@@ -559,7 +736,7 @@ def sync_health(request):
                 interval_risk_score=95.0,
                 accepted=False,
                 rejection_reason=replay_reason or "sequence_replay_detected",
-                raw_payload=request.data,
+                raw_payload=_redact_payload(request.data),
             )
             session.last_sequence_number = max(
                 session.last_sequence_number, sequence_number or 0
@@ -589,6 +766,17 @@ def sync_health(request):
         )
 
     existing_record = HealthRecord.objects.filter(user=user, date=date).first()
+    existing_meta = dict(existing_record.anticheat or {}) if existing_record else {}
+    # Days written before Phase 0 hold a discounted total and no raw figure. The first
+    # sync after the upgrade re-evaluates such a day from scratch (as the old engine did
+    # on every sync); from then on the day is tracked incrementally, raw vs raw.
+    legacy_day = (
+        existing_record is not None
+        and existing_meta.get("v") != ANTICHEAT_DAY_VERSION
+    )
+    prev_raw = 0
+    if existing_record is not None:
+        prev_raw = max(existing_record.last_raw_steps or 0, 0) or existing_record.steps
     if existing_record:
         last_ts = existing_record.last_client_timestamp
         if (
@@ -599,19 +787,18 @@ def sync_health(request):
             # Out-of-order delivery: a reading taken *before* the one already applied
             # arrived late (e.g. a queued retry landing after a newer background upload).
             # A day's counter only grows, so it carries nothing new; applying it would
-            # lower the stored total. Not tampering either, so no flag. (The stored day
-            # total is the anti-cheat *approved* figure, so the order has to come from the
-            # reading's own timestamp, not from comparing step counts.)
+            # lower the stored total. Not tampering either, so no flag.
             return _current_state_response(user, date, submitted_steps, stale=True)
-        if submitted_steps < existing_record.steps:
-            FraudFlag.objects.create(
-                user=user,
-                date=date,
-                flag_type="non_monotonic_steps",
-                severity="high",
-                details={
+        if submitted_steps < prev_raw:
+            # Raw vs raw: the phone's day counter never goes down for the same day.
+            _record_flag(
+                user,
+                date,
+                "non_monotonic_steps",
+                "high",
+                {
                     "submitted_steps": submitted_steps,
-                    "previous_steps": existing_record.steps,
+                    "previous_steps": prev_raw,
                     "note": "Submitted steps decreased compared to existing total for the same day.",
                 },
             )
@@ -622,43 +809,56 @@ def sync_health(request):
                 status=400,
             )
 
-        elapsed_seconds = max(1.0, (now - existing_record.synced_at).total_seconds())
-        delta_steps = submitted_steps - existing_record.steps
-        max_delta = int(elapsed_seconds * 5) + 200
-        if delta_steps > max_delta:
-            FraudFlag.objects.create(
-                user=user,
-                date=date,
-                flag_type="step_velocity_spike",
-                severity="high",
-                details={
-                    "submitted_steps": submitted_steps,
-                    "previous_steps": existing_record.steps,
-                    "delta_steps": delta_steps,
-                    "elapsed_seconds": round(elapsed_seconds, 2),
-                    "max_allowed_delta": max_delta,
-                    "note": "Delta exceeds allowed step increase for elapsed sync interval.",
-                },
-            )
-            return Response(
-                {"error": "Step delta too high for the elapsed time window."},
-                status=400,
-            )
+    fresh_day = existing_record is None or legacy_day
+    velocity = assess_velocity(
+        day=date,
+        now=now,
+        submitted=submitted_steps,
+        prev_raw=0 if fresh_day else prev_raw,
+        prev_unverified=0 if fresh_day else existing_record.unverified_steps,
+        last_synced_at=None if fresh_day else existing_record.synced_at,
+        last_client_ts=None if fresh_day else existing_record.last_client_timestamp,
+        client_ts=timestamp_client,
+        default_offset_hours=getattr(
+            settings, "STEP_DEVICE_DEFAULT_UTC_OFFSET_HOURS", None
+        ),
+    )
+    if velocity.impossible:
+        # Clearly impossible for the elapsed time (beyond twice a sprint, sustained, with
+        # a large allowance). Borderline excess is not rejected: it is kept unverified.
+        _record_flag(
+            user,
+            date,
+            "step_velocity_spike",
+            "high",
+            {
+                **velocity.details,
+                "note": "Increase is physically impossible for the elapsed time.",
+            },
+        )
+        return Response(
+            {"error": "Step delta too high for the elapsed time window."},
+            status=400,
+        )
 
     anti_v2_enabled = bool(getattr(settings, "STEP_ANTICHEAT_V2_ENABLED", False))
     anti_v2_shadow = bool(getattr(settings, "STEP_ANTICHEAT_V2_SHADOW_MODE", True))
     anti_v2_version = str(getattr(settings, "STEP_ANTICHEAT_V2_VERSION", "v2"))
     anti_cfg = VerificationConfig.from_settings(settings)
+    # Confidence comes from what the server knows about the uploader (verified session
+    # on a registered phone), never from the free `source` label, which can only lower it.
+    source_key = resolve_source_key(session=session, user=user)
 
     trust_score_before = 0
     approved_steps = submitted_steps
-    anti_is_suspicious = False
-    legacy_is_suspicious = False
     record = None
-    v2_decision = None
+    event_id = uuid.uuid4()
 
     v2_payload = {
         "steps": submitted_steps,
+        "steps_delta_credit": velocity.credit_delta,
+        "client_source": data.get("source"),
+        "burst_source": data.get("burst_source"),
         "distance_km": data.get("distance_km"),
         "calories_active": data.get("calories_active"),
         "active_minutes": data.get("active_minutes"),
@@ -693,63 +893,106 @@ def sync_health(request):
 
             trust_score_before = trust.score
 
-            if anti_v2_enabled:
-                v2_decision = evaluate_daily_submission(
-                    user=user,
-                    payload=v2_payload,
-                    day=date,
-                    submitted_at=now,
-                    trust_score=trust.score,
-                    trust_status=trust.status,
-                    source_platform=data.get("source", "device_sensor"),
-                    source_device=user.device_platform,
-                    source_app="steps.sync_health",
-                    config=anti_cfg,
-                )
-                result = decision_to_check_result(v2_decision)
-            else:
-                result = run_anti_cheat(
-                    user=user,
-                    steps=submitted_steps,
-                    date=date,
-                    distance_km=data.get("distance_km"),
-                    calories=data.get("calories_active"),
-                    active_minutes=data.get("active_minutes"),
-                    cadence_spm=data.get("cadence_spm"),
-                    burst_steps_5s=data.get("burst_steps_5s"),
-                    gait_state=data.get("gait_state"),
-                    gait_confidence=data.get("gait_confidence"),
-                    gait_dominant_freq_hz=data.get("gait_dominant_freq_hz"),
-                    gait_autocorr=data.get("gait_autocorr"),
-                    gait_interval_std_ms=data.get("gait_interval_std_ms"),
-                    gait_valid_peaks_2s=data.get("gait_valid_peaks_2s"),
-                    gait_gyro_variance=data.get("gait_gyro_variance"),
-                    gait_jerk_rms=data.get("gait_jerk_rms"),
-                    carry_mode=data.get("carry_mode"),
-                    ml_motion_label=data.get("ml_motion_label"),
-                    ml_walk_probability=data.get("ml_walk_probability"),
-                    ml_shake_probability=data.get("ml_shake_probability"),
-                    ml_model_version=data.get("ml_model_version"),
-                    submitted_at=now,
-                )
-                if anti_v2_shadow:
-                    v2_decision = evaluate_daily_submission(
-                        user=user,
-                        payload=v2_payload,
-                        day=date,
-                        submitted_at=now,
-                        trust_score=trust.score,
-                        trust_status=trust.status,
-                        source_platform=data.get("source", "device_sensor"),
-                        source_device=user.device_platform,
-                        source_app="steps.sync_health",
-                        config=anti_cfg,
+            # One engine for both modes; "shadow" vs "active" only labels the stored
+            # verification artifacts (admin v2 screens).
+            v2_decision = evaluate_daily_submission(
+                user=user,
+                payload=v2_payload,
+                day=date,
+                submitted_at=now,
+                trust_score=trust.score,
+                trust_status=trust.status,
+                source_platform=source_key,
+                source_device=user.device_platform,
+                source_app="steps.sync_health",
+                config=anti_cfg,
+            )
+            result = decision_to_check_result(v2_decision, anti_cfg)
+
+            today_key = str(now.date())
+            deduct_cache_key = f"step2win:trust_sync_deducted:{user.id}:{today_key}"
+            already_today = max(
+                int(cache.get(deduct_cache_key) or 0),
+                _trust_deducted_today(user, today_key),
+            )
+            deduction = cap_trust_deduction(
+                requested=result.trust_deduction,
+                has_critical=result.has_critical,
+                already_today=already_today,
+                current_score=trust.score,
+            )
+
+            def _apply_deduction():
+                if deduction > 0:
+                    trust.deduct(deduction)
+                    cache.set(
+                        deduct_cache_key, already_today + deduction, timeout=2 * 86_400
                     )
 
+            def _mark_suspicion(meta: dict) -> dict:
+                suspicion = dict(meta.get("suspicion") or {})
+                suspicion["sticky"] = True
+                reasons = list(suspicion.get("reasons") or [])
+                for reason in result.strong_reasons:
+                    if reason not in reasons:
+                        reasons.append(reason)
+                suspicion["reasons"] = reasons[-30:]
+                events = list(suspicion.get("sync_events") or [])
+                events.append(str(event_id))
+                suspicion["sync_events"] = events[-50:]
+                suspicion.setdefault("first_at", now.isoformat())
+                suspicion["last_at"] = now.isoformat()
+                meta["suspicion"] = suspicion
+                return meta
+
+            def _add_deduction(meta: dict) -> dict:
+                if deduction > 0:
+                    ledger = dict(meta.get("trust_deductions") or {})
+                    ledger[today_key] = int(ledger.get(today_key, 0)) + deduction
+                    meta["trust_deductions"] = ledger
+                return meta
+
             if result.should_block:
+                # CRITICAL / reject-level risk: nothing from this sync is credited, the
+                # evidence is recorded, and the day is excluded (sticky).
                 for flag in result.flags:
-                    FraudFlag.objects.create(user=user, date=date, **flag)
-                trust.deduct(result.trust_deduction)
+                    _record_flag(
+                        user,
+                        date,
+                        flag["flag_type"],
+                        flag["severity"],
+                        {**flag["details"], "sync_event_id": str(event_id)},
+                    )
+                _apply_deduction()
+                block_meta = existing_meta if not legacy_day else {}
+                block_meta["v"] = ANTICHEAT_DAY_VERSION
+                block_meta["blocked_uploads"] = int(block_meta.get("blocked_uploads", 0)) + 1
+                block_meta = _add_deduction(_mark_suspicion(block_meta))
+                if existing_record is not None:
+                    blocked_record = existing_record
+                    blocked_record.is_suspicious = True
+                    blocked_record.anticheat = block_meta
+                    if legacy_day:
+                        # Keep the (old) figure but start raw tracking from it.
+                        blocked_record.last_raw_steps = prev_raw
+                    HealthRecord.objects.filter(pk=existing_record.pk).update(
+                        is_suspicious=True,
+                        anticheat=block_meta,
+                        last_raw_steps=blocked_record.last_raw_steps,
+                        verification=build_breakdown(blocked_record),
+                    )
+                else:
+                    blocked_record = HealthRecord.objects.create(
+                        user=user,
+                        date=date,
+                        source=data.get("source", "device_sensor"),
+                        steps=0,
+                        is_suspicious=True,
+                        anticheat=block_meta,
+                    )
+                    HealthRecord.objects.filter(pk=blocked_record.pk).update(
+                        verification=build_breakdown(blocked_record)
+                    )
                 SuspiciousActivity.objects.create(
                     user=user,
                     reason="Critical anti-cheat block",
@@ -764,48 +1007,126 @@ def sync_health(request):
                 )
 
             anti_flags_count = len(result.flags)
-            anti_is_suspicious = anti_flags_count > 0
+            # HIGH/CRITICAL hits are always recorded (deduplicated per day). MEDIUM hits
+            # only as supporting evidence of a day excluded on strong evidence.
             for flag in result.flags:
-                FraudFlag.objects.create(user=user, date=date, **flag)
+                if flag["severity"] in ("high", "critical") or result.strong_evidence:
+                    _record_flag(
+                        user,
+                        date,
+                        flag["flag_type"],
+                        flag["severity"],
+                        {**flag["details"], "sync_event_id": str(event_id)},
+                    )
 
-            if result.trust_deduction > 0:
-                trust.deduct(result.trust_deduction)
-            else:
+            has_high_hits = any(
+                flag["severity"] in ("high", "critical") for flag in result.flags
+            )
+            if deduction > 0:
+                _apply_deduction()
+            elif not has_high_hits and not result.strong_evidence:
                 trust.recover(1)
 
-            approved_steps = result.approved_steps
+            credited_delta = int(v2_decision.verified_steps_total)
             if trust.status == "RESTRICT" and not anti_v2_enabled:
-                approved_steps = int(approved_steps * 0.5)
+                credited_delta = int(credited_delta * 0.5)
+            prev_credit = 0 if fresh_day else int(existing_record.steps)
+            uncapped = prev_credit + credited_delta
+            # Plausible daily maximum: credit stops at DAILY_STEP_CAP; the rest is kept
+            # as unverified volume. High volume alone is no penalty (workers, runners).
+            approved_steps = min(DAILY_STEP_CAP, uncapped)
+            over_cap = max(0, uncapped - max(DAILY_STEP_CAP, prev_credit))
 
-            if submitted_steps > DAILY_STEP_CAP:
+            if submitted_steps > DAILY_STEP_CAP and not SuspiciousActivity.objects.filter(
+                user=user, date=date, reason="Exceeds daily step cap"
+            ).exists():
                 SuspiciousActivity.objects.create(
                     user=user,
                     reason="Exceeds daily step cap",
                     steps_submitted=submitted_steps,
                     date=date,
                 )
-                legacy_is_suspicious = True
 
-            recent_avg = (
-                HealthRecord.objects.filter(
-                    user=user,
-                    date__gte=date - timedelta(days=7),
-                )
-                .exclude(date=date)
-                .aggregate(avg=Avg("steps"))["avg"]
-                or 0
+            # Suspicion is sticky per day: a later clean sync cannot clear a day that
+            # was excluded on strong evidence (only an admin can, by clearing
+            # is_suspicious). Days flagged by the pre-Phase-0 engine are re-decided.
+            prior_sticky = bool(
+                existing_record is not None
+                and existing_record.is_suspicious
+                and not legacy_day
+                and (existing_meta.get("suspicion") or {}).get("sticky")
+            )
+            if (
+                legacy_day
+                and existing_record.is_suspicious
+                and _legacy_day_has_strong_flags(user, date)
+            ):
+                # Flagged before Phase 0 on evidence that is still "strong" today:
+                # re-evaluating with a clean snapshot must not launder it.
+                prior_sticky = True
+            is_suspicious = bool(result.strong_evidence or prior_sticky)
+            previous_suspicious = (
+                bool(existing_record.is_suspicious) if existing_record else False
             )
 
-            if recent_avg > 0 and approved_steps > recent_avg * 10:
-                SuspiciousActivity.objects.create(
-                    user=user,
-                    reason="Step spike  10 recent average",
-                    steps_submitted=approved_steps,
-                    date=date,
+            meta = {} if fresh_day else dict(existing_meta)
+            if legacy_day:
+                meta["reevaluated_from_legacy"] = now.isoformat()
+            meta["v"] = ANTICHEAT_DAY_VERSION
+            if result.strong_evidence:
+                meta = _mark_suspicion(meta)
+            elif legacy_day and prior_sticky:
+                meta["suspicion"] = {
+                    "sticky": True,
+                    "reasons": ["pre_phase0_flags"],
+                    "sync_events": [],
+                    "first_at": now.isoformat(),
+                    "last_at": now.isoformat(),
+                }
+            meta = _add_deduction(meta)
+            # Gait coverage of the credited steps (P1b: null gait is not yet penalised).
+            coverage = dict(
+                meta.get("gait_coverage")
+                or {
+                    "gait_steps": 0,
+                    "rest_snapshot_steps": 0,
+                    "no_gait_steps": 0,
+                    "syncs_gait": 0,
+                    "syncs_rest_snapshot": 0,
+                    "syncs_no_gait": 0,
+                }
+            )
+            if velocity.credit_delta > 0:
+                if "gait_not_measured" in result.notes:
+                    bucket = "no_gait"
+                elif "gait_snapshot_at_rest" in result.notes:
+                    bucket = "rest_snapshot"
+                else:
+                    bucket = "gait"
+                coverage[f"{bucket}_steps"] = (
+                    int(coverage.get(f"{bucket}_steps", 0)) + velocity.credit_delta
                 )
-                legacy_is_suspicious = True
-
-            is_suspicious = anti_is_suspicious or legacy_is_suspicious
+                syncs_key = f"syncs_{bucket}"
+                coverage[syncs_key] = int(coverage.get(syncs_key, 0)) + 1
+            meta["gait_coverage"] = coverage
+            if over_cap:
+                meta["over_cap_steps"] = int(meta.get("over_cap_steps", 0)) + over_cap
+            reduced = max(0, velocity.credit_delta - credited_delta)
+            if reduced:
+                meta["reduced_steps"] = int(meta.get("reduced_steps", 0)) + reduced
+            if velocity.unverified:
+                meta["velocity"] = velocity.details
+            meta["last_sync"] = {
+                "event_id": str(event_id),
+                "at": now.isoformat(),
+                "source_key": source_key,
+                "risk": round(result.risk_score, 2),
+                "credit_delta": velocity.credit_delta,
+                "credited": credited_delta,
+                "multiplier": round(result.credit_multiplier, 4),
+                "strong_evidence": result.strong_evidence,
+                "notes": result.notes,
+            }
 
             previous_steps = existing_record.steps if existing_record else None
 
@@ -828,11 +1149,19 @@ def sync_health(request):
                     "last_client_timestamp": newest_client_ts,
                     "source": data.get("source", "device_sensor"),
                     "steps": approved_steps,
+                    "last_raw_steps": submitted_steps,
+                    "unverified_steps": velocity.unverified,
+                    "anticheat": meta,
                     "distance_km": data.get("distance_km"),
                     "calories_active": data.get("calories_active"),
                     "active_minutes": data.get("active_minutes"),
                     "is_suspicious": is_suspicious,
                 },
+            )
+            suspicion_changed = previous_suspicious != is_suspicious
+            record.verification = build_breakdown(record)
+            HealthRecord.objects.filter(pk=record.pk).update(
+                verification=record.verification
             )
 
             if record.steps > request.user.best_day_steps:
@@ -842,12 +1171,10 @@ def sync_health(request):
 
             # Persist step event + session aggregates for verified or legacy syncs.
             event_steps_delta = int(
-                data.get("steps_delta")
-                or max(
-                    0, submitted_steps - (existing_record.steps if existing_record else 0)
-                )
+                data.get("steps_delta") or max(0, submitted_steps - prev_raw)
             )
             event = StepSyncEvent.objects.create(
+                id=event_id,
                 user=user,
                 session=session,
                 device=session.device if session else None,
@@ -865,20 +1192,15 @@ def sync_health(request):
                 ml_walk_probability=data.get("ml_walk_probability"),
                 ml_shake_probability=data.get("ml_shake_probability"),
                 ml_model_version=data.get("ml_model_version"),
-                interval_risk_score=float(
-                    sum(flag.get("severity") == "high" for flag in result.flags) * 10.0
-                ),
-                accepted=not result.should_block,
+                interval_risk_score=float(result.risk_score),
+                accepted=True,
                 rejection_reason=None,
-                raw_payload=request.data,
+                raw_payload=_redact_payload(request.data),
             )
 
             if session:
                 session.total_steps += event_steps_delta
-                if not result.should_block:
-                    session.accepted_steps += approved_steps
-                else:
-                    session.rejected_steps += submitted_steps
+                session.accepted_steps += max(0, approved_steps - (previous_steps or 0))
                 session.last_sequence_number = max(
                     session.last_sequence_number,
                     sequence_number or session.last_sequence_number + 1,
@@ -925,11 +1247,17 @@ def sync_health(request):
                     ]
                 )
 
-            if v2_decision is not None:
+            if anti_v2_enabled or anti_v2_shadow:
+                # Day-level totals, so drift monitoring compares like with like.
                 _persist_verification_artifacts(
                     user=user,
                     day=date,
-                    decision=v2_decision,
+                    decision=dataclasses.replace(
+                        v2_decision,
+                        raw_steps_total=submitted_steps,
+                        verified_steps_total=record.steps,
+                        suspicious_steps_total=max(0, submitted_steps - record.steps),
+                    ),
                     mode="active" if anti_v2_enabled else "shadow",
                     version=anti_v2_version,
                     trust_before=trust_score_before,
@@ -962,9 +1290,12 @@ def sync_health(request):
         # for their final end-day uploads to land.
         finalize_expired_challenges(today=min(date, timezone.now().date()))
 
-    should_recompute_challenges = (
-        previous_steps is None or approved_steps != previous_steps
-    ) and _acquire_periodic_lock(f"step2win:participant_recompute:{user.id}", 15)
+    # A change of the day's suspicion must reach challenge totals right away (the
+    # 15-second coalescing lock only applies to ordinary step increases).
+    should_recompute_challenges = suspicion_changed or (
+        (previous_steps is None or approved_steps != previous_steps)
+        and _acquire_periodic_lock(f"step2win:participant_recompute:{user.id}", 15)
+    )
 
     if should_recompute_challenges:
         # One query for the user's active entries (challenge joined in), then one
@@ -1518,39 +1849,9 @@ def sync_hourly_steps(request):
             LocationWaypoint.objects.bulk_create(new_points)
         stored_waypoints = len(new_points)
 
-        # Route plausibility check: compare route distance against synced steps.
-        route_km = _route_distance_km(filtered)
-        daily_record = HealthRecord.objects.filter(user=user, date=day).first()
-        if daily_record and daily_record.steps > 0 and route_km > 0:
-            ratio_km_per_step = route_km / daily_record.steps
-            if ratio_km_per_step < ROUTE_DISTANCE_PER_STEP_MIN_KM:
-                FraudFlag.objects.create(
-                    user=user,
-                    date=day,
-                    flag_type="route_step_mismatch_low_distance",
-                    severity="high",
-                    details={
-                        "steps": daily_record.steps,
-                        "route_km": round(route_km, 3),
-                        "ratio_km_per_step": round(ratio_km_per_step, 6),
-                        "min_expected_km_per_step": ROUTE_DISTANCE_PER_STEP_MIN_KM,
-                        "note": "Route distance is too short for submitted step volume.",
-                    },
-                )
-            elif ratio_km_per_step > ROUTE_DISTANCE_PER_STEP_MAX_KM:
-                FraudFlag.objects.create(
-                    user=user,
-                    date=day,
-                    flag_type="route_step_mismatch_high_distance",
-                    severity="medium",
-                    details={
-                        "steps": daily_record.steps,
-                        "route_km": round(route_km, 3),
-                        "ratio_km_per_step": round(ratio_km_per_step, 6),
-                        "max_expected_km_per_step": ROUTE_DISTANCE_PER_STEP_MAX_KM,
-                        "note": "Route distance is unusually long for submitted step volume.",
-                    },
-                )
+        # Route plausibility: compare the uploaded route with the steps of the SAME
+        # hours (the phone's hourly buckets), not with the whole day.
+        _check_route_against_hours(user, day, filtered)
 
     return Response(
         {
@@ -1560,3 +1861,56 @@ def sync_hourly_steps(request):
             "waypoint_quality": waypoint_quality,
         }
     )
+
+
+VERIFICATION_MAX_DAYS = 14
+
+
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name="StepVerificationResponse",
+            fields={
+                "days": serializers.ListField(child=serializers.DictField()),
+            },
+        )
+    }
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+@throttle_classes([DashboardReadRateThrottle])
+def step_verification(request):
+    """
+    Why do (or don't) my steps count? Per-day breakdown for the requesting user only.
+
+    GET /api/steps/verification/?date=YYYY-MM-DD      -> one day
+    GET /api/steps/verification/?days=N (1..14)       -> the last N days (default 7)
+
+    Each day: counted_steps (what the phone reported), credited_steps (what counts
+    toward challenges), unverified_steps (counted but not credited) and reasons
+    [{code, steps_affected, severity, user_message}]. Days without a record are
+    omitted. No internal anti-cheat evidence is exposed.
+    """
+    import datetime
+
+    today = timezone.now().date()
+    date_param = request.query_params.get("date")
+    if date_param:
+        try:
+            day = datetime.date.fromisoformat(date_param)
+        except ValueError:
+            return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+        days = [day]
+    else:
+        try:
+            count = int(request.query_params.get("days", 7))
+        except (TypeError, ValueError):
+            return Response({"error": "days must be a number."}, status=400)
+        count = max(1, min(VERIFICATION_MAX_DAYS, count))
+        # +1: a phone east of UTC can already be on tomorrow's date.
+        days = [today + timedelta(days=1) - timedelta(days=i) for i in range(count + 1)]
+
+    records = HealthRecord.objects.filter(user=request.user, date__in=days).order_by(
+        "-date"
+    )
+    return Response({"days": [build_breakdown(record) for record in records]})

@@ -365,6 +365,15 @@ class HealthSyncSerializerV2(serializers.Serializer):
         required=False,
         allow_null=True,
     )
+    # How burst_steps_5s was measured. Only "live_timed" (each step carries its own
+    # timestamp from live sensor events) makes the burst rules apply. Current Android
+    # builds stamp every step of a batched TYPE_STEP_COUNTER event with the arrival
+    # time, so a normal batch looks like a burst: absent/other values = no evidence.
+    burst_source = serializers.ChoiceField(
+        choices=["live_timed", "arrival_batched", "unknown"],
+        required=False,
+        allow_null=True,
+    )
     # Session and replay protection fields
     session_id = serializers.UUIDField(required=False, allow_null=True)
     session_token = serializers.CharField(
