@@ -20,6 +20,13 @@ const STILLS: Array<{ light: string; dark: string }> = [
   { light: habitLight, dark: habitDark },
 ];
 
+/** True when the page background token is dark (follows the in-app theme, not just the OS). */
+export function readDark(el: Element): boolean {
+  const raw = getComputedStyle(el).getPropertyValue('--bg-page').trim();
+  const l = Number(raw.split(/\s+/)[2]?.replace('%', ''));
+  return Number.isFinite(l) ? l < 40 : window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+}
+
 export function OnboardingStill({ index, dark }: { index: number; dark: boolean }) {
   const still = STILLS[index] ?? STILLS[0];
   return (

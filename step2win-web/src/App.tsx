@@ -16,6 +16,7 @@ import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
 import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import { BootSplash, shouldShowBootSplash } from './components/splash/BootSplash';
+import { OnboardingPlaceholder } from './components/onboarding/OnboardingPlaceholder';
 import { setOnboardingOpen, useOnboardingOpen } from './lib/launchState';
 import type { ReactNode } from 'react';
 
@@ -83,7 +84,9 @@ function OnboardingGate({ onMounted, onClose }: { onMounted: () => void; onClose
   );
 
   return (
-    <Suspense fallback={<div className="fixed inset-0 z-50 bg-bg-page" aria-busy="true" />}>
+    // The placeholder counts as mounted too: the splash hands over to it right away instead of
+    // waiting for the onboarding chunk on a slow phone.
+    <Suspense fallback={<OnboardingPlaceholder onMount={onMounted} />}>
       <OnboardingScreen onComplete={handleComplete} />
       <MountSignal onMount={onMounted} />
     </Suspense>

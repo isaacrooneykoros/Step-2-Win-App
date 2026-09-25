@@ -110,7 +110,7 @@ export function SummaryList({ rows }: { rows: Array<{ label: string; value: Reac
       {rows.map((row) => (
         <div key={row.label} className="flex items-center justify-between gap-4 px-4 py-3">
           <dt className="text-callout text-text-secondary">{row.label}</dt>
-          <dd className={`num text-right ${row.strong ? 'text-headline text-text-primary' : 'text-body font-medium text-text-primary'}`}>
+          <dd className={`num select-text text-right ${row.strong ? 'text-headline text-text-primary' : 'text-body font-medium text-text-primary'}`}>
             {row.value}
           </dd>
         </div>

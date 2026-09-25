@@ -160,7 +160,8 @@ export default function SyncOutboxScreen() {
     void statusQuery.refetch();
     const nativeAfter = nativeSync ? (await DeviceStepCounter.getSyncStatus().catch(() => null))?.pending?.length ?? 0 : 0;
     const after = nativeAfter + (await listOutboxItems(userId)).length;
-    if (before > 0 && after === 0) showToast({ message: 'Everything is synced.', type: 'success' });
+    if (before === 0 && after === 0) showToast({ message: 'Already up to date. Your steps are on your account.', type: 'success' });
+    else if (before > 0 && after === 0) showToast({ message: 'Everything is synced.', type: 'success' });
     else if (before > 0 && after > 0) showToast({ message: `${after} update${after === 1 ? '' : 's'} still waiting. We’ll keep retrying.`, type: 'info' });
   };
 

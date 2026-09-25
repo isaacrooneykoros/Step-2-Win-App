@@ -7,7 +7,7 @@ import { readRichMotion } from '../../lib/motion';
 import { useBootSplashActive } from '../../lib/launchState';
 import { pushBackHandler } from '../../lib/backButton';
 import type { OnboardingWorld } from '../../lib/three/onboardingWorld';
-import { OnboardingStill } from '../onboarding/OnboardingStills';
+import { OnboardingStill, readDark } from '../onboarding/OnboardingStills';
 import { preloadOnboarding } from '../onboarding/preload';
 
 // This chunk is fetched during the launch splash: start the 3D chunk and character files too.
@@ -63,12 +63,6 @@ const ease = {
 
 const clampIndex = (i: number) => Math.max(0, Math.min(LAST, i));
 
-function readDark(el: Element): boolean {
-  const raw = getComputedStyle(el).getPropertyValue('--bg-page').trim();
-  const l = Number(raw.split(/\s+/)[2]?.replace('%', ''));
-  return Number.isFinite(l) ? l < 40 : window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
-}
-
 type HeroMode = 'loading' | '3d' | 'still';
 
 /**
@@ -84,6 +78,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
   const [index, setIndex] = useState(0);
   const [heroMode, setHeroMode] = useState<HeroMode>(rich ? 'loading' : 'still');
   const [dark, setDark] = useState(() => readDark(document.documentElement));
+  const openingStillKey = useRef(`0-${dark}`);
   const headingId = useId();
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -446,7 +441,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
       <div ref={heroRef} className="absolute inset-0 touch-pan-y select-none" aria-hidden="true">
         {/* The still also covers the 3D world's build time, so the scene is never blank. */}
         {heroMode !== '3d' && (
-          <div key={`${index}-${dark}`} className="fade-in absolute inset-0">
+          // The opening still is already on screen (the placeholder shown while this chunk loaded),
+          // so only later page or theme changes fade in.
+          <div
+            key={`${index}-${dark}`}
+            className={`${`${index}-${dark}` === openingStillKey.current ? '' : 'fade-in '}absolute inset-0`}
+          >
             <OnboardingStill index={index} dark={dark} />
           </div>
         )}

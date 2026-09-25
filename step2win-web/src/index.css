@@ -179,6 +179,16 @@
   *::-webkit-scrollbar { display: none; }
   * { -webkit-tap-highlight-color: transparent; }
 
+  /* App feel: a stray long-press shouldn't select labels or leave a Copy/Share bar stuck on
+     screen. Inputs, legal documents and anything marked `select-text` (e.g. transaction codes)
+     stay selectable. */
+  body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  input, textarea, [contenteditable='true'], .legal-content {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
   button, a, [role='button'] {
     transition-property: color, background-color, border-color, box-shadow, opacity, transform;
     transition-duration: var(--dur-fast);
