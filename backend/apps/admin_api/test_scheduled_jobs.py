@@ -326,7 +326,7 @@ class TickerGatingTests(TestCase):
             self.assertFalse(should_start(argv, runner="builtin"), argv)
 
     def test_started_only_for_daphne_with_builtin_runner(self):
-        daphne = ["/opt/render/project/src/.venv/bin/daphne", "-b", "0.0.0.0", "step2win.asgi:application"]
+        daphne = ["/opt/render/project/src/.venv/bin/daphne", "-b", "0.0.0.0", "step2win.asgi:application"]  # nosec B104
         self.assertTrue(should_start(daphne, runner="builtin"))
         self.assertFalse(should_start(daphne, runner="celery"))
         self.assertFalse(should_start(daphne, runner="off"))
