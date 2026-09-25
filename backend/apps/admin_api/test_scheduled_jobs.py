@@ -111,6 +111,28 @@ class DueLogicTests(TestCase):
         for job in scheduler.get_jobs():
             self.assertTrue(callable(job.resolve()), job.task)
 
+    def test_risk_ml_nightly_job_resolves_with_its_kwargs(self):
+        job = scheduler.get_job("risk-ml-features-and-scores")
+        self.assertIsNotNone(job)
+        self.assertEqual(job.task, "apps.risk_ml.tasks.compute_features_and_scores_task")
+        self.assertEqual(job.kwargs, {"days": 3})
+        self.assertEqual(job.args, ())
+        self.assertEqual(job.lease_seconds, 60 * 60)
+        self.assertEqual(scheduler.describe_schedule(job.schedule), "30 1 * * * (UTC)")
+        # Analytics: runs after every money and cleanup job in the same tick.
+        names = [j.name for j in scheduler.get_jobs()]
+        self.assertEqual(names[-1], "risk-ml-features-and-scores")
+        from apps.risk_ml.tasks import compute_features_and_scores_task
+
+        self.assertIs(job.resolve(), compute_features_and_scores_task)
+
+    def test_risk_ml_job_runs_through_the_runner(self):
+        job = scheduler.get_job("risk-ml-features-and-scores")
+        with patch("apps.risk_ml.pipeline.compute_features_and_scores", return_value={"ok": True}) as run:
+            outcome = scheduler.run_job(job, force=True, trigger="manual")
+        self.assertEqual(outcome["status"], "ok", outcome)
+        run.assert_called_once_with(days=3)
+
     def test_celery_beat_schedule_wraps_every_entry(self):
         from django.conf import settings
 
@@ -327,7 +349,9 @@ class TickerGatingTests(TestCase):
 
     def test_started_only_for_daphne_with_builtin_runner(self):
         daphne = ["/opt/render/project/src/.venv/bin/daphne", "-b", "0.0.0.0", "step2win.asgi:application"]
-        self.assertTrue(should_start(daphne, runner="builtin"))
+        # Independent of the environment running the suite (QA runs set JOB_TICKER_DISABLED=1).
+        with patch.dict("os.environ", {"JOB_TICKER_DISABLED": ""}):
+            self.assertTrue(should_start(daphne, runner="builtin"))
         self.assertFalse(should_start(daphne, runner="celery"))
         self.assertFalse(should_start(daphne, runner="off"))
         self.assertTrue(is_daphne_process([r"C:\app\venv\Scripts\daphne.exe", "x"]))
