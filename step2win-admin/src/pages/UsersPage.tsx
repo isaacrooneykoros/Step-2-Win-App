@@ -1,3 +1,5 @@
+import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
+import { useIsFlashing } from '../lib/realtime/store'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
@@ -60,13 +62,16 @@ export function UsersPage() {
   const selectedId = params.get('user') ? Number(params.get('user')) : null
 
   const ordering = `${sort.dir === 'desc' ? '-' : ''}${SORT_FIELD[sort.key] ?? 'date_joined'}`
+  const refetchInterval = useLiveRefetchInterval(30_000)
+  const isFlashing = useIsFlashing('user')
   const listQ = useQuery({
+    refetchInterval,
     queryKey: ['admin', 'users', { q, status, trust, page, ordering }],
     queryFn: () =>
       consoleApi.listUsers({ page, page_size: PAGE_SIZE, search: q, status: status === 'all' ? undefined : status, trust: trust || undefined, ordering }),
     placeholderData: keepPreviousData,
   })
-  const statsQ = useQuery({ queryKey: ['admin', 'user-stats'], queryFn: consoleApi.userStats })
+  const statsQ = useQuery({ queryKey: ['admin', 'user-stats'], queryFn: consoleApi.userStats, refetchInterval })
   const s = statsQ.data
 
   const setFilter = (next: { status?: StatusFilter; trust?: string }) => {
@@ -188,6 +193,7 @@ export function UsersPage() {
         onRetry={() => void listQ.refetch()}
         onRowClick={(u) => openUser(u.id)}
         isRowActive={(u) => u.id === selectedId}
+        isRowFlashing={(u) => isFlashing(u.id)}
         sortKey={sort.key}
         sortDir={sort.dir}
         onSort={onSort}

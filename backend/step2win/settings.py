@@ -91,6 +91,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "django_celery_beat",
     "django_celery_results",
+    "apps.core",
     "apps.users",
     "apps.challenges",
     "apps.wallet",
@@ -152,12 +153,31 @@ TEMPLATES = [
 WSGI_APPLICATION = "step2win.wsgi.application"
 ASGI_APPLICATION = "step2win.asgi.application"
 
-if os.getenv("REDIS_URL"):
+# ── Channel layer (WebSockets) ───────────────────────────────────────────────
+# CHANNEL_LAYER_BACKEND: "auto" (default) uses Redis when CHANNEL_REDIS_URL or
+# REDIS_URL is set, else the in-process layer; "redis" / "memory" force one.
+# The in-memory layer is correct for ONE server process (the Render free plan);
+# Redis is only needed when several processes/instances must share events.
+CHANNEL_REDIS_URL = (
+    os.getenv("CHANNEL_REDIS_URL", "").strip() or os.getenv("REDIS_URL", "").strip()
+)
+_CHANNEL_LAYER_BACKEND = os.getenv("CHANNEL_LAYER_BACKEND", "auto").strip().lower()
+if _CHANNEL_LAYER_BACKEND not in {"auto", "redis", "memory"}:
+    raise ImproperlyConfigured("CHANNEL_LAYER_BACKEND must be auto, redis or memory.")
+if CHANNEL_REDIS_URL and _CHANNEL_LAYER_BACKEND in {"auto", "redis"}:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [os.getenv("REDIS_URL")],
+                "hosts": [CHANNEL_REDIS_URL],
+                # Bounded per-channel buffers: a stalled consumer loses messages
+                # (and resyncs) instead of growing Redis memory.
+                "capacity": 200,
+                "expiry": 30,
+                "group_expiry": 86400,
+                # Per-environment keys: a local/QA server that shares a Redis with
+                # production must never deliver its events to production sockets.
+                "prefix": f"s2w-ws-{ENVIRONMENT}",
             },
         },
     }
@@ -165,8 +185,30 @@ else:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels.layers.InMemoryChannelLayer",
+            "CONFIG": {"capacity": 200, "expiry": 30},
         },
     }
+# The admin realtime stream uses its own alias: same backend, but Redis errors are
+# retried instead of killing the socket (apps/core/layers.py), and same-process
+# delivery does not depend on the layer at all (apps/core/realtime.py).
+CHANNEL_LAYERS["realtime"] = dict(CHANNEL_LAYERS["default"])
+if "redis" in CHANNEL_LAYERS["default"]["BACKEND"]:
+    CHANNEL_LAYERS["realtime"]["BACKEND"] = "apps.core.layers.ResilientRedisChannelLayer"
+
+# Admin realtime event stream (apps/core/realtime.py, ws/admin/events/).
+REALTIME_ENABLED = os.getenv("REALTIME_ENABLED", "True").strip().lower() == "true"
+# Browser origins allowed to open the admin socket. localhost/127.0.0.1 on any
+# port are also allowed when DEBUG is on.
+ADMIN_WS_ALLOWED_ORIGINS = list(
+    dict.fromkeys(
+        ["https://step-2-win-app.vercel.app"]
+        + [
+            o.strip().rstrip("/")
+            for o in os.getenv("ADMIN_WS_ALLOWED_ORIGINS", "").split(",")
+            if o.strip()
+        ]
+    )
+)
 
 USE_SQLITE = os.getenv("USE_SQLITE", "False") == "True"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -743,6 +785,11 @@ LOGGING = {
             "handlers": ["console"],
             "level": "INFO",
             "propagate": True,
+        },
+        "apps.core.realtime": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
         },
     },
 }

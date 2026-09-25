@@ -1,3 +1,5 @@
+import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
+import { useIsFlashing } from '../lib/realtime/store'
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -193,8 +195,10 @@ export function ModerationPage() {
 
   const view = tab === 'enforced' ? 'enforced' : 'queue'
   // Unfiltered lists feed the KPIs; the filtered ones (only while searching) feed the table.
-  const queueQ = useQuery({ queryKey: ['admin', 'trust', 'moderation', 'queue', ''], queryFn: () => trustApi.moderationUsers('queue'), refetchInterval: REFRESH_MS })
-  const enforcedQ = useQuery({ queryKey: ['admin', 'trust', 'moderation', 'enforced', ''], queryFn: () => trustApi.moderationUsers('enforced'), refetchInterval: REFRESH_MS })
+  const refetchInterval = useLiveRefetchInterval(REFRESH_MS)
+  const isFlashing = useIsFlashing('user')
+  const queueQ = useQuery({ queryKey: ['admin', 'trust', 'moderation', 'queue', ''], queryFn: () => trustApi.moderationUsers('queue'), refetchInterval })
+  const enforcedQ = useQuery({ queryKey: ['admin', 'trust', 'moderation', 'enforced', ''], queryFn: () => trustApi.moderationUsers('enforced'), refetchInterval })
   const searchQ = useQuery({
     queryKey: ['admin', 'trust', 'moderation', tab === 'enforced' ? 'enforced' : 'queue', q],
     queryFn: () => trustApi.moderationUsers(tab === 'enforced' ? 'enforced' : 'queue', q),
@@ -321,6 +325,7 @@ export function ModerationPage() {
       onRetry={() => void listQ.refetch()}
       onRowClick={openRow}
       isRowActive={(r) => r.id === (paneRow?.id ?? (drawerOpen ? selectedId : null))}
+      isRowFlashing={(r) => isFlashing(r.id)}
       toolbar={
         <Toolbar actions={<span className="hidden text-xs text-ink-muted sm:inline">{view === 'queue' ? 'Most severe open case first, then lowest trust' : 'Lowest trust first'}</span>}>
           <SearchInput size="sm" value={search} onChange={setSearch} placeholder="User name, email or ID" />

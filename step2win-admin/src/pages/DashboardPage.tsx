@@ -2,8 +2,8 @@ import { useState, type ElementType, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Activity, AlertOctagon, Banknote, ChevronRight, Footprints, HeadphonesIcon, RefreshCw,
-  ShieldAlert, Trophy, UserPlus, Users, Wallet, Coins, CheckCircle2,
+  Activity, AlertOctagon, Banknote, ChevronRight, Footprints, HeadphonesIcon, LogIn, RefreshCw,
+  ShieldAlert, Smartphone, Trophy, UserPlus, Users, Wallet, Coins, CheckCircle2,
 } from 'lucide-react'
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -27,6 +27,9 @@ import {
   formatAgeHours, formatCompact, formatKES, formatKESShort, formatNumber, formatPercent, formatRelative, sumBy,
 } from '../lib/format'
 import { cn } from '../lib/cn'
+import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
+import { useRealtimeStore } from '../lib/realtime/store'
+import { PULSE_KEY, realtimeApi } from '../lib/realtime/api'
 
 type Period = '7' | '30' | '90'
 const PERIODS = [
@@ -172,31 +175,39 @@ export function DashboardPage() {
   const days = Number(period)
   const navigate = useNavigate()
 
+  // Live events refetch these as customers act; polling only while the socket is down.
+  const refetchInterval = useLiveRefetchInterval(REFRESH_MS)
+  const live = useRealtimeStore((s) => s.status === 'live')
   const overviewQ = useQuery({
     queryKey: ['admin', 'overview', days],
     queryFn: () => adminApi.getOverview(days),
-    refetchInterval: REFRESH_MS,
+    refetchInterval,
     placeholderData: (prev) => prev,
   })
   const withdrawalsQ = useQuery({
     queryKey: ['admin', 'withdrawal-stats'],
     queryFn: () => adminApi.getWithdrawalStats(),
-    refetchInterval: REFRESH_MS,
+    refetchInterval,
   })
   const fraudQ = useQuery({
     queryKey: ['admin', 'fraud-overview'],
     queryFn: () => adminApi.getFraudOverview(),
-    refetchInterval: REFRESH_MS,
+    refetchInterval,
   })
   const opsQ = useQuery({
     queryKey: ['admin', 'ops-monitoring'],
     queryFn: () => adminApi.getOpsMonitoring(),
-    refetchInterval: REFRESH_MS,
+    refetchInterval,
   })
   const notificationsQ = useQuery({
     queryKey: ['admin', 'notifications'],
     queryFn: () => adminApi.getNotifications(),
-    refetchInterval: REFRESH_MS,
+    refetchInterval,
+  })
+  const pulseQ = useQuery({
+    queryKey: PULSE_KEY,
+    queryFn: realtimeApi.pulse,
+    refetchInterval,
   })
 
   const stats = overviewQ.data
@@ -208,6 +219,7 @@ export function DashboardPage() {
   const refreshing =
     overviewQ.isFetching || withdrawalsQ.isFetching || fraudQ.isFetching || opsQ.isFetching || notificationsQ.isFetching
   const refreshAll = () => {
+    void pulseQ.refetch()
     void overviewQ.refetch()
     void withdrawalsQ.refetch()
     void fraudQ.refetch()
@@ -302,7 +314,8 @@ export function DashboardPage() {
   const t = ops?.thresholds
   const drift = ops?.anti_cheat_drift
 
-  const updatedAt = stats?.timestamp ? format(new Date(stats.timestamp), 'HH:mm') : null
+  const updatedAt = stats?.timestamp ? format(new Date(stats.timestamp), live ? 'HH:mm:ss' : 'HH:mm') : null
+  const pulse = pulseQ.data
   const kpiLoading = overviewQ.isLoading
 
   return (
@@ -310,7 +323,7 @@ export function DashboardPage() {
       <PageHeader
         title="Dashboard"
         description="Queues that need a decision, platform health, and activity for the selected period."
-        meta={updatedAt ? `Updated ${updatedAt} · refreshes every minute` : undefined}
+        meta={updatedAt ? `Updated ${updatedAt} · ${live ? 'live' : 'refreshes every minute'}` : undefined}
         actions={
           <>
             <SegmentedControl label="Reporting period" items={PERIODS} value={period} onChange={setPeriod} />
@@ -465,6 +478,42 @@ export function DashboardPage() {
           />
         </section>
       )}
+
+      {/* ── Live activity (rolling windows, refetched as phones sync) ── */}
+      <section aria-label="Live activity" className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label="Step syncs · last hour"
+          icon={RefreshCw}
+          loading={pulseQ.isLoading}
+          value={formatNumber(pulse?.step_syncs_last_hour ?? undefined)}
+          hint="Accepted and rejected sync events"
+          to="/steps"
+        />
+        <StatCard
+          label="People syncing · last hour"
+          icon={Smartphone}
+          loading={pulseQ.isLoading}
+          value={formatNumber(pulse?.users_synced_last_hour ?? undefined)}
+          hint="Distinct users whose steps landed"
+          to="/steps"
+        />
+        <StatCard
+          label="Sign-ins · last hour"
+          icon={LogIn}
+          loading={pulseQ.isLoading}
+          value={formatNumber(pulse?.logins_last_hour ?? undefined)}
+          hint="New device sessions"
+          to="/users"
+        />
+        <StatCard
+          label="Sign-ups · last 24h"
+          icon={UserPlus}
+          loading={pulseQ.isLoading}
+          value={formatNumber(pulse?.signups_last_24h ?? undefined)}
+          hint="New accounts"
+          to="/users"
+        />
+      </section>
 
       {/* ── Charts ── */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

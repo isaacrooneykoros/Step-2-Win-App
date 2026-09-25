@@ -1,3 +1,4 @@
+import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
 import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -163,7 +164,8 @@ const shortDay = (iso: string | number) => {
 }
 
 export function OpsMonitoringPage() {
-  const opsQ = useQuery({ queryKey: ['admin', 'ops-monitoring'], queryFn: trustApi.ops, refetchInterval: 60_000 })
+  const refetchInterval = useLiveRefetchInterval(60_000)
+  const opsQ = useQuery({ queryKey: ['admin', 'ops-monitoring'], queryFn: trustApi.ops, refetchInterval })
   const histQ = useQuery({ queryKey: ['admin', 'ops-monitoring', 'history'], queryFn: () => trustApi.opsHistory(14), refetchInterval: 300_000 })
   const d = opsQ.data
   const checks = useMemo(() => (d ? buildChecks(d) : []), [d])

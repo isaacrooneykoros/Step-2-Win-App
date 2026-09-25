@@ -1,3 +1,4 @@
+import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
 import { Fragment, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
@@ -51,7 +52,9 @@ export function ActivityLogsPage() {
     to_date: to ? `${to}T23:59:59` : undefined,
     exclude_auth: scope === 'changes' && action !== 'login' && action !== 'logout' ? 'true' : undefined,
   }
+  const refetchInterval = useLiveRefetchInterval(60_000)
   const logsQ = useQuery({
+    refetchInterval,
     queryKey: ['admin', 'audit-logs', filters, page],
     queryFn: () => consoleApi.auditLogs({ ...filters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
     placeholderData: keepPreviousData,

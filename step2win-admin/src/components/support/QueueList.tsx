@@ -1,6 +1,7 @@
 import { useRef, type KeyboardEvent } from 'react'
 import { Clock, Flag, Megaphone, UserRound } from 'lucide-react'
 import { cn } from '../../lib/cn'
+import { useIsFlashing } from '../../lib/realtime/store'
 import { formatAgeHours, formatDateTime, formatRelative } from '../../lib/format'
 import { StatusBadge } from '../StatusBadge'
 import type { QueueTicket } from './api'
@@ -20,6 +21,7 @@ interface QueueListProps {
  */
 export function QueueList({ rows, selectedId, onSelect, label }: QueueListProps) {
   const refs = useRef<Array<HTMLButtonElement | null>>([])
+  const isFlashing = useIsFlashing('ticket')
 
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let next = -1
@@ -50,6 +52,7 @@ export function QueueList({ rows, selectedId, onSelect, label }: QueueListProps)
               className={cn(
                 'relative block w-full px-4 py-3 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand',
                 selected ? 'bg-brand-soft' : 'hover:bg-surface-elevated',
+                !selected && isFlashing(t.id) && 'live-flash',
               )}
             >
               {selected && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-brand" />}

@@ -1,3 +1,5 @@
+import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
+import { useIsFlashing } from '../lib/realtime/store'
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertOctagon, Banknote, CheckCircle2, Clock, History, Inbox, RefreshCw, RotateCw, X, XCircle } from 'lucide-react'
@@ -107,11 +109,13 @@ export function AdminWithdrawalsPage() {
   const [rejectTarget, setRejectTarget] = useState<WithdrawalRow | null>(null)
   const [reason, setReason] = useState('')
 
-  const statsQ = useQuery({ queryKey: ['admin', 'withdrawal-stats'], queryFn: financeApi.stats, refetchInterval: REFRESH_MS })
+  const refetchInterval = useLiveRefetchInterval(REFRESH_MS)
+  const isFlashing = useIsFlashing('withdrawal')
+  const statsQ = useQuery({ queryKey: ['admin', 'withdrawal-stats'], queryFn: financeApi.stats, refetchInterval })
   const queueQ = useQuery({
     queryKey: ['admin', 'finance', 'withdrawals', 'queue'],
     queryFn: () => financeApi.withdrawals({ status: 'pending_review', limit: 200, offset: 0 }),
-    refetchInterval: REFRESH_MS,
+    refetchInterval,
   })
   const historyFilters = {
     status: hStatus, method: hMethod || undefined, q: hSearchDebounced, from: hFrom || undefined, to: hTo || undefined,
@@ -366,6 +370,7 @@ export function AdminWithdrawalsPage() {
             onRetry={() => void queueQ.refetch()}
             onRowClick={openRow}
             isRowActive={(r) => r.id === (paneRow?.id ?? (drawerOpen ? selectedId : null))}
+            isRowFlashing={(r) => isFlashing(r.id)}
             toolbar={
               <Toolbar actions={<span className="hidden text-xs text-ink-muted sm:inline">Oldest first · refreshes every 30s</span>}>
                 <SearchInput size="sm" value={queueSearch} onChange={setQueueSearch} placeholder="Filter by user, phone or ID" />
@@ -419,6 +424,7 @@ export function AdminWithdrawalsPage() {
             onRetry={() => void historyQ.refetch()}
             onRowClick={setHistoryRow}
             isRowActive={(r) => r.id === historyRow?.id}
+            isRowFlashing={(r) => isFlashing(r.id)}
             toolbar={
               <div className="space-y-2">
                 <Toolbar

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
+import { useIsFlashing } from '../lib/realtime/store'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertOctagon, CheckCircle2, Clock, Inbox, RefreshCw, ShieldCheck, UserX } from 'lucide-react'
@@ -75,13 +77,15 @@ export function AdminFraudPage() {
     from: from || undefined, to: to || undefined, limit: PAGE, offset: (page - 1) * PAGE,
   }
 
-  const summaryQ = useQuery({ queryKey: ['admin', 'trust', 'summary'], queryFn: () => trustApi.summary(30), refetchInterval: REFRESH_MS })
+  const refetchInterval = useLiveRefetchInterval(REFRESH_MS)
+  const isFlashing = useIsFlashing('flag')
+  const summaryQ = useQuery({ queryKey: ['admin', 'trust', 'summary'], queryFn: () => trustApi.summary(30), refetchInterval })
   const casesQ = useQuery({
     queryKey: ['admin', 'trust', 'cases', filters],
     queryFn: () => trustApi.cases(filters),
     enabled: tab !== 'trends',
     placeholderData: (prev) => prev,
-    refetchInterval: tab === 'queue' ? REFRESH_MS : false,
+    refetchInterval: tab === 'queue' ? refetchInterval : false,
   })
 
   const rows = useMemo(() => casesQ.data?.results ?? [], [casesQ.data])
@@ -297,6 +301,7 @@ export function AdminFraudPage() {
       onRetry={() => void casesQ.refetch()}
       onRowClick={openRow}
       isRowActive={(r) => r.key === (paneRow?.key ?? (drawerOpen ? selectedKey : null))}
+      isRowFlashing={(r) => isFlashing(r.id)}
       toolbar={toolbar}
       emptyState={
         filtered ? (

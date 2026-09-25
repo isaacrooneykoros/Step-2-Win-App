@@ -50,6 +50,8 @@ interface AdminTableProps<T> {
   rowActions?: (row: T) => ReactNode
   /** Marks a row as selected/open (e.g. the record shown in a SlideOver). */
   isRowActive?: (row: T) => boolean
+  /** Marks a row as just changed by a live update (brief highlight, see `.live-flash`). */
+  isRowFlashing?: (row: T) => boolean
   sortKey?:    string
   sortDir?:    'asc' | 'desc'
   onSort?:     (key: string) => void
@@ -89,7 +91,7 @@ export function AdminTable<T>({
   title, subtitle, columns, data, isLoading, error, onRetry,
   searchValue, onSearchChange, searchPlaceholder = 'Search…',
   actions, toolbar, emptyMessage = 'No records found', emptyDescription, emptyState,
-  rowKey, onRowClick, rowActions, isRowActive, sortKey, sortDir, onSort,
+  rowKey, onRowClick, rowActions, isRowActive, isRowFlashing, sortKey, sortDir, onSort,
   pagination, maxHeight, density = 'compact', skeletonRows = 6, className,
 }: AdminTableProps<T>) {
   const controlled = Boolean(onSort)
@@ -244,6 +246,7 @@ export function AdminTable<T>({
                       'border-b border-surface-border last:border-b-0',
                       onRowClick && 'cursor-pointer hover:bg-surface-elevated/60 focus-visible:bg-surface-elevated/60 focus-visible:outline-none',
                       active && 'bg-brand-soft/60',
+                      !active && isRowFlashing?.(row) && 'live-flash',
                     )}
                   >
                     {columns.map((col) => (

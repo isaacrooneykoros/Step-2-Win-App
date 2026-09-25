@@ -1,3 +1,4 @@
+import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -56,11 +57,12 @@ export function SupportPage() {
     view, q: debounced, priority, category, tag, assigned_to: assignee, sort,
     limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE,
   }
+  const queueRefetch = useLiveRefetchInterval(30_000)
   const queueQ = useQuery({
     queryKey: ['support', 'queue', queueParams],
     queryFn: () => supportApi.queue(queueParams),
     placeholderData: keepPreviousData,
-    refetchInterval: 30_000,
+    refetchInterval: queueRefetch,
   })
   const adminsQ = useQuery({ queryKey: ['support', 'admins'], queryFn: supportApi.admins, staleTime: 5 * 60_000 })
   const admins = adminsQ.data?.results ?? []

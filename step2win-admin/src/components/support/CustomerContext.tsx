@@ -1,3 +1,4 @@
+import { useLiveRefetchInterval } from '../../lib/realtime/useAdminRealtime'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -163,7 +164,8 @@ function CustomerBody({ data, ticketId, onOpenTicket }: { data: Awaited<ReturnTy
 /** Staff-only note stored on the ticket (admin_notes). Never sent to the customer. */
 function InternalNote({ ticketId }: { ticketId: number }) {
   const qc = useQueryClient()
-  const conv = useQuery({ queryKey: ['support', 'conversation', ticketId], queryFn: () => supportApi.conversation(ticketId), refetchInterval: 20_000 })
+  const refetchInterval = useLiveRefetchInterval(20_000)
+  const conv = useQuery({ queryKey: ['support', 'conversation', ticketId], queryFn: () => supportApi.conversation(ticketId), refetchInterval })
   const saved = conv.data?.ticket.admin_notes ?? ''
   const [value, setValue] = useState<string | null>(null)
   const current = value ?? saved

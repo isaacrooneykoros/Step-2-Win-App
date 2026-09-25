@@ -236,6 +236,16 @@
 }
 @keyframes skeletonPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 
+/* Live update highlight: a row or value changed by a realtime event. Background only,
+   so nothing moves or resizes. Reduced motion: a static brand edge instead of a fade. */
+.live-flash { animation: liveFlash 1800ms ease-out 1; }
+.live-value { animation: liveValue 1400ms ease-out 1; border-radius: 4px; }
+@keyframes liveFlash { from { background-color: var(--brand-soft); } to { background-color: transparent; } }
+@keyframes liveValue { from { background-color: var(--brand-soft); } to { background-color: transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  .live-flash { box-shadow: inset 2px 0 0 var(--brand); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

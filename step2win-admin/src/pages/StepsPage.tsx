@@ -1,3 +1,5 @@
+import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
+import { useIsFlashing } from '../lib/realtime/store'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
@@ -95,7 +97,10 @@ export function StepsPage() {
     source: source || undefined,
     suspicious: flag === 'all' ? undefined : flag,
   }
+  const refetchInterval = useLiveRefetchInterval(30_000)
+  const isFlashing = useIsFlashing('steps')
   const listQ = useQuery({
+    refetchInterval,
     queryKey: ['admin', 'step-logs', filters, page, sort],
     queryFn: () => consoleApi.stepLogs({ ...filters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE, order: sort.dir, sort: sort.key }),
     placeholderData: keepPreviousData,
@@ -266,6 +271,7 @@ export function StepsPage() {
         onRetry={() => void listQ.refetch()}
         onRowClick={setSelected}
         isRowActive={(r) => r.id === selected?.id}
+        isRowFlashing={(r) => isFlashing(r.user_id)}
         sortKey={sort.key}
         sortDir={sort.dir}
         onSort={(k) => { setSort((c) => (c.key === k ? { key: c.key, dir: c.dir === 'asc' ? 'desc' : 'asc' } : { key: k as 'date' | 'steps', dir: 'desc' })); reset() }}

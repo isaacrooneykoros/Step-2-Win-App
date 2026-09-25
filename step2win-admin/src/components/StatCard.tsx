@@ -1,4 +1,5 @@
-import type { ElementType, ReactNode } from 'react'
+import { useState, type ElementType, type ReactNode } from 'react'
+import { useRealtimeStore } from '../lib/realtime/store'
 import { Link } from 'react-router-dom'
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react'
 import { Line, LineChart, ResponsiveContainer, YAxis } from 'recharts'
@@ -93,6 +94,16 @@ export function StatCard({
   const spark = sparkData && sparkData.length > 1 ? sparkData.map((v, i) => ({ i, v })) : null
   const interactive = Boolean(to || onClick)
 
+  // Briefly highlight the value when a live event just changed it (not on first load
+  // or when the operator changes a filter: only while `kpiLive` is set by an event).
+  const kpiLive = useRealtimeStore((s) => s.kpiLive)
+  const valueKey = loading ? null : typeof displayValue === 'string' || typeof displayValue === 'number' ? String(displayValue) : null
+  const [seen, setSeen] = useState({ key: valueKey, flashes: 0 })
+  if (seen.key !== valueKey) {
+    const flash = kpiLive && seen.key !== null && valueKey !== null
+    setSeen({ key: valueKey, flashes: flash ? seen.flashes + 1 : seen.flashes })
+  }
+
   const body = (
     <>
       <div className="flex items-start justify-between gap-2">
@@ -109,7 +120,10 @@ export function StatCard({
         </div>
       ) : (
         <>
-          <p className={cn('mt-1.5 truncate text-[22px] font-semibold leading-7 tracking-[-0.01em]', TONE_VALUE[tone])}>
+          <p
+            key={seen.flashes}
+            className={cn('mt-1.5 truncate text-[22px] font-semibold leading-7 tracking-[-0.01em]', TONE_VALUE[tone], seen.flashes > 0 && 'live-value')}
+          >
             {prefix}{displayValue}{suffix}
           </p>
           {(effectiveDelta || effectiveHint) && (

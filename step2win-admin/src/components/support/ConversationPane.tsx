@@ -1,3 +1,4 @@
+import { useLiveRefetchInterval } from '../../lib/realtime/useAdminRealtime'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CheckCircle2, Flag, Megaphone, PanelRightOpen, RefreshCw, Send, UserPlus } from 'lucide-react'
@@ -56,10 +57,11 @@ function describeEvent(e: TicketEvent): string | null {
 export function ConversationPane({ ticketId, admins, meId, onBack, onOpenCustomer, onChanged }: ConversationPaneProps) {
   const qc = useQueryClient()
   const key = ['support', 'conversation', ticketId]
+  const refetchInterval = useLiveRefetchInterval(20_000)
   const q = useQuery({
     queryKey: key,
     queryFn: () => supportApi.conversation(ticketId),
-    refetchInterval: 20_000,
+    refetchInterval,
   })
   const [draft, setDraft] = useState('')
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)

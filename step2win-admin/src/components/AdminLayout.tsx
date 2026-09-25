@@ -5,6 +5,8 @@ import { Banknote, Bell, FileText, Menu, MessageSquare, Search } from 'lucide-re
 import Sidebar from './Sidebar'
 import CommandPalette from './CommandPalette'
 import { ThemeToggle } from './ThemeToggle'
+import { LiveIndicator } from './LiveIndicator'
+import { useAdminRealtime, useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
 import { IconButton } from './ui/Button'
 import { adminApi } from '../services/adminApi'
 import type { AdminNotificationItem } from '../types/admin'
@@ -12,7 +14,10 @@ import { routeLabel, SIDEBAR_WIDTH } from '../lib/nav'
 import { formatRelative } from '../lib/format'
 import { cn } from '../lib/cn'
 
-/** Queue counts refresh every minute. Query keys are shared with the dashboard, so requests are cached once. */
+/**
+ * Queue counts update from live events; this polling interval only applies while
+ * the realtime socket is down. Query keys are shared with the dashboard.
+ */
 const LAYOUT_REFRESH_MS = 60_000
 
 const SECTION_META: Record<AdminNotificationItem['type'], { label: string; icon: typeof Bell; to: string }> = {
@@ -51,6 +56,8 @@ export function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const isDesktop = useIsDesktop()
+  useAdminRealtime()
+  const layoutRefetch = useLiveRefetchInterval(LAYOUT_REFRESH_MS)
   const popoverRef = useRef<HTMLDivElement>(null)
   const bellRef = useRef<HTMLButtonElement>(null)
 
@@ -95,22 +102,22 @@ export function AdminLayout() {
   const { data: withdrawalStats } = useQuery({
     queryKey: ['admin', 'withdrawal-stats'],
     queryFn: () => adminApi.getWithdrawalStats(),
-    refetchInterval: LAYOUT_REFRESH_MS,
+    refetchInterval: layoutRefetch,
   })
   const { data: notifications } = useQuery({
     queryKey: ['admin', 'notifications'],
     queryFn: () => adminApi.getNotifications(),
-    refetchInterval: LAYOUT_REFRESH_MS,
+    refetchInterval: layoutRefetch,
   })
   const { data: fraud } = useQuery({
     queryKey: ['admin', 'fraud-overview'],
     queryFn: () => adminApi.getFraudOverview(),
-    refetchInterval: LAYOUT_REFRESH_MS,
+    refetchInterval: layoutRefetch,
   })
   const { data: ops } = useQuery({
     queryKey: ['admin', 'ops-monitoring'],
     queryFn: () => adminApi.getOpsMonitoring(),
-    refetchInterval: LAYOUT_REFRESH_MS,
+    refetchInterval: layoutRefetch,
   })
   const { data: profile } = useQuery({
     queryKey: ['admin', 'profile'],
@@ -187,6 +194,7 @@ export function AdminLayout() {
           </button>
 
           <div className="ml-auto flex items-center gap-1">
+            <LiveIndicator />
             <ThemeToggle />
 
             <div className="relative">

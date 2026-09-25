@@ -1,3 +1,5 @@
+import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
+import { useIsFlashing } from '../lib/realtime/store'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -67,7 +69,10 @@ export function TransactionsPage() {
     setPage(1)
   }
 
+  const refetchInterval = useLiveRefetchInterval(30_000)
+  const isFlashing = useIsFlashing('wallet')
   const q = useQuery({
+    refetchInterval,
     queryKey: ['admin', 'finance', 'ledger', effective, page],
     queryFn: () => financeApi.ledger(effective, PAGE_SIZE, (page - 1) * PAGE_SIZE),
     placeholderData: (prev) => prev,
@@ -190,6 +195,7 @@ export function TransactionsPage() {
         onRetry={() => void q.refetch()}
         onRowClick={setSelected}
         isRowActive={(r) => r.id === selected?.id}
+        isRowFlashing={(r) => isFlashing(r.id)}
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={onSort}

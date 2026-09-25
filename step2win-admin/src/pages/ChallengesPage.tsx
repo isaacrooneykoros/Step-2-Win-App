@@ -1,3 +1,5 @@
+import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
+import { useIsFlashing } from '../lib/realtime/store'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
@@ -48,16 +50,20 @@ export function ChallengesPage() {
   const openId = params.get('open') ? Number(params.get('open')) : null
 
   const ordering = `${sort.dir === 'desc' ? '-' : ''}${SORT_FIELD[sort.key] ?? 'created_at'}`
+  const refetchInterval = useLiveRefetchInterval(30_000)
+  const isFlashing = useIsFlashing('challenge')
   const listQ = useQuery({
+    refetchInterval,
     queryKey: ['admin', 'challenges', { tab, q, page, ordering }],
     queryFn: () => consoleApi.listChallenges({ page, page_size: PAGE_SIZE, status: tab === 'all' ? undefined : tab, search: q, ordering }),
     placeholderData: keepPreviousData,
   })
   const queueQ = useQuery({
     queryKey: ['admin', 'challenges', 'queue'],
+    refetchInterval,
     queryFn: () => consoleApi.listChallenges({ page: 1, page_size: 50, status: 'pending', ordering: 'start_date' }),
   })
-  const statsQ = useQuery({ queryKey: ['admin', 'challenge-stats'], queryFn: consoleApi.challengeStats })
+  const statsQ = useQuery({ queryKey: ['admin', 'challenge-stats'], queryFn: consoleApi.challengeStats, refetchInterval })
   const s = statsQ.data
   const queue = queueQ.data?.results ?? []
 
@@ -190,6 +196,7 @@ export function ChallengesPage() {
           onRetry={() => void listQ.refetch()}
           onRowClick={(c) => open(c.id)}
           isRowActive={(c) => c.id === openId}
+          isRowFlashing={(c) => isFlashing(c.id)}
           sortKey={sort.key}
           sortDir={sort.dir}
           onSort={(k) => { setSort((cur) => (cur.key === k ? { key: k, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: k === 'name' ? 'asc' : 'desc' })); setPage(1) }}
