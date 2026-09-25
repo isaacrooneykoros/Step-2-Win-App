@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import logging
 
 from django.conf import settings
@@ -467,11 +465,28 @@ def delete_profile_picture(request):
 @throttle_classes([DeviceBindRateThrottle])
 def bind_device(request):
     """
-    Bind a device to user account for step tracking
+    Bind a device to the user's account for step tracking.
+
+    Proof of identity is the user's JWT (the binding can only ever be made for
+    the signed-in account). There is deliberately no client-held shared secret:
+    one that ships in an app bundle can be extracted and proves nothing. Abuse is
+    contained server-side instead:
+      * DeviceBindRateThrottle (per-user request rate);
+      * a device can be bound to one account only;
+      * one active device per account: binding a new device deactivates the
+        account's other device registrations, and switching to a different
+        device is allowed at most once per DEVICE_REBIND_COOLDOWN_HOURS (24 h);
+      * no switching while trust is SUSPEND / BAN or a payout is under review.
+    A legacy `device_signature` field from old clients is accepted and ignored.
     """
+    from datetime import timedelta
+
+    from django.core.cache import cache
+
+    from apps.steps.models import DeviceRegistration, TrustScore
+
     device_id = str(request.data.get("device_id", "")).strip()
     platform = request.data.get("platform")
-    device_signature = (request.data.get("device_signature") or "").strip()
 
     if not device_id:
         return Response(
@@ -491,31 +506,6 @@ def bind_device(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    signing_secret = (getattr(settings, "APP_SIGNING_SECRET", "") or "").strip()
-    if not signing_secret:
-        return Response(
-            {"error": "Device binding is unavailable due to server configuration"},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-
-    if not device_signature:
-        return Response(
-            {"error": "device_signature required"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    signature_payload = f"{request.user.id}:{device_id}:{platform}"
-    expected_signature = hmac.new(
-        signing_secret.encode(),
-        signature_payload.encode(),
-        hashlib.sha256,
-    ).hexdigest()
-    if not hmac.compare_digest(device_signature, expected_signature):
-        return Response(
-            {"error": "Invalid device signature"},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     # Check if device is already bound to another account
     if User.objects.filter(device_id=device_id).exclude(id=request.user.id).exists():
         return Response(
@@ -523,11 +513,56 @@ def bind_device(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    cooldown_hours = int(getattr(settings, "DEVICE_REBIND_COOLDOWN_HOURS", 24))
+    cooldown_key = f"device-rebind:{request.user.id}"
+
     with transaction.atomic():
         user = User.objects.select_for_update().get(id=request.user.id)
+        switching = bool(user.device_id) and user.device_id != device_id
+        if switching:
+            trust = TrustScore.objects.filter(user=user).first()
+            if trust is not None and trust.status in ("SUSPEND", "BAN"):
+                return Response(
+                    {"error": "Device changes are paused on this account. Contact support."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            from apps.challenges.models import HeldPayout
+
+            if HeldPayout.objects.filter(user=user, status=HeldPayout.STATUS_HELD).exists():
+                return Response(
+                    {"error": "You can change devices once the review of your recent payout is complete."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if cache.get(cooldown_key):
+                return Response(
+                    {
+                        "error": (
+                            "This account switched devices recently. "
+                            f"You can switch again within {cooldown_hours} hours of the last change."
+                        ),
+                        "code": "device_rebind_cooldown",
+                    },
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
+
         user.device_id = device_id
         user.device_platform = platform
-        user.save()
+        user.save(update_fields=["device_id", "device_platform", "updated_at"])
+
+        # One active device per account.
+        registration, _ = DeviceRegistration.objects.get_or_create(
+            user=user, device_id=device_id, defaults={"platform": platform}
+        )
+        if not registration.is_active or registration.platform != platform:
+            registration.is_active = True
+            registration.platform = platform
+            registration.save(update_fields=["is_active", "platform", "updated_at"])
+        DeviceRegistration.objects.filter(user=user, is_active=True).exclude(
+            pk=registration.pk
+        ).update(is_active=False)
+
+    if switching:
+        cache.set(cooldown_key, True, timeout=int(timedelta(hours=cooldown_hours).total_seconds()))
 
     return Response(
         {

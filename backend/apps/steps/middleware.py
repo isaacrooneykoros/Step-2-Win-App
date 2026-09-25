@@ -11,9 +11,18 @@ from rest_framework_simplejwt.tokens import AccessToken
 
 class HMACSignatureMiddleware:
     """
-    Validates sync requests came from the real app.
-    Uses: HMAC-SHA256(secret, "{user_id}:{timestamp}:{body_sha256}")
-    Rejects requests older than 5 minutes to prevent replay attacks.
+    Step sync gate: every POST /api/steps/sync/ must carry a server-issued step
+    session (session_id + session_token), which the view verifies (token hash,
+    ownership, expiry, sequence, replay).
+
+    A client-side HMAC ("X-App-Signature", HMAC-SHA256 over
+    "{user_id}:{timestamp}:{body_sha256}") is NOT sufficient on its own: the
+    secret used to ship inside the web/app bundle, so anyone could compute it.
+    Every client since the session protocol (commit b8e9ed7) sends a session, so
+    HMAC-only syncs are rejected with 403 SESSION_REQUIRED. The legacy HMAC-only
+    path survives only behind settings.STEP_SYNC_ALLOW_HMAC_ONLY (default False)
+    as an emergency switch; do not enable it with a secret that has shipped in a
+    client.
     """
 
     PROTECTED_PATHS = ["/api/steps/sync/"]
@@ -24,12 +33,21 @@ class HMACSignatureMiddleware:
 
     def __call__(self, request):
         if request.path in self.PROTECTED_PATHS and request.method == "POST":
-            if not request.headers.get("X-App-Signature") and self._has_session_credentials(request):
-                # Session-authenticated sync (the app's current protocol): the view verifies
+            if self._has_session_credentials(request):
+                # Session-authenticated sync (the app's protocol): the view verifies
                 # the server-issued session token hash, session ownership/expiry, sequence
                 # monotonicity and replay before accepting anything. An invalid or foreign
                 # session is rejected there (400/401) and recorded as a replay event.
+                # Any X-App-Signature header is ignored: it proves nothing.
                 return self.get_response(request)
+            if not getattr(settings, "STEP_SYNC_ALLOW_HMAC_ONLY", False):
+                return JsonResponse(
+                    {
+                        "error": "Please update the app to keep syncing your steps.",
+                        "code": "SESSION_REQUIRED",
+                    },
+                    status=403,
+                )
             result = self._verify(request)
             if not result["valid"]:
                 return JsonResponse(

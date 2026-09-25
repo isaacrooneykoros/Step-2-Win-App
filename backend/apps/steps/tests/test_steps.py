@@ -47,16 +47,18 @@ class SignedSyncTests(APITestCase):
             "HTTP_X_IDEMPOTENCY_KEY": str(uuid.uuid4()),
         }
 
-    def test_valid_signed_sync_is_accepted(self):
-        payload = {
-            "steps": 8200,
-            "date": "2026-03-16",
-            "distance_km": 5.1,
-            "calories_active": 410,
-            "active_minutes": 44,
-            "source": "google_fit",
-        }
-        body, headers = self._signed_headers(payload)
+    SYNC_PAYLOAD = {
+        "steps": 8200,
+        "date": "2026-03-16",
+        "distance_km": 5.1,
+        "calories_active": 410,
+        "active_minutes": 44,
+        "source": "google_fit",
+    }
+
+    def test_hmac_only_sync_is_rejected(self):
+        """A valid client HMAC is not enough: the secret shipped in the bundle."""
+        body, headers = self._signed_headers(dict(self.SYNC_PAYLOAD))
 
         response = self.client.post(
             "/api/steps/sync/",
@@ -65,10 +67,36 @@ class SignedSyncTests(APITestCase):
             **headers,
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data.get("submitted_steps"), payload["steps"])
-        self.assertIn("approved_steps", response.data)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(json.loads(response.content)["code"], "SESSION_REQUIRED")
+        self.assertFalse(HealthRecord.objects.filter(user=self.user).exists())
 
+    def test_signature_header_does_not_bypass_session_verification(self):
+        """A forged session with a valid HMAC header still goes to session checks."""
+        payload = dict(
+            self.SYNC_PAYLOAD,
+            session_id=str(uuid.uuid4()),
+            session_token="forged-token",
+            client_event_id=str(uuid.uuid4()),
+            sequence_number=1,
+        )
+        body, headers = self._signed_headers(payload)
+        response = self.client.post(
+            "/api/steps/sync/", data=body, content_type="application/json", **headers
+        )
+        self.assertIn(response.status_code, (400, 401))
+        self.assertFalse(HealthRecord.objects.filter(user=self.user).exists())
+
+    @override_settings(STEP_SYNC_ALLOW_HMAC_ONLY=True)
+    def test_legacy_hmac_switch_still_verifies_signature(self):
+        body, headers = self._signed_headers(dict(self.SYNC_PAYLOAD))
+        response = self.client.post(
+            "/api/steps/sync/", data=body, content_type="application/json", **headers
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data.get("submitted_steps"), self.SYNC_PAYLOAD["steps"])
+
+    @override_settings(STEP_SYNC_ALLOW_HMAC_ONLY=True)
     def test_invalid_signature_is_rejected(self):
         payload = {
             "steps": 5000,

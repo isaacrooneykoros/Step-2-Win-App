@@ -104,7 +104,7 @@ class SessionAuthenticatedSyncTests(SyncReliabilityBase):
             format="json",
         )
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json()["code"], "MISSING_SIGNATURE")
+        self.assertEqual(response.json()["code"], "SESSION_REQUIRED")
 
     def test_forged_session_token_is_rejected(self):
         payload = self._payload(800)
