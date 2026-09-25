@@ -122,7 +122,10 @@ def harvest_held_payout_labels() -> dict:
         if not user_id or label is None or window is None:
             counts["skipped"] += 1
             continue
-        note = getattr(obj, "review_note", None) or getattr(obj, "reason", None) or ""
+        note = (
+            getattr(obj, "review_note", None) or getattr(obj, "note", None)
+            or getattr(obj, "reason", None) or ""
+        )
         _, created = upsert_label(user_id=user_id, date_start=window[0], date_end=window[1], label=label,
                                   source=Label.SOURCE_PAYOUT_REVIEW, source_ref=f"heldpayout:{obj.pk}",
                                   notes=str(note)[:500])

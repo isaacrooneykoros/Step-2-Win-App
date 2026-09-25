@@ -74,8 +74,41 @@ class LabelHarvestTests(TestCase):
         self.assertEqual(with_syn[(self.user.pk, self.day + timedelta(days=3))], "cheat")
 
     def test_held_payouts_are_a_noop_before_the_model_exists(self):
-        self.assertIsNone(labels_mod.find_held_payout_model())
-        self.assertEqual(labels_mod.harvest_held_payout_labels()["available"], False)
+        # Phase 1a's HeldPayout is installed now; simulate a deployment without it.
+        with mock.patch.object(labels_mod, "find_held_payout_model", return_value=None):
+            self.assertEqual(labels_mod.harvest_held_payout_labels()["available"], False)
+
+    def test_finds_the_installed_held_payout_model(self):
+        from apps.challenges.models import HeldPayout
+
+        self.assertIs(labels_mod.find_held_payout_model(), HeldPayout)
+
+    def test_real_held_payouts_are_ingested(self):
+        from decimal import Decimal
+
+        from apps.challenges.models import Challenge, HeldPayout, Participant
+
+        challenge = Challenge.objects.create(
+            creator=self.user, name="Label week", entry_fee=Decimal("100.00"), milestone=10000,
+            start_date=self.day, end_date=self.day + timedelta(days=6), status="completed",
+            total_pool=Decimal("200.00"),
+        )
+        others = [mkuser(i) for i in (2, 3)]
+        holds = {}
+        for user, status in ((self.user, "released"), (others[0], "forfeited"), (others[1], "held")):
+            p = Participant.objects.create(challenge=challenge, user=user, steps=20000)
+            holds[status] = HeldPayout.objects.create(
+                challenge=challenge, participant=p, user=user, amount=Decimal("90.00"),
+                status=status, note=f"review note {status}",
+            )
+        out = labels_mod.harvest_held_payout_labels()
+        self.assertTrue(out["available"])
+        self.assertEqual((out["created"], out["skipped"]), (2, 1))
+        rel = Label.objects.get(source_ref=f"heldpayout:{holds['released'].pk}")
+        self.assertEqual((rel.label, rel.date_start, rel.date_end), ("honest", self.day, self.day + timedelta(days=6)))
+        self.assertEqual(rel.notes, "review note released")
+        self.assertEqual(Label.objects.get(source_ref=f"heldpayout:{holds['forfeited'].pk}").label, "cheat")
+        self.assertFalse(Label.objects.filter(source_ref=f"heldpayout:{holds['held'].pk}").exists())
 
     def test_held_payouts_are_ingested_when_present(self):
         challenge = SimpleNamespace(start_date=self.day, end_date=self.day + timedelta(days=6))
