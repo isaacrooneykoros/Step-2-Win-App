@@ -27,7 +27,8 @@ from apps.core.throttles import (DashboardReadRateThrottle,
                                  StepSyncSustainedThrottle)
 
 from .anti_cheat import (ANTICHEAT_DAY_VERSION, DAILY_STEP_CAP,
-                         VerificationConfig, assess_velocity,
+                         SHAKE_POSITIVE_RULES, VerificationConfig,
+                         assess_velocity,
                          cap_trust_deduction, decision_to_check_result,
                          evaluate_daily_submission, resolve_source_key)
 from .daily_reset import update_streak
@@ -140,6 +141,30 @@ def _record_flag(user, day, flag_type: str, severity: str, details: dict) -> Fra
         existing.severity = severity
     existing.save(update_fields=["details", "severity"])
     return existing
+
+
+def _legacy_day_has_strong_flags(user, day) -> bool:
+    """Open flags on a pre-Phase-0 day that would count as strong evidence today."""
+    open_flags = FraudFlag.objects.filter(user=user, date=day, reviewed=False)
+    if open_flags.filter(severity="critical").exists():
+        return True
+    if open_flags.filter(flag_type__in=SHAKE_POSITIVE_RULES).exists():
+        return True
+    high_types = set(
+        open_flags.filter(severity="high")
+        .exclude(
+            flag_type__in=[
+                "step_velocity_spike",
+                "non_monotonic_steps",
+                "route_step_mismatch_low_distance",
+                "burst_impossible",
+                "baseline_spike_hard",
+                "gait_confidence_very_low",
+            ]
+        )
+        .values_list("flag_type", flat=True)
+    )
+    return len(high_types) >= 2
 
 
 def _trust_deducted_today(user, today_key: str) -> int:
@@ -1031,6 +1056,14 @@ def sync_health(request):
                 and not legacy_day
                 and (existing_meta.get("suspicion") or {}).get("sticky")
             )
+            if (
+                legacy_day
+                and existing_record.is_suspicious
+                and _legacy_day_has_strong_flags(user, date)
+            ):
+                # Flagged before Phase 0 on evidence that is still "strong" today:
+                # re-evaluating with a clean snapshot must not launder it.
+                prior_sticky = True
             is_suspicious = bool(result.strong_evidence or prior_sticky)
             previous_suspicious = (
                 bool(existing_record.is_suspicious) if existing_record else False
@@ -1042,6 +1075,14 @@ def sync_health(request):
             meta["v"] = ANTICHEAT_DAY_VERSION
             if result.strong_evidence:
                 meta = _mark_suspicion(meta)
+            elif legacy_day and prior_sticky:
+                meta["suspicion"] = {
+                    "sticky": True,
+                    "reasons": ["pre_phase0_flags"],
+                    "sync_events": [],
+                    "first_at": now.isoformat(),
+                    "last_at": now.isoformat(),
+                }
             meta = _add_deduction(meta)
             # Gait coverage of the credited steps (P1b: null gait is not yet penalised).
             coverage = dict(

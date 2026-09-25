@@ -364,6 +364,22 @@ class SuspicionTests(Phase0SyncBase):
         self.assertFalse(record.is_suspicious)
         self.assertEqual(record.steps, 5_200)  # the old 25% discount is gone too
 
+    def test_old_day_flagged_on_strong_evidence_is_not_laundered(self):
+        day = self.yesterday()
+        HealthRecord.objects.create(
+            user=self.user, date=day, steps=3_000, is_suspicious=True,
+            source="device_sensor",
+        )
+        FraudFlag.objects.create(
+            user=self.user, date=day, flag_type="ml_shake_high_probability",
+            severity="high", details={},
+        )
+        self.assertEqual(self.sync(5_000, day=day).status_code, 200)  # clean snapshot
+        self.assertTrue(self.record(day).is_suspicious)
+        self.age_record(15 * 60, day)
+        self.assertEqual(self.sync(5_500, day=day).status_code, 200)
+        self.assertTrue(self.record(day).is_suspicious)
+
 
 # ── Fix 4: resting snapshot is neutral; shake detection stays effective ─────────
 
