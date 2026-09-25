@@ -267,6 +267,7 @@ import statistics
 from dataclasses import dataclass, field
 from datetime import date as date_type
 from datetime import datetime, time, timedelta
+from datetime import timezone as dt_timezone
 from enum import Enum
 from typing import Any
 
@@ -279,6 +280,61 @@ from .models import HealthRecord
 
 DAILY_STEP_CAP = 60_000
 WEEKLY_HARD_CAP = 420_000
+
+# Bumped when the day-level bookkeeping in HealthRecord.anticheat changes meaning.
+# Rows without it were written by the pre-Phase-0 engine (see views.sync_health).
+ANTICHEAT_DAY_VERSION = 1
+
+# ── Velocity (steps vs elapsed time) ─────────────────────────────────────────
+# A sprint is ~3.5 steps/s; the Android ledger clamps at 4 steps/s. Up to this rate
+# (plus headroom for batching and clock skew) a delta is credited; beyond it the
+# excess is kept as *unverified* (deferred, not counted) until time catches up.
+VELOCITY_PLAUSIBLE_STEPS_PER_S = 4.0
+VELOCITY_PLAUSIBLE_HEADROOM = 600
+DAY_BOUND_HEADROOM = 2_000
+# Clearly impossible (twice a sprint, sustained, plus a big allowance): 400 + HIGH flag.
+VELOCITY_IMPOSSIBLE_STEPS_PER_S = 8.0
+VELOCITY_IMPOSSIBLE_HEADROOM = 5_000
+# The server does not know the phone's time zone. The plausible first-sync bound
+# assumes the market's offset (EAT, UTC+3) plus a tolerance; the impossible bound
+# assumes the most generous offset on Earth (UTC+14).
+DEFAULT_DEVICE_UTC_OFFSET_HOURS = 3.0
+DEVICE_OFFSET_TOLERANCE_HOURS = 2.0
+MAX_DEVICE_UTC_OFFSET_HOURS = 14.0
+
+# ── Gait gating ───────────────────────────────────────────────────────────────
+# The uploaded gait is a snapshot of the last ~3 s, not a summary of the credited
+# steps. "No walking seen" rules only mean something when this sync credits a
+# non-trivial number of steps AND the window actually covered movement.
+GAIT_MIN_DELTA_STEPS = 100
+
+# Rules that positively indicate shaking / non-walking step generation. They stay
+# effective whenever steps are credited (any delta > 0), even for a resting snapshot.
+SHAKE_POSITIVE_RULES = frozenset(
+    {"ml_shake_high_probability", "ml_label_shake", "gait_state_suspicious"}
+)
+# Rules that only say "the snapshot did not look like walking". Neutral at rest.
+GAIT_ABSENCE_RULES = frozenset(
+    {
+        "gait_confidence_very_low",
+        "gait_confidence_low",
+        "gait_frequency_out_of_band",
+        "gait_periodicity_low",
+        "gait_interval_variability_high",
+        "gait_interval_variability_moderate",
+        "gait_peak_run_short",
+    }
+)
+
+# Below this risk, MEDIUM/LOW hits don't reduce credit (single weak signals).
+RISK_FREE_ALLOWANCE = 10.0
+
+# Trust deductions from sync evidence (per sync, then capped per user per server day).
+TRUST_DEDUCT_HIGH = 8
+TRUST_DEDUCT_CRITICAL = 15
+# Sync evidence alone never pushes an account into SUSPEND (score <= 20); that is an
+# admin decision. 21 is the lowest RESTRICT score.
+TRUST_SYNC_FLOOR = 21
 
 
 class RiskLevel(str, Enum):
@@ -376,6 +432,16 @@ class NormalizedInterval:
     ml_model_version: str | None
     source_confidence: float
     dedupe_key: str
+    # Steps this sync would credit (plausible delta). None = legacy caller: the
+    # whole total is evaluated as one interval, as before.
+    delta_steps: int | None = None
+    # True only when the client states the burst number was computed from live,
+    # per-step timestamps (burst_source == "live_timed").
+    burst_live: bool = False
+
+    @property
+    def credit_steps(self) -> int:
+        return self.normalized_steps if self.delta_steps is None else self.delta_steps
 
 
 @dataclass(frozen=True)
@@ -440,8 +506,17 @@ class VerificationConfig:
     hold_risk_threshold: float = 70.0
     review_risk_threshold: float = 45.0
     reject_risk_threshold: float = 90.0
+    # Keyed by the *server-derived* source (see resolve_source_key), never by the
+    # free `source` field the client sends.
     source_confidence: dict[str, float] = field(
         default_factory=lambda: {
+            # Registered Android/iOS device, step session verified: the phone's own
+            # step counter. Credited in full when nothing else is wrong.
+            "phone_sensor_session": 1.00,
+            # Phone without a step session (legacy HMAC-signed path).
+            "phone_unsessioned": 0.90,
+            # Unknown caller of the legacy run_anti_cheat adapter.
+            "device_sensor": 0.90,
             "watch_attested": 1.00,
             "watch_unattested": 0.92,
             "phone_sensor": 0.85,
@@ -449,6 +524,15 @@ class VerificationConfig:
             "apple_health": 0.80,
             "manual": 0.20,
             "web": 0.70,
+        }
+    )
+    # The client's `source` label can only LOWER confidence (min with the above).
+    client_source_cap: dict[str, float] = field(
+        default_factory=lambda: {
+            "device_sensor": 1.00,
+            "apple_health": 1.00,
+            "google_fit": 0.90,
+            "manual": 0.20,
         }
     )
     trust_risk_multiplier: dict[str, float] = field(
@@ -463,7 +547,7 @@ class VerificationConfig:
     )
     trust_confidence_multiplier: dict[str, float] = field(
         default_factory=lambda: {
-            "GOOD": 1.05,
+            "GOOD": 1.00,
             "WARN": 1.00,
             "REVIEW": 0.90,
             "RESTRICT": 0.75,
@@ -534,11 +618,25 @@ class CheckResult:
     """Legacy compatibility shape consumed by sync_health view."""
 
     def __init__(self):
+        # MEDIUM+ rule hits as FraudFlag kwargs. LOW (credit/informational) hits are
+        # never here. Which of them are persisted is decided by the view: HIGH and
+        # CRITICAL always, MEDIUM only as supporting evidence of a suspicious day.
         self.flags: list[dict] = []
+        # Credited steps for the evaluated steps (the delta when one was given).
         self.approved_steps: int = 0
+        # Per-sync trust deduction (HIGH/CRITICAL evidence only). The view caps it
+        # per user per day and never lets sync evidence alone reach SUSPEND.
         self.trust_deduction: int = 0
         self.should_block: bool = False
         self.should_cap: bool = False
+        # Strong evidence => the day is excluded from challenge money (sticky).
+        self.strong_evidence: bool = False
+        self.strong_reasons: list[str] = []
+        self.has_critical: bool = False
+        self.risk_score: float = 0.0
+        self.credit_multiplier: float = 1.0
+        # Neutral observations (at-rest snapshot, batched burst, late sync, ...).
+        self.notes: list[str] = []
 
     @property
     def is_clean(self):
@@ -568,6 +666,14 @@ def normalize_payload_to_intervals(
         bucket_minutes = min(60, max(1, active_minutes))
 
     source_confidence = config.source_confidence.get(source_platform, 0.75)
+    client_source = payload.get("client_source")
+    if client_source:
+        source_confidence = min(
+            source_confidence, config.client_source_cap.get(client_source, 0.75)
+        )
+    delta_steps = payload.get("steps_delta_credit")
+    if delta_steps is not None:
+        delta_steps = max(0, min(steps, int(delta_steps)))
     start_dt = timezone.make_aware(
         datetime.combine(day, time.min), timezone.get_current_timezone()
     )
@@ -605,6 +711,8 @@ def normalize_payload_to_intervals(
             ml_model_version=payload.get("ml_model_version"),
             source_confidence=source_confidence,
             dedupe_key=dedupe_key,
+            delta_steps=delta_steps,
+            burst_live=payload.get("burst_source") == "live_timed",
         )
     ]
 
@@ -625,16 +733,27 @@ def deduplicate_intervals(
     return deduped
 
 
+BASELINE_MIN_HISTORY_DAYS = 7
+
+
 def compute_baseline_context(user, day: date_type) -> BaselineContext:
-    """Baseline computed from non-suspicious historical records only."""
-    qs_30 = list(
+    """Baseline computed from non-suspicious historical records only.
+
+    Uses the RAW daily totals the phone reported (last_raw_steps) so it compares like
+    with like against the raw submitted total; rows written before raw totals were
+    stored fall back to `steps`. Most recent days first.
+    """
+    rows = list(
         HealthRecord.objects.filter(
             user=user,
             date__gte=day - timedelta(days=30),
             date__lt=day,
             is_suspicious=False,
-        ).values_list("steps", flat=True)
+        )
+        .order_by("-date")
+        .values_list("last_raw_steps", "steps")
     )
+    qs_30 = [int(raw) if raw else int(steps) for raw, steps in rows]
     history_days = len(qs_30)
     if history_days == 0:
         return BaselineContext(
@@ -646,8 +765,9 @@ def compute_baseline_context(user, day: date_type) -> BaselineContext:
             variability_cv_14d=0.30,
         )
 
-    last_7 = qs_30[-7:] if history_days >= 7 else qs_30
-    last_14 = qs_30[-14:] if history_days >= 14 else qs_30
+    # qs_30 is newest-first: the first N entries are the most recent N days.
+    last_7 = qs_30[:7]
+    last_14 = qs_30[:14]
     avg_7d = float(sum(last_7) / max(1, len(last_7)))
     avg_14d = float(sum(last_14) / max(1, len(last_14)))
     p99_30d = float(sorted(qs_30)[max(0, int(0.99 * (history_days - 1)))])
@@ -782,7 +902,41 @@ def score_interval(
                 )
             )
 
-    if interval.burst_steps_5s is not None:
+    credit = interval.credit_steps
+    has_gait = any(
+        value is not None
+        for value in (
+            interval.gait_state,
+            interval.gait_confidence,
+            interval.gait_dominant_freq_hz,
+            interval.gait_autocorr,
+            interval.gait_interval_std_ms,
+            interval.gait_valid_peaks_2s,
+        )
+    )
+    # "App opened while sitting": the analyzer's window saw no movement and no step
+    # events arrived in the last minute. Such a snapshot says nothing about the steps
+    # being credited (they were walked earlier): no gait evidence either way.
+    at_rest = interval.gait_state == "idle" and not (
+        interval.cadence_spm is not None and interval.cadence_spm > 0
+    )
+    gait_absence_applies = credit >= GAIT_MIN_DELTA_STEPS and not at_rest
+    shake_applies = credit > 0
+    notes: list[str] = []
+    if has_gait and at_rest and credit > 0:
+        notes.append("gait_snapshot_at_rest")
+    if has_gait and not at_rest and 0 < credit < GAIT_MIN_DELTA_STEPS:
+        notes.append("gait_delta_trivial")
+    if not has_gait:
+        notes.append("gait_not_measured")
+
+    # Bursts: Android stamps every step of a batched hardware-counter event with the
+    # arrival time, so a normal batch looks like a burst. Only live, per-step timed
+    # bursts are evidence (client sends burst_source="live_timed").
+    if interval.burst_steps_5s is not None and not interval.burst_live:
+        if interval.burst_steps_5s > config.suspicious_burst_steps_5s:
+            notes.append("burst_untimed_ignored")
+    if interval.burst_steps_5s is not None and interval.burst_live and shake_applies:
         if interval.burst_steps_5s > config.impossible_burst_steps_5s:
             hits.append(
                 _mk_hit(
@@ -812,7 +966,7 @@ def score_interval(
                 )
             )
 
-    if interval.gait_confidence is not None:
+    if interval.gait_confidence is not None and gait_absence_applies:
         if interval.gait_confidence < 20:
             hits.append(
                 _mk_hit(
@@ -821,7 +975,7 @@ def score_interval(
                     0.9,
                     16.0,
                     "Motion confidence is too low for reliable walking gait.",
-                    {"gait_confidence": interval.gait_confidence},
+                    {"gait_confidence": interval.gait_confidence, "delta_steps": credit},
                 )
             )
         elif interval.gait_confidence < 40:
@@ -832,11 +986,11 @@ def score_interval(
                     0.5,
                     8.0,
                     "Weak gait confidence suggests non-walking motion.",
-                    {"gait_confidence": interval.gait_confidence},
+                    {"gait_confidence": interval.gait_confidence, "delta_steps": credit},
                 )
             )
 
-    if interval.gait_state == "suspicious_motion":
+    if interval.gait_state == "suspicious_motion" and shake_applies:
         hits.append(
             _mk_hit(
                 "gait_state_suspicious",
@@ -844,11 +998,11 @@ def score_interval(
                 0.8,
                 14.0,
                 "Sensor state machine flagged suspicious motion.",
-                {"gait_state": interval.gait_state},
+                {"gait_state": interval.gait_state, "delta_steps": credit},
             )
         )
 
-    if interval.gait_dominant_freq_hz is not None:
+    if interval.gait_dominant_freq_hz is not None and gait_absence_applies:
         if not (0.8 <= interval.gait_dominant_freq_hz <= 3.0):
             hits.append(
                 _mk_hit(
@@ -861,7 +1015,11 @@ def score_interval(
                 )
             )
 
-    if interval.gait_autocorr is not None and interval.gait_autocorr < 0.35:
+    if (
+        interval.gait_autocorr is not None
+        and interval.gait_autocorr < 0.35
+        and gait_absence_applies
+    ):
         hits.append(
             _mk_hit(
                 "gait_periodicity_low",
@@ -873,7 +1031,7 @@ def score_interval(
             )
         )
 
-    if interval.gait_interval_std_ms is not None:
+    if interval.gait_interval_std_ms is not None and gait_absence_applies:
         if interval.gait_interval_std_ms > 320:
             hits.append(
                 _mk_hit(
@@ -900,7 +1058,7 @@ def score_interval(
     if (
         interval.gait_valid_peaks_2s is not None
         and interval.gait_valid_peaks_2s < 3
-        and interval.normalized_steps > 0
+        and gait_absence_applies
     ):
         hits.append(
             _mk_hit(
@@ -913,7 +1071,11 @@ def score_interval(
             )
         )
 
-    if interval.gait_jerk_rms is not None and interval.gait_jerk_rms > 18:
+    if (
+        interval.gait_jerk_rms is not None
+        and interval.gait_jerk_rms > 18
+        and shake_applies
+    ):
         hits.append(
             _mk_hit(
                 "gait_jerk_high",
@@ -925,7 +1087,11 @@ def score_interval(
             )
         )
 
-    if interval.gait_gyro_variance is not None and interval.gait_gyro_variance > 4.0:
+    if (
+        interval.gait_gyro_variance is not None
+        and interval.gait_gyro_variance > 4.0
+        and shake_applies
+    ):
         hits.append(
             _mk_hit(
                 "gait_rotation_chaotic",
@@ -941,6 +1107,7 @@ def score_interval(
         interval.carry_mode == "in_hand"
         and interval.cadence_spm is not None
         and interval.cadence_spm > 185
+        and shake_applies
     ):
         hits.append(
             _mk_hit(
@@ -956,7 +1123,7 @@ def score_interval(
             )
         )
 
-    if interval.ml_shake_probability is not None:
+    if interval.ml_shake_probability is not None and shake_applies:
         if interval.ml_shake_probability >= 0.80:
             hits.append(
                 _mk_hit(
@@ -969,6 +1136,7 @@ def score_interval(
                         "ml_shake_probability": interval.ml_shake_probability,
                         "ml_motion_label": interval.ml_motion_label,
                         "ml_model_version": interval.ml_model_version,
+                        "delta_steps": credit,
                     },
                 )
             )
@@ -988,6 +1156,7 @@ def score_interval(
                 )
             )
 
+    # Credit rule (negative score). LOW: never a FraudFlag, never suspicion.
     if (
         interval.ml_walk_probability is not None
         and interval.ml_walk_probability >= 0.70
@@ -1011,6 +1180,7 @@ def score_interval(
         interval.ml_motion_label == "shake"
         and interval.ml_walk_probability is not None
         and interval.ml_walk_probability < 0.40
+        and shake_applies
     ):
         hits.append(
             _mk_hit(
@@ -1024,25 +1194,28 @@ def score_interval(
                     "ml_walk_probability": interval.ml_walk_probability,
                     "ml_shake_probability": interval.ml_shake_probability,
                     "ml_model_version": interval.ml_model_version,
+                    "delta_steps": credit,
                 },
             )
         )
 
-    # Personal baseline deviation from clean history.
+    # Personal baseline deviation from clean history (raw vs raw, most recent days).
+    # A big day (hike, event, a 25-30k day for a 5k/day walker) is plausible: MEDIUM
+    # at most, so it only adds risk and never excludes a day on its own.
     baseline_anchor = max(1.0, baseline.avg_14d)
     ratio = interval.normalized_steps / baseline_anchor
-    if baseline.history_days >= 5 and ratio > 10.0:
+    if baseline.history_days >= BASELINE_MIN_HISTORY_DAYS and ratio > 10.0:
         hits.append(
             _mk_hit(
                 "baseline_spike_hard",
-                RuleSeverity.HIGH,
+                RuleSeverity.MEDIUM,
                 0.7,
-                14.0,
+                12.0,
                 "Submitted steps are far above personal clean baseline.",
                 {"ratio": round(ratio, 2), "avg_14d": round(baseline.avg_14d)},
             )
         )
-    elif baseline.history_days >= 5 and ratio > 5.0:
+    elif baseline.history_days >= BASELINE_MIN_HISTORY_DAYS and ratio > 5.0:
         hits.append(
             _mk_hit(
                 "baseline_spike_soft",
@@ -1054,16 +1227,18 @@ def score_interval(
             )
         )
 
+    # Offline catch-up (rural users, data bundles) is normal. LOW/informational: it
+    # only adds a little risk when other evidence exists, and never excludes a day.
     days_late = (now.date() - day).days
     if days_late > 1:
         late_score = min(1.0, config.late_sync_weight_per_day * max(0, days_late - 1))
         hits.append(
             _mk_hit(
                 "late_sync",
-                RuleSeverity.MEDIUM,
+                RuleSeverity.LOW,
                 late_score,
                 6.0,
-                "Late backfilled sync increases fraud risk.",
+                "Late backfilled sync (informational; weighs only with other evidence).",
                 {"days_late": days_late},
             )
         )
@@ -1080,7 +1255,14 @@ def score_interval(
             )
         )
 
-    weighted_sum = sum(hit.rule_score * hit.weight for hit in hits)
+    has_other_evidence = any(
+        hit.severity != RuleSeverity.LOW and hit.rule_code != "late_sync" for hit in hits
+    )
+    weighted_sum = sum(
+        hit.rule_score * hit.weight
+        for hit in hits
+        if hit.rule_code != "late_sync" or has_other_evidence
+    )
     risk_multiplier = config.trust_risk_multiplier.get(trust.status, 1.0)
     risk_score = max(0.0, min(100.0, weighted_sum * risk_multiplier))
 
@@ -1090,6 +1272,12 @@ def score_interval(
         "baseline_ratio": round(ratio, 2),
         "source_confidence": interval.source_confidence,
         "trust_status": trust.status,
+        "delta_steps": credit,
+        "gait_measured": has_gait,
+        "gait_at_rest": at_rest,
+        "gait_absence_rules_applied": gait_absence_applies,
+        "burst_live": interval.burst_live,
+        "notes": notes,
         "gait_state": interval.gait_state,
         "gait_confidence": interval.gait_confidence,
         "gait_dominant_freq_hz": interval.gait_dominant_freq_hz,
@@ -1114,11 +1302,17 @@ def verify_interval(
     rule_hits: list[RuleHit],
     trust: TrustContext,
     config: VerificationConfig,
+    evidence: dict[str, Any] | None = None,
 ) -> IntervalDecision:
-    base_conf = 0.95
+    # A clean sync from a trustworthy source credits exactly what the phone counted
+    # (no blanket base discount). Real risk still lowers credit through the pattern
+    # multiplier once it exceeds a small allowance (a single weak signal is free).
+    base_conf = 1.0
     source_mult = interval.source_confidence
     trust_mult = config.trust_confidence_multiplier.get(trust.status, 1.0)
-    pattern_mult = max(0.35, 1.0 - (risk_score / 180.0))
+    pattern_mult = max(
+        0.35, 1.0 - (max(0.0, risk_score - RISK_FREE_ALLOWANCE) / 180.0)
+    )
     confidence = max(0.0, min(1.0, base_conf * source_mult * trust_mult * pattern_mult))
 
     has_critical = any(hit.severity == RuleSeverity.CRITICAL for hit in rule_hits)
@@ -1143,8 +1337,9 @@ def verify_interval(
         payout_state = PayoutState.ELIGIBLE
         status_mult = 1.0
 
-    verified_steps = int(round(interval.normalized_steps * confidence * status_mult))
-    verified_steps = max(0, min(interval.normalized_steps, verified_steps))
+    credit = interval.credit_steps
+    verified_steps = int(round(credit * confidence * status_mult))
+    verified_steps = max(0, min(credit, verified_steps))
 
     return IntervalDecision(
         interval=interval,
@@ -1161,6 +1356,20 @@ def verify_interval(
             "trust_multiplier": trust_mult,
             "pattern_multiplier": pattern_mult,
             "status_multiplier": status_mult,
+            "credit_steps": credit,
+            "evidence": {
+                key: value
+                for key, value in (evidence or {}).items()
+                if key
+                in (
+                    "delta_steps",
+                    "gait_measured",
+                    "gait_at_rest",
+                    "gait_absence_rules_applied",
+                    "burst_live",
+                    "notes",
+                )
+            },
         },
     )
 
@@ -1171,8 +1380,7 @@ def aggregate_daily_decision(
     raw_total = sum(d.interval.normalized_steps for d in interval_decisions)
     verified_total = sum(d.verified_steps for d in interval_decisions)
     suspicious_total = sum(
-        max(0, d.interval.normalized_steps - d.verified_steps)
-        for d in interval_decisions
+        max(0, d.interval.credit_steps - d.verified_steps) for d in interval_decisions
     )
     accepted = sum(
         1 for d in interval_decisions if d.status == VerificationStatus.ACCEPT
@@ -1281,7 +1489,7 @@ def evaluate_daily_submission(
 
     decisions: list[IntervalDecision] = []
     for interval in deduped:
-        risk_score, hits, _ = score_interval(
+        risk_score, hits, evidence = score_interval(
             interval,
             trust=trust_ctx,
             baseline=baseline,
@@ -1296,6 +1504,7 @@ def evaluate_daily_submission(
                 rule_hits=hits,
                 trust=trust_ctx,
                 config=config,
+                evidence=evidence,
             )
         )
 
@@ -1304,14 +1513,28 @@ def evaluate_daily_submission(
     )
 
 
-def decision_to_check_result(daily: DailyDecision) -> CheckResult:
+def decision_to_check_result(
+    daily: DailyDecision, config: VerificationConfig | None = None
+) -> CheckResult:
     """Map v2 structured decision to legacy sync_health contract."""
     result = CheckResult()
     result.approved_steps = daily.verified_steps_total
 
+    config = config or VerificationConfig()
     flags: list[dict[str, Any]] = []
+    high_rules: set[str] = set()
+    has_critical = False
+    critical_rules: list[str] = []
     for interval_decision in daily.interval_decisions:
         for hit in interval_decision.rule_hits:
+            # LOW = credit / informational rules: never a FraudFlag, never suspicion.
+            if hit.severity == RuleSeverity.LOW:
+                continue
+            if hit.severity == RuleSeverity.CRITICAL:
+                has_critical = True
+                critical_rules.append(hit.rule_code)
+            elif hit.severity == RuleSeverity.HIGH:
+                high_rules.add(hit.rule_code)
             flags.append(
                 {
                     "flag_type": hit.rule_code,
@@ -1319,10 +1542,48 @@ def decision_to_check_result(daily: DailyDecision) -> CheckResult:
                     "details": hit.evidence | {"message": hit.message},
                 }
             )
+        for note in (interval_decision.explainability.get("evidence") or {}).get(
+            "notes", []
+        ):
+            if note not in result.notes:
+                result.notes.append(note)
     result.flags = flags
+    result.has_critical = has_critical
+    result.risk_score = daily.risk_score
 
-    sev_weight = {"low": 0, "medium": 3, "high": 8, "critical": 15}
-    result.trust_deduction = sum(sev_weight.get(flag["severity"], 3) for flag in flags)
+    # Strong evidence (excludes the day from challenge money):
+    #  - any CRITICAL hit, or
+    #  - risk at/above the review threshold (MEDIUM hits only get here by stacking), or
+    #  - a HIGH hit that positively indicates shaking while steps are credited, or
+    #  - two or more distinct HIGH rules corroborating each other.
+    # A single "absence of walking" HIGH hit or any number of MEDIUM hits alone only
+    # add risk (and lower that sync's credit once risk is material).
+    reasons: list[str] = []
+    if has_critical:
+        reasons.extend(f"critical:{code}" for code in critical_rules)
+    if daily.risk_score >= config.review_risk_threshold:
+        reasons.append(f"risk>={config.review_risk_threshold:g}")
+    shake_hits = sorted(high_rules & SHAKE_POSITIVE_RULES)
+    if shake_hits:
+        reasons.extend(f"shake:{code}" for code in shake_hits)
+    if len(high_rules) >= 2:
+        reasons.append("corroborated_high:" + ",".join(sorted(high_rules)))
+    result.strong_evidence = bool(reasons)
+    result.strong_reasons = reasons
+
+    # Trust: only HIGH/CRITICAL evidence costs trust, at most one HIGH-equivalent per
+    # sync (the view caps it again per user per day and floors it above SUSPEND).
+    if has_critical:
+        result.trust_deduction = TRUST_DEDUCT_CRITICAL
+    elif high_rules and result.strong_evidence:
+        result.trust_deduction = TRUST_DEDUCT_HIGH
+    else:
+        result.trust_deduction = 0
+
+    verified_credit = sum(d.interval.credit_steps for d in daily.interval_decisions)
+    result.credit_multiplier = (
+        daily.verified_steps_total / verified_credit if verified_credit else 1.0
+    )
     result.should_block = (
         daily.review_state == ReviewState.REQUIRED
         and daily.payout_state == PayoutState.FROZEN
@@ -1357,11 +1618,22 @@ def run_anti_cheat(
     ml_shake_probability=None,
     ml_model_version=None,
     submitted_at=None,
+    source_platform="device_sensor",
+    client_source=None,
+    steps_delta=None,
+    burst_source=None,
 ) -> CheckResult:
-    """Backward-compatible adapter for existing call sites and tests."""
+    """Backward-compatible adapter for existing call sites and tests.
+
+    `steps_delta` = steps this sync would credit (None: evaluate the whole total).
+    `source_platform` must be server-derived (resolve_source_key).
+    """
     submitted_at = submitted_at or timezone.now()
     payload = {
         "steps": steps,
+        "steps_delta_credit": steps_delta,
+        "client_source": client_source,
+        "burst_source": burst_source,
         "distance_km": distance_km,
         "calories_active": calories,
         "active_minutes": active_minutes,
@@ -1393,9 +1665,163 @@ def run_anti_cheat(
         submitted_at=submitted_at,
         trust_score=trust_score,
         trust_status=trust_status,
-        source_platform="device_sensor",
+        source_platform=source_platform,
         source_device=getattr(user, "device_platform", None),
         source_app="legacy_sync",
         config=VerificationConfig.from_settings(settings),
     )
-    return decision_to_check_result(daily)
+    return decision_to_check_result(daily, VerificationConfig.from_settings(settings))
+
+
+# ============================================================
+# Phase 0 helpers used by steps.views.sync_health
+# ============================================================
+
+
+def resolve_source_key(*, session=None, user=None) -> str:
+    """Source key from what the SERVER knows, never from the client's `source` field.
+
+    A verified step session bound to a registered Android/iOS device means the numbers
+    come from the phone's own step counter through the app.
+    """
+    device = getattr(session, "device", None) if session is not None else None
+    platform = (getattr(device, "platform", "") or "").lower()
+    if session is not None and platform in {"android", "ios"}:
+        return "phone_sensor_session"
+    if session is not None and platform == "web":
+        return "web"
+    user_platform = (getattr(user, "device_platform", "") or "").lower()
+    if user_platform in {"android", "ios"}:
+        return "phone_unsessioned"
+    return "web"
+
+
+def _local_midnight_utc(day: date_type, offset_hours: float) -> datetime:
+    midnight = datetime.combine(day, time.min).replace(tzinfo=dt_timezone.utc)
+    return midnight - timedelta(hours=offset_hours)
+
+
+def seconds_since_local_midnight(
+    day: date_type, now: datetime, offset_hours: float
+) -> float:
+    """Seconds of `day` (device-local) elapsed at `now`, clamped to [0, 24h]."""
+    elapsed = (now - _local_midnight_utc(day, offset_hours)).total_seconds()
+    return max(0.0, min(86_400.0, elapsed))
+
+
+@dataclass(frozen=True)
+class VelocityAssessment:
+    """How much of a submitted raw day total is plausible for the elapsed time."""
+
+    plausible_raw: int  # raw total now considered creditable (never decreases)
+    unverified: int  # submitted - plausible_raw (deferred, not counted)
+    credit_delta: int  # plausible_raw - previous plausible_raw
+    impossible: bool  # clearly impossible jump: reject (400 + HIGH flag)
+    details: dict[str, Any]
+
+
+def assess_velocity(
+    *,
+    day: date_type,
+    now: datetime,
+    submitted: int,
+    prev_raw: int,
+    prev_unverified: int,
+    last_synced_at: datetime | None,
+    last_client_ts: datetime | None,
+    client_ts: datetime | None,
+    check_pair_velocity: bool = True,
+    default_offset_hours: float | None = None,
+) -> VelocityAssessment:
+    """Raw-vs-raw velocity check with a first-sync-of-the-day bound.
+
+    - Per-sync: the delta since the previous RAW total may grow at a plausible walking
+      rate (VELOCITY_PLAUSIBLE_STEPS_PER_S) over the elapsed time (max of server and
+      client clocks, so a delayed upload isn't punished) plus batching headroom.
+    - Per-day: the raw total may not exceed that rate over the time elapsed since the
+      device's local midnight (with time-zone tolerance). Covers the first sync.
+    - The part above the plausible amount is kept as unverified (deferred): it becomes
+      creditable later as time passes. Only clearly impossible jumps are rejected.
+    """
+    offset = (
+        DEFAULT_DEVICE_UTC_OFFSET_HOURS
+        if default_offset_hours is None
+        else float(default_offset_hours)
+    )
+    since_midnight = seconds_since_local_midnight(
+        day, now, offset + DEVICE_OFFSET_TOLERANCE_HOURS
+    )
+    since_midnight_generous = seconds_since_local_midnight(
+        day, now, MAX_DEVICE_UTC_OFFSET_HOURS
+    )
+    day_bound = int(since_midnight * VELOCITY_PLAUSIBLE_STEPS_PER_S) + DAY_BOUND_HEADROOM
+    day_impossible = (
+        int(since_midnight_generous * VELOCITY_IMPOSSIBLE_STEPS_PER_S)
+        + VELOCITY_IMPOSSIBLE_HEADROOM
+    )
+
+    prev_raw = max(0, int(prev_raw))
+    prev_plausible = max(0, prev_raw - max(0, int(prev_unverified)))
+    details: dict[str, Any] = {
+        "submitted_steps": submitted,
+        "previous_raw_steps": prev_raw,
+        "previous_plausible_steps": prev_plausible,
+        "seconds_since_local_midnight": round(since_midnight),
+        "day_bound": day_bound,
+        "day_impossible_bound": day_impossible,
+    }
+
+    elapsed = None
+    if last_synced_at is not None:
+        server_elapsed = max(0.0, (now - last_synced_at).total_seconds())
+        client_elapsed = 0.0
+        if client_ts is not None and last_client_ts is not None:
+            capped_ts = min(client_ts, now + timedelta(minutes=5))
+            client_elapsed = max(0.0, (capped_ts - last_client_ts).total_seconds())
+        elapsed = max(1.0, server_elapsed, client_elapsed)
+        details["elapsed_seconds"] = round(elapsed, 1)
+
+    impossible = submitted > day_impossible
+    pair_bound = None
+    if elapsed is not None and check_pair_velocity:
+        pair_bound = (
+            prev_plausible
+            + int(elapsed * VELOCITY_PLAUSIBLE_STEPS_PER_S)
+            + VELOCITY_PLAUSIBLE_HEADROOM
+        )
+        pair_impossible = (
+            int(elapsed * VELOCITY_IMPOSSIBLE_STEPS_PER_S) + VELOCITY_IMPOSSIBLE_HEADROOM
+        )
+        details["max_plausible_total"] = pair_bound
+        details["max_allowed_delta"] = pair_impossible
+        if submitted - prev_raw > pair_impossible:
+            impossible = True
+
+    plausible = min(submitted, day_bound)
+    if pair_bound is not None:
+        plausible = min(plausible, pair_bound)
+    plausible = max(plausible, min(prev_plausible, submitted))
+    unverified = max(0, submitted - plausible)
+    details["plausible_steps"] = plausible
+    details["unverified_steps"] = unverified
+    return VelocityAssessment(
+        plausible_raw=plausible,
+        unverified=unverified,
+        credit_delta=max(0, plausible - prev_plausible),
+        impossible=impossible,
+        details=details,
+    )
+
+
+def cap_trust_deduction(
+    *, requested: int, has_critical: bool, already_today: int, current_score: int
+) -> int:
+    """Per user per server day: at most one HIGH-equivalent (or one CRITICAL-equivalent
+    when a CRITICAL hit is involved), and never below TRUST_SYNC_FLOOR (no automatic
+    SUSPEND from sync evidence)."""
+    if requested <= 0:
+        return 0
+    day_cap = TRUST_DEDUCT_CRITICAL if has_critical else TRUST_DEDUCT_HIGH
+    allowed = max(0, min(requested, day_cap - max(0, already_today)))
+    allowed = min(allowed, max(0, int(current_score) - TRUST_SYNC_FLOOR))
+    return allowed

@@ -33,6 +33,19 @@ class HealthRecord(models.Model):
     # recognise an older upload arriving late (out-of-order retry) and ignore it instead
     # of treating the lower total as tampering.
     last_client_timestamp = models.DateTimeField(null=True, blank=True)
+    # Raw day total the phone last reported (before any anti-cheat discount). Velocity
+    # and non-monotonic checks compare raw with raw; `steps` is the credited figure.
+    last_raw_steps = models.IntegerField(default=0)
+    # Part of `last_raw_steps` not (yet) plausible for the elapsed time: not counted.
+    # It becomes creditable as time passes (see anti_cheat.assess_velocity).
+    unverified_steps = models.IntegerField(default=0)
+    # Anti-cheat bookkeeping for the day: version marker, sticky suspicion and which
+    # syncs contributed, gait coverage, trust deductions per server day, capped steps.
+    anticheat = models.JSONField(default=dict, blank=True)
+    # User-explainable breakdown of the day (counted / credited / unverified steps and
+    # reasons with plain-language messages), written at every sync. Contains no rule
+    # weights or thresholds. Served by GET /api/steps/verification/.
+    verification = models.JSONField(default=dict, blank=True)
 
     class Meta:
         unique_together = ["user", "date"]
