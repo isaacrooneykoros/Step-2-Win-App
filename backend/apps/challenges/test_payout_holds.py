@@ -331,20 +331,109 @@ class ForfeitMathTests(HoldFixture, TestCase):
         )
         self.assertTrue(AuditLog.objects.filter(action="reject", resource_id=hold.id).exists())
 
-    def test_no_clear_qualifier_goes_to_platform(self):
+    def _refunds(self, c):
+        return WalletTransaction.objects.filter(
+            type="refund", metadata__challenge_id=c.id, metadata__payout_review="forfeit_refund"
+        )
+
+    def test_no_clear_qualifier_refunds_other_participants_by_entry_fee(self):
+        """Owner decision: with no clear qualifier the forfeited amount goes back
+        to the other participants in proportion to their entry fees."""
+        c = self.make_challenge(entry=Decimal("33.37"))
+        solo = self.make_user("solo")
+        losers = [self.make_user(f"loser{i}") for i in range(6)]
+        self.join(c, solo, 20000)
+        for i, u in enumerate(losers):
+            self.join(c, u, 100 + i)  # nobody else reaches the 10,000 milestone
+        TrustScore.objects.create(user=solo, score=0)
+        finalize_challenge(c)
+        c.refresh_from_db()
+        hold = HeldPayout.objects.get(user=solo)
+
+        out = forfeit_hold(hold.id, self.admin, "Banned account, refund the others")
+        self.assertEqual(out["mode"], "refund")
+        self.assertIsNone(out["platform_revenue_id"])
+        shares = {d["user_id"]: Decimal(d["share"]) for d in out["redistributed"]}
+        self.assertEqual(set(shares), {u.id for u in losers})
+        # Equal entry fees -> equal shares, largest-remainder cents, exact total.
+        self.assertEqual(sum(shares.values()), hold.amount)
+        self.assertLessEqual(max(shares.values()) - min(shares.values()), Decimal("0.01"))
+        expected = split_forfeit(hold.amount, [c.entry_fee] * len(losers))
+        self.assertEqual(sorted(shares.values()), sorted(expected))
+
+        # One clearly described refund transaction each; refunds are not "earned".
+        refunds = self._refunds(c)
+        self.assertEqual(refunds.count(), len(losers))
+        for u in losers:
+            u.refresh_from_db()
+            txn = refunds.get(user=u)
+            self.assertEqual(txn.amount, shares[u.id])
+            self.assertIn("Partial refund", txn.description)
+            self.assertIn(c.name, txn.description)
+            self.assertEqual(u.wallet_balance, START_BALANCE - c.entry_fee + shares[u.id])
+            self.assertEqual(u.total_earned, Decimal("0.00"))
+            self.assertEqual(u.locked_balance, Decimal("0.00"))
+        solo.refresh_from_db()
+        self.assertEqual(solo.wallet_balance, START_BALANCE - c.entry_fee)
+
+        # The pool balances to the cent: refunds + platform fee == everything paid in.
+        fee = PlatformRevenue.objects.filter(challenge=c).aggregate(t=Sum("amount_kes"))["t"]
+        self.assertEqual(PlatformRevenue.objects.filter(challenge=c).count(), 1)
+        self.assertEqual(self.payouts_credited(c), Decimal("0.00"))
+        self.assertEqual(refunds.aggregate(t=Sum("amount"))["t"] + fee, c.total_pool)
+        self.assertEqual(hold.amount + fee, c.total_pool)
+
+        # Idempotent: a second decision changes nothing.
+        again = forfeit_hold(hold.id, self.admin, "Double click on forfeit")
+        self.assertTrue(again["already_decided"])
+        self.assertEqual(self._refunds(c).count(), len(losers))
+        hold.refresh_from_db()
+        self.assertEqual(hold.resolution["mode"], "refund")
+        self.assertTrue(AuditLog.objects.filter(action="reject", resource_id=hold.id).exists())
+
+    def test_refund_skips_banned_closed_and_held_participants(self):
+        c = self.make_challenge()
+        solo = self.make_user("solo2")
+        ok1, ok2 = self.make_user("ok1"), self.make_user("ok2")
+        banned, closed = self.make_user("banned1"), self.make_user("closed1")
+        other_winner = self.make_user("heldwinner")
+        self.join(c, solo, 20000)
+        self.join(c, other_winner, 18000)
+        for u in (ok1, ok2, banned, closed):
+            self.join(c, u, 100)
+        TrustScore.objects.create(user=solo, score=0)
+        TrustScore.objects.create(user=other_winner, score=50)  # also held, not clear
+        finalize_challenge(c)
+        TrustScore.objects.create(user=banned, score=0)
+        User.objects.filter(pk=closed.pk).update(is_active=False)
+        hold = HeldPayout.objects.get(user=solo)
+
+        out = forfeit_hold(hold.id, self.admin, "Refund only the eligible participants")
+        self.assertEqual(out["mode"], "refund")
+        shares = {d["user_id"]: Decimal(d["share"]) for d in out["redistributed"]}
+        self.assertEqual(set(shares), {ok1.id, ok2.id})
+        self.assertEqual(sum(shares.values()), hold.amount)
+        for u in (banned, closed, other_winner):
+            self.assertFalse(self._refunds(c).filter(user=u).exists())
+
+    def test_no_eligible_participant_goes_to_platform(self):
         c = self.make_challenge()
         solo, loser = self.make_user("solo"), self.make_user("loser")
         self.join(c, solo, 20000)
         self.join(c, loser, 100)
         TrustScore.objects.create(user=solo, score=0)
+        TrustScore.objects.create(user=loser, score=0)  # the only other participant is banned
         finalize_challenge(c)
         hold = HeldPayout.objects.get(user=solo)
         out = forfeit_hold(hold.id, self.admin, "Banned account, forfeit to platform")
+        self.assertEqual(out["mode"], "platform")
         self.assertEqual(out["redistributed"], [])
         rev = PlatformRevenue.objects.get(pk=out["platform_revenue_id"])
         self.assertEqual(rev.amount_kes, hold.amount)
         self.assertEqual(rev.metadata["held_payout_id"], hold.id)
+        self.assertEqual(rev.metadata["reason"], "forfeit_no_eligible_participants")
         self.assertFalse(WalletTransaction.objects.filter(type="payout", metadata__challenge_id=c.id).exists())
+        self.assertFalse(self._refunds(c).exists())
         c.refresh_from_db()
         total_rev = PlatformRevenue.objects.filter(challenge=c).aggregate(t=Sum("amount_kes"))["t"]
         self.assertEqual(total_rev, c.total_pool)
@@ -400,6 +489,22 @@ class PaidEntryBlockTests(HoldFixture, APITestCase):
         self.assertIn("review", r.json()["error"])
         release_hold(hold.id, self.make_user("ops", is_staff=True), "Checked, releasing now")
         self.assertEqual(self._join().status_code, 200)
+
+    def test_held_payout_blocks_creating_a_paid_challenge(self):
+        from apps.challenges.models import get_configured_milestones
+
+        User.objects.filter(pk=self.user.pk).update(challenges_joined=3)
+        old = self.make_challenge()
+        p = Participant.objects.create(challenge=old, user=self.user, steps=20000)
+        HeldPayout.objects.create(challenge=old, participant=p, user=self.user, amount=Decimal("90"))
+        body = {
+            "name": "Blocked while reviewed", "milestone": get_configured_milestones()[0],
+            "entry_fee": 500, "is_public": True, "duration_days": 7,
+        }
+        r = self.client.post("/api/challenges/create/", body, format="json")
+        self.assertEqual(r.status_code, 403, r.content)
+        self.assertEqual(r.json()["code"], "paid_entry_paused")
+        self.assertIn("usually takes up to 48 hours", r.json()["error"])
 
     def test_suspended_and_banned_cannot_join_paid(self):
         trust = TrustScore.objects.create(user=self.user, score=10)
@@ -492,6 +597,7 @@ class AdminQueueApiTests(HoldFixture, APITestCase):
         self.assertTrue(d["can_release"])
         self.assertEqual(len(d["evidence"]["flags_in_window"]), 1)
         self.assertEqual(d["evidence"]["daily_steps"]["baseline_avg"], 4000)
+        self.assertEqual(d["forfeit_preview"]["mode"], "qualifiers")
         self.assertEqual(d["forfeit_preview"]["recipients"][0]["user_id"], self.other.id)
 
         r = self.client.post(f"/api/admin/payout-reviews/{self.hold.id}/forfeit/", {"note": ""}, format="json")
@@ -505,6 +611,24 @@ class AdminQueueApiTests(HoldFixture, APITestCase):
         self.assertTrue(second.json()["already_decided"])
         self.assertEqual(WalletTransaction.objects.filter(user=self.u, type="payout").count(), 1)
         self.assertEqual(self.client.get("/api/admin/payout-reviews/").json()["counts"]["held"], 0)
+
+
+    def test_forfeit_preview_shows_refund_plan(self):
+        c = self.make_challenge()
+        solo, loser = self.make_user("prev_solo"), self.make_user("prev_loser")
+        self.join(c, solo, 20000)
+        self.join(c, loser, 100)
+        TrustScore.objects.create(user=solo, score=0)
+        finalize_challenge(c)
+        hold = HeldPayout.objects.get(user=solo)
+        self.client.force_authenticate(self.admin)
+        preview = self.client.get(f"/api/admin/payout-reviews/{hold.id}/").json()["forfeit_preview"]
+        self.assertEqual(preview["mode"], "refund")
+        self.assertFalse(preview["to_platform"])
+        self.assertEqual(preview["recipients"][0]["user_id"], loser.id)
+        self.assertEqual(preview["recipients"][0]["username"], "prev_loser")
+        self.assertEqual(Decimal(preview["recipients"][0]["entry_fee"]), c.entry_fee)
+        self.assertEqual(Decimal(preview["recipients"][0]["share"]), hold.amount)
 
 
 class ConcurrentReleaseTests(HoldFixture, TransactionTestCase):

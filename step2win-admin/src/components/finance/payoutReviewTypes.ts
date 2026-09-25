@@ -64,14 +64,28 @@ export interface PayoutReviewDetail extends PayoutReviewRow {
     }
   }
   forfeit_preview: {
+    /** qualifiers: shared by original payout; refund: no clear qualifier, refunded to the
+     *  other eligible participants by entry fee; platform: nobody eligible. */
+    mode: ForfeitMode
     to_platform: boolean
-    recipients: Array<{ username: string | null; user_id: number; original_payout: string; share: string }>
+    recipients: Array<{
+      username: string | null
+      user_id: number
+      share: string
+      /** mode "qualifiers" */
+      original_payout?: string
+      /** mode "refund" */
+      entry_fee?: string
+    }>
   } | null
 }
+
+export type ForfeitMode = 'qualifiers' | 'refund' | 'platform'
 
 export interface PayoutDecisionResult {
   id: number
   status: PayoutReviewStatus
+  mode?: ForfeitMode
   already_decided?: boolean
   wallet_transaction_id?: number
   redistributed?: Array<{ user_id: number; share: string }>

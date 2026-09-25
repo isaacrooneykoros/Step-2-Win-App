@@ -28,10 +28,11 @@ from apps.admin_api.trust_views import (HISTORY_ACTIONS, _age_hours, _related,
                                         _audit_row, _user_brief)
 from apps.admin_api.views import IsAdminUser
 from apps.challenges.models import ChallengeResult, HeldPayout
-from apps.challenges.payout_holds import (PayoutReviewError, _clear_recipients,
-                                          _release_blocker, forfeit_hold,
-                                          release_hold, split_forfeit)
+from apps.challenges.payout_holds import (PayoutReviewError, _release_blocker,
+                                          forfeit_hold, forfeit_plan,
+                                          release_hold)
 from apps.steps.models import FraudFlag, HealthRecord
+from apps.users.models import User
 
 ADMIN = [permissions.IsAuthenticated, IsAdminUser]
 STATUSES = [s for s, _ in HeldPayout.STATUS_CHOICES]
@@ -146,20 +147,28 @@ def _daily_steps(h):
 
 
 def _forfeit_preview(h):
+    """Where the amount would go if forfeited now (same plan forfeit_hold uses)."""
     if h.status != HeldPayout.STATUS_HELD:
         return None
-    recipients = _clear_recipients(h)
-    shares = split_forfeit(h.amount, [r[2] for r in recipients])
+    plan = forfeit_plan(h)
     names = dict(
-        ChallengeResult.objects.filter(
-            participant_id__in=[r[0] for r in recipients]
-        ).values_list("participant_id", "user__username")
+        User.objects.filter(
+            pk__in=[r[1] for r in plan["recipients"]]
+        ).values_list("pk", "username")
     )
-    rows = [
-        {"username": names.get(pid), "user_id": uid, "original_payout": str(orig), "share": str(share)}
-        for (pid, uid, orig), share in zip(recipients, shares)
-    ]
-    return {"to_platform": not rows, "recipients": rows}
+    rows = []
+    for pid, uid, weight, share in plan["recipients"]:
+        row = {"username": names.get(uid), "user_id": uid, "share": str(share)}
+        if plan["mode"] == "qualifiers":
+            row["original_payout"] = str(weight)
+        else:
+            row["entry_fee"] = str(weight)
+        rows.append(row)
+    return {
+        "mode": plan["mode"],
+        "to_platform": plan["mode"] == "platform",
+        "recipients": rows,
+    }
 
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})

@@ -28,9 +28,15 @@ Staff decide in the admin console (Finance > Payout reviews):
   forfeit  -> the amount is shared among the challenge's other clear qualifiers
               in proportion to their original payouts (largest-remainder cents,
               the shares add up to the forfeited amount exactly), one "payout"
-              WalletTransaction each. With no clear qualifier it is recorded as
-              PlatformRevenue. Clear = paid instantly or released after review;
-              qualifiers still under review, forfeited, banned or closed get none.
+              WalletTransaction each. Clear = paid instantly or released after
+              review; qualifiers still under review, forfeited, banned or closed
+              get none.
+              With no clear qualifier the amount is REFUNDED to the challenge's
+              other participants in proportion to their entry fees (same
+              largest-remainder cents, one "refund" WalletTransaction each).
+              Participants whose own payout is held or forfeited, and banned or
+              closed accounts, get none. Only when nobody is eligible at all is
+              it recorded as PlatformRevenue (with the audit trail).
 
 Both decisions claim the row with a conditional UPDATE (status held -> decided)
 inside a transaction, so a double click or two admins at once decide it once.
@@ -306,20 +312,25 @@ def _release_blocker(hold) -> str | None:
     return None
 
 
-def _credit(user_id, amount, *, reference_id, description, metadata, count_win=False):
+def _credit(user_id, amount, *, reference_id, description, metadata, count_win=False,
+            txn_type="payout"):
     from apps.users.models import User
     from apps.wallet.models import WalletTransaction
 
     user = User.objects.select_for_update().get(pk=user_id)
     before = user.wallet_balance
     user.wallet_balance += amount
-    user.total_earned += amount
-    user.save(update_fields=["wallet_balance", "total_earned", "updated_at"])
+    fields = ["wallet_balance", "updated_at"]
+    if txn_type == "payout":
+        # A refund gives back money the user paid in; it is not "earned".
+        user.total_earned += amount
+        fields.append("total_earned")
+    user.save(update_fields=fields)
     if count_win:
         User.objects.filter(pk=user_id).update(challenges_won=models.F("challenges_won") + 1)
     return WalletTransaction.objects.create(
         user=user,
-        type="payout",
+        type=txn_type,
         amount=amount,
         balance_before=before,
         balance_after=user.wallet_balance,
@@ -452,6 +463,66 @@ def split_forfeit(amount, weights) -> list[Decimal]:
     return _largest_remainder(amount, raw)
 
 
+def _refund_recipients(hold):
+    """(participant_id, user_id, entry fee) of the challenge's other participants
+    who may receive a refund share: not the held user, no held or forfeited
+    payout of their own, not banned, account not closed."""
+    from apps.challenges.models import HeldPayout, Participant
+    from apps.steps.models import TrustScore
+
+    challenge = hold.challenge
+    not_clear = set(
+        HeldPayout.objects.filter(challenge_id=hold.challenge_id)
+        .exclude(status=HeldPayout.STATUS_RELEASED)
+        .values_list("participant_id", flat=True)
+    )
+    rows = list(
+        Participant.objects.filter(challenge_id=hold.challenge_id)
+        .exclude(pk=hold.participant_id)
+        .select_related("user")
+        .order_by("pk")
+    )
+    banned = set(
+        TrustScore.objects.filter(
+            user_id__in=[p.user_id for p in rows], score__lte=0
+        ).values_list("user_id", flat=True)
+    )
+    fee = _D(challenge.entry_fee)
+    out = []
+    for p in rows:
+        if p.pk in not_clear or p.user_id in banned:
+            continue
+        if not p.user.is_active or getattr(p.user, "deleted_at", None):
+            continue
+        out.append((p.pk, p.user_id, fee))
+    return out
+
+
+def forfeit_plan(hold) -> dict:
+    """Where a forfeited payout goes. Used by the decision and the admin preview.
+
+    mode "qualifiers": shared among clear qualifiers by original payout;
+    mode "refund":     no clear qualifier, refunded to the other eligible
+                       participants by entry fee;
+    mode "platform":   nobody eligible, recorded as PlatformRevenue.
+    `recipients` is a list of (participant_id, user_id, weight, share).
+    """
+    amount = _D(hold.amount)
+    for mode, recipients in (
+        ("qualifiers", _clear_recipients(hold)),
+        ("refund", _refund_recipients(hold)),
+    ):
+        shares = split_forfeit(amount, [r[2] for r in recipients])
+        rows = [
+            (pid, uid, weight, share)
+            for (pid, uid, weight), share in zip(recipients, shares)
+            if share > 0
+        ]
+        if rows:
+            return {"mode": mode, "recipients": rows}
+    return {"mode": "platform", "recipients": []}
+
+
 def forfeit_hold(hold_id, admin, note, request=None) -> dict:
     from apps.challenges.models import HeldPayout
     from apps.payments.models import PlatformRevenue
@@ -471,32 +542,53 @@ def forfeit_hold(hold_id, admin, note, request=None) -> dict:
 
         amount = _D(hold.amount)
         name = hold.challenge.name
-        recipients = _clear_recipients(hold)
-        shares = split_forfeit(amount, [r[2] for r in recipients])
+        plan = forfeit_plan(hold)
+        mode = plan["mode"]
         distributed = []
-        for (participant_id, user_id, original), share in zip(recipients, shares):
-            if share <= 0:
-                continue
-            txn = _credit(
-                user_id,
-                share,
-                reference_id=f"PAYOUT-HOLD-{hold.pk}-SHARE-{participant_id}",
-                description=(
-                    f'Extra payout from "{name}": a prize not approved after review '
-                    "was shared among qualifying finishers"
-                ),
-                metadata={
-                    "challenge_id": hold.challenge_id,
-                    "held_payout_id": hold.pk,
-                    "payout_review": "forfeit_share",
-                    "original_payout": str(original),
-                },
-            )
-            distributed.append(
-                {"user_id": user_id, "participant_id": participant_id,
-                 "original_payout": str(original), "share": str(share),
-                 "wallet_transaction_id": txn.pk}
-            )
+        for participant_id, user_id, weight, share in plan["recipients"]:
+            if mode == "qualifiers":
+                txn = _credit(
+                    user_id,
+                    share,
+                    reference_id=f"PAYOUT-HOLD-{hold.pk}-SHARE-{participant_id}",
+                    description=(
+                        f'Extra payout from "{name}": a prize not approved after review '
+                        "was shared among qualifying finishers"
+                    ),
+                    metadata={
+                        "challenge_id": hold.challenge_id,
+                        "held_payout_id": hold.pk,
+                        "payout_review": "forfeit_share",
+                        "original_payout": str(weight),
+                    },
+                )
+                distributed.append(
+                    {"user_id": user_id, "participant_id": participant_id,
+                     "original_payout": str(weight), "share": str(share),
+                     "wallet_transaction_id": txn.pk}
+                )
+            else:
+                txn = _credit(
+                    user_id,
+                    share,
+                    txn_type="refund",
+                    reference_id=f"PAYOUT-HOLD-{hold.pk}-REFUND-{participant_id}",
+                    description=(
+                        f'Partial refund from "{name}": a prize not approved after review '
+                        "was returned to the other participants"
+                    ),
+                    metadata={
+                        "challenge_id": hold.challenge_id,
+                        "held_payout_id": hold.pk,
+                        "payout_review": "forfeit_refund",
+                        "entry_fee": str(weight),
+                    },
+                )
+                distributed.append(
+                    {"user_id": user_id, "participant_id": participant_id,
+                     "entry_fee": str(weight), "share": str(share),
+                     "wallet_transaction_id": txn.pk}
+                )
 
         revenue_id = None
         if not distributed:
@@ -507,7 +599,7 @@ def forfeit_hold(hold_id, admin, note, request=None) -> dict:
                 metadata={
                     "held_payout_id": hold.pk,
                     "user_id": hold.user_id,
-                    "reason": "forfeit_no_clear_qualifiers",
+                    "reason": "forfeit_no_eligible_participants",
                     "decided_by": getattr(admin, "username", None),
                 },
             )
@@ -516,6 +608,7 @@ def forfeit_hold(hold_id, admin, note, request=None) -> dict:
         hold.refresh_from_db()
         hold.resolution = {
             "action": "forfeited",
+            "mode": mode,
             "redistributed": distributed,
             "platform_revenue_id": revenue_id,
             "total": str(amount),
@@ -525,10 +618,13 @@ def forfeit_hold(hold_id, admin, note, request=None) -> dict:
             admin, "reject", hold,
             f"Forfeited held payout KES {amount} of {hold.user.username} "
             f'(challenge "{name}"): '
-            + (f"shared among {len(distributed)} qualifier(s)" if distributed else "kept by the platform"),
+            + {
+                "qualifiers": f"shared among {len(distributed)} qualifier(s)",
+                "refund": f"refunded to {len(distributed)} other participant(s) by entry fee",
+            }.get(mode, "kept by the platform (no eligible participant)"),
             {"decision": "forfeit", "amount": str(amount), "note": note,
              "user_id": hold.user_id, "challenge_id": hold.challenge_id,
-             "redistributed": distributed, "platform_revenue_id": revenue_id},
+             "mode": mode, "redistributed": distributed, "platform_revenue_id": revenue_id},
             request,
         )
         _notify(
@@ -540,6 +636,7 @@ def forfeit_hold(hold_id, admin, note, request=None) -> dict:
     return {
         "id": hold.pk,
         "status": HeldPayout.STATUS_FORFEITED,
+        "mode": mode,
         "redistributed": distributed,
         "platform_revenue_id": revenue_id,
     }

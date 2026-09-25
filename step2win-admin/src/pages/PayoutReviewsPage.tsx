@@ -183,18 +183,25 @@ function ReviewDetail({ id }: { id: number }) {
       {d.forfeit_preview && (
         <Section title="If forfeited">
           {d.forfeit_preview.to_platform ? (
-            <p className="text-sm text-ink-secondary">No other clear qualifier: the amount is recorded as platform revenue with an audit trail.</p>
+            <p className="text-sm text-ink-secondary">No other clear qualifier and no other eligible participant: the amount is recorded as platform revenue with an audit trail.</p>
           ) : (
-            <ul className="divide-y divide-surface-border rounded-md border border-surface-border">
-              {d.forfeit_preview.recipients.map((r) => (
-                <li key={r.user_id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                  <span className="truncate">{r.username ?? `User ${r.user_id}`}</span>
-                  <span className="mono text-xs text-ink-secondary">
-                    {formatKES(toNum(r.original_payout))} + <span className="text-ink-primary">{formatKES(toNum(r.share))}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <>
+              <p className="mb-2 text-xs text-ink-muted">
+                {d.forfeit_preview.mode === 'refund'
+                  ? 'No other clear qualifier: the amount is refunded to the other participants in proportion to their entry fees (entry fee + refund share).'
+                  : "Shared among the challenge's other clear qualifiers in proportion to their payouts (payout + extra share)."}
+              </p>
+              <ul className="divide-y divide-surface-border rounded-md border border-surface-border">
+                {d.forfeit_preview.recipients.map((r) => (
+                  <li key={r.user_id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                    <span className="truncate">{r.username ?? `User ${r.user_id}`}</span>
+                    <span className="mono text-xs text-ink-secondary">
+                      {formatKES(toNum(d.forfeit_preview?.mode === 'refund' ? r.entry_fee : r.original_payout))} + <span className="text-ink-primary">{formatKES(toNum(r.share))}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </Section>
       )}
@@ -240,8 +247,10 @@ export function PayoutReviewsPage() {
           : kind === 'release'
             ? `Released ${amount} to ${row.user.username}'s wallet. The user was notified.`
             : res.redistributed && res.redistributed.length
-              ? `Forfeited ${amount}: shared among ${res.redistributed.length} qualifier(s). The user was notified.`
-              : `Forfeited ${amount}: recorded as platform revenue (no other clear qualifier). The user was notified.`,
+              ? res.mode === 'refund'
+                ? `Forfeited ${amount}: refunded to ${res.redistributed.length} other participant(s) by entry fee (no other clear qualifier). The user was notified.`
+                : `Forfeited ${amount}: shared among ${res.redistributed.length} qualifier(s). The user was notified.`
+              : `Forfeited ${amount}: recorded as platform revenue (no other eligible participant). The user was notified.`,
       })
       setSelected(null)
     },
@@ -305,7 +314,7 @@ export function PayoutReviewsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Payout reviews"
-        description="Challenge payouts held at settlement for a second look. Release credits the winner's wallet; forfeit shares the amount among the challenge's other clear qualifiers."
+        description="Challenge payouts held at settlement for a second look. Release credits the winner's wallet; forfeit shares the amount among the challenge's other clear qualifiers, or refunds it to the other participants when there is none."
         actions={
           <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={listQ.isFetching} onClick={() => void listQ.refetch()}>
             Refresh
@@ -416,8 +425,10 @@ export function PayoutReviewsPage() {
         message={
           decision?.kind === 'forfeit'
             ? current?.forfeit_preview?.to_platform
-              ? 'The user is not paid. With no other clear qualifier, the amount is recorded as platform revenue.'
-              : "The user is not paid. The amount is shared among the challenge's other clear qualifiers in proportion to their payouts."
+              ? 'The user is not paid. With no other clear qualifier and no other eligible participant, the amount is recorded as platform revenue.'
+              : current?.forfeit_preview?.mode === 'refund'
+                ? 'The user is not paid. With no other clear qualifier, the amount is refunded to the other participants in proportion to their entry fees.'
+                : "The user is not paid. The amount is shared among the challenge's other clear qualifiers in proportion to their payouts."
             : "The amount is credited to the user's wallet now, like a normal challenge payout."
         }
         details={
