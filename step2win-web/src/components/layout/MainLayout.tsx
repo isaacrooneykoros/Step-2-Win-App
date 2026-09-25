@@ -3,7 +3,7 @@ import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
-import { Home, Trophy, Wallet, User, Footprints, Bell, Camera, MapPin, Navigation, Activity } from 'lucide-react';
+import { Home, Trophy, Wallet, User, Footprints, Bell, MapPin, Activity } from 'lucide-react';
 import { useStepsWebSocket } from '../../hooks/useStepsWebSocket';
 import { useHealthSync, useSmartStepSync } from '../../hooks/useHealthSync';
 import { usePermissionStatus } from '../../hooks/usePermissionStatus';
@@ -14,16 +14,14 @@ import Button from '../ui/Button';
 import { IconTile, Pill } from '../ui/Pill';
 import { ConnectionBanner } from '../ui/ConnectionBanner';
 import { useBootSplashActive, useOnboardingOpen } from '../../lib/launchState';
-import { isIOSApp, permissionCopy } from '../../utils/platform';
+import { permissionCopy } from '../../utils/platform';
 import {
   checkNotificationPermission,
   requestNotificationPermission,
   syncReminderNotifications,
 } from '../../services/notifications';
-import { checkCameraPermission, requestCameraPermission, type CameraPermissionState } from '../../services/cameraPermissions';
 import {
   checkAdvancedPermissionSnapshot,
-  requestBackgroundLocationPermission,
   requestForegroundLocationPermission,
   type LocationPermissionState,
 } from '../../services/locationPermissions';
@@ -64,15 +62,17 @@ export default function MainLayout() {
   const { syncHealthSilent, syncHealthNow, requestSync, connectDevice, isConnectingDevice, permissionStatus } = useHealthSync();
   const queryClient = useQueryClient();
   const [permissionsVersion, setPermissionsVersion] = useState(0);
-  const { permissionStatus: globalPermissionStatus } = usePermissionStatus();
+  const {
+    permissionStatus: globalPermissionStatus,
+    hasChecked: activityPermissionChecked,
+    checkPermissions: recheckActivityPermission,
+  } = usePermissionStatus();
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   // Ask for permissions only once the launch splash and the first-run onboarding are out of the way.
   const onboardingOpen = useOnboardingOpen();
   const bootSplashActive = useBootSplashActive();
   const [notificationPermission, setNotificationPermission] = useState<'prompt' | 'prompt-with-rationale' | 'granted' | 'denied' | 'unavailable'>('prompt');
-  const [cameraPermission, setCameraPermission] = useState<CameraPermissionState>('prompt');
   const [locationPermission, setLocationPermission] = useState<LocationPermissionState>('prompt');
-  const [backgroundLocationPermission, setBackgroundLocationPermission] = useState<LocationPermissionState>('prompt');
 
   const isNative = Capacitor.isNativePlatform();
   const updateUser = useAuthStore((state) => state.updateUser);
@@ -97,9 +97,6 @@ export default function MainLayout() {
     return isNative && notificationPermission !== 'granted';
   }, [isNative, notificationPermission]);
 
-  const canRequestCameraPermission = useMemo(() => {
-    return isNative && cameraPermission !== 'granted';
-  }, [isNative, cameraPermission]);
 
   const canRequestLocationPermission = useMemo(() => {
     return isNative && locationPermission !== 'granted';
@@ -118,6 +115,8 @@ export default function MainLayout() {
   // app was away for a while, and re-read permissions the user may have changed in Settings.
   const syncNowRef = useRef(syncHealthNow);
   syncNowRef.current = syncHealthNow;
+  const recheckActivityPermissionRef = useRef(recheckActivityPermission);
+  recheckActivityPermissionRef.current = recheckActivityPermission;
   useEffect(() => {
     if (!isNative) return;
     let pausedAt = 0;
@@ -128,6 +127,7 @@ export default function MainLayout() {
       }
       void syncNowRef.current();
       setPermissionsVersion((v) => v + 1);
+      void recheckActivityPermissionRef.current(true);
       if (pausedAt && Date.now() - pausedAt > 30_000) {
         void queryClient.invalidateQueries({ refetchType: 'active' });
       }
@@ -148,13 +148,10 @@ export default function MainLayout() {
       }
 
       const status = await checkNotificationPermission();
-      const camera = await checkCameraPermission();
       const advanced = await checkAdvancedPermissionSnapshot();
       if (!cancelled) {
         setNotificationPermission(status);
-        setCameraPermission(camera);
         setLocationPermission(advanced.location);
-        setBackgroundLocationPermission(advanced.backgroundLocation);
       }
     };
 
@@ -177,7 +174,8 @@ export default function MainLayout() {
       return;
     }
 
-    if (!canRequestDevicePermission && !canRequestNotificationPermission && !canRequestCameraPermission && !canRequestLocationPermission) {
+    // Camera is asked when the user scans an invite QR code, not here.
+    if (!canRequestDevicePermission && !canRequestNotificationPermission && !canRequestLocationPermission) {
       localStorage.setItem(PERMISSIONS_BOOTSTRAP_DONE_KEY, 'true');
       setShowPermissionModal(false);
       return;
@@ -186,10 +184,18 @@ export default function MainLayout() {
     if (onboardingOpen || bootSplashActive) return;
     const timer = window.setTimeout(() => setShowPermissionModal(true), 700);
     return () => window.clearTimeout(timer);
-  }, [canRequestCameraPermission, canRequestDevicePermission, canRequestLocationPermission, canRequestNotificationPermission, onboardingOpen, bootSplashActive]);
+  }, [canRequestDevicePermission, canRequestLocationPermission, canRequestNotificationPermission, onboardingOpen, bootSplashActive]);
+
+  // Android's permission dialog doesn't background the app, so nothing else notices the answer:
+  // re-read it right away so the "Allow access" banner doesn't stay stuck on top.
+  const refreshPermissionViews = () => {
+    void recheckActivityPermission(true);
+    setPermissionsVersion((v) => v + 1);
+  };
 
   const handleEnablePermission = async () => {
     const ok = await connectDevice();
+    refreshPermissionViews();
     if (ok) {
       syncHealthSilent();
     }
@@ -208,26 +214,50 @@ export default function MainLayout() {
     setShowPermissionModal(false);
   };
 
+  /**
+   * One tap, then the system dialogs one after another. The choice is recorded and the sheet
+   * closed first, so an interrupted chain (app killed, a dialog dismissed, a request failing)
+   * never brings the sheet back on the next launch, and nothing is left open behind the dialogs.
+   * Only permissions that show a plain dialog are asked here: camera is asked when scanning an
+   * invite, and background location (a full Settings page on Android 11+) lives in Settings.
+   */
   const handleEnableEverything = async () => {
-    await handleEnablePermission();
-    await handleEnableNotifications();
-    const cameraGranted = await requestCameraPermission();
-    setCameraPermission(cameraGranted ? 'granted' : 'denied');
-
-    const locationGranted = await requestForegroundLocationPermission();
-    setLocationPermission(locationGranted ? 'granted' : 'denied');
-
-    if (locationGranted && !isIOSApp()) {
-      const backgroundGranted = await requestBackgroundLocationPermission();
-      setBackgroundLocationPermission(backgroundGranted ? 'granted' : 'denied');
-    }
-
     localStorage.setItem(PERMISSIONS_BOOTSTRAP_DONE_KEY, 'true');
     setShowPermissionModal(false);
+
+    // Silent: a previously denied permission would otherwise jump to the Settings app mid-chain.
+    // The banner offers "Open settings" for that case instead.
+    try {
+      const ok = await connectDevice({ silent: true });
+      if (ok) syncHealthSilent();
+    } catch {
+      // Keep going: the banner still offers step access.
+    }
+    try {
+      await handleEnableNotifications();
+    } catch {
+      // Keep going.
+    }
+    try {
+      const locationGranted = await requestForegroundLocationPermission();
+      setLocationPermission(locationGranted ? 'granted' : 'denied');
+    } catch {
+      // Keep going.
+    }
+    refreshPermissionViews();
   };
 
-  const activityDenied = globalPermissionStatus.activityRecognition === 'denied';
-  const showActivityBanner = isNative && globalPermissionStatus.activityRecognition !== 'granted';
+  const activityState = globalPermissionStatus.activityRecognition;
+  const activityDenied = activityState === 'denied';
+  // Only once the real answer is known, and never while onboarding or the setup sheet is showing
+  // (they ask for the same thing).
+  const showActivityBanner =
+    isNative &&
+    activityPermissionChecked &&
+    (activityState === 'prompt' || activityState === 'prompt-with-rationale' || activityState === 'denied') &&
+    !showPermissionModal &&
+    !onboardingOpen &&
+    !bootSplashActive;
 
   return (
     <div className="app-shell flex min-h-[100dvh] flex-col">
@@ -338,27 +368,15 @@ export default function MainLayout() {
             granted={notificationPermission === 'granted'}
           />
           <PermissionRow
-            icon={Camera}
-            title="Camera"
-            subtitle="Scan challenge invite QR codes."
-            granted={cameraPermission === 'granted'}
-          />
-          <PermissionRow
             icon={MapPin}
             title="Location"
             subtitle="Draws your walking route on the activity map."
             granted={locationPermission === 'granted'}
           />
-          {!isIOSApp() && (
-            <PermissionRow
-              icon={Navigation}
-              title="Background location"
-              subtitle="Keeps routes continuous while the app is closed."
-              granted={backgroundLocationPermission === 'granted'}
-              optional
-            />
-          )}
         </div>
+        <p className="mt-3 text-caption text-text-muted">
+          Camera is only asked for when you scan an invite code. Background location is optional and can be turned on in Settings.
+        </p>
       </Sheet>
     </div>
   );

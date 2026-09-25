@@ -21,6 +21,9 @@ export function usePermissionStatus() {
   // True in the Android and iOS apps (native step counter); false on the web.
   const [hasStepCounter, setHasStepCounter] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
+  // False until the first real check returns: the initial 'prompt' is a placeholder, and UI that
+  // nags about a missing permission must not flash on every launch before the answer is known.
+  const [hasChecked, setHasChecked] = useState(false);
   const [isRequesting, setIsRequesting] = useState(false);
   const lastCheckTimeRef = useRef(0);
   const permissionStatusRef = useRef(permissionStatus);
@@ -38,6 +41,7 @@ export function usePermissionStatus() {
     if (!hasNativeStepCounter()) {
       setHasStepCounter(false);
       setPermissionStatus({ activityRecognition: 'unavailable' });
+      setHasChecked(true);
       return { activityRecognition: 'unavailable' };
     }
 
@@ -53,6 +57,7 @@ export function usePermissionStatus() {
     try {
       const status = await DeviceStepCounter.checkPermissions();
       setPermissionStatus(status);
+      setHasChecked(true);
       lastCheckTimeRef.current = now;
       return status;
     } catch (error) {
@@ -91,6 +96,7 @@ export function usePermissionStatus() {
       }
       const status = await DeviceStepCounter.requestPermissions();
       setPermissionStatus(status);
+      setHasChecked(true);
       lastCheckTimeRef.current = Date.now();
 
       // Check result
@@ -142,6 +148,7 @@ export function usePermissionStatus() {
 
   return {
     permissionStatus,
+    hasChecked,
     hasStepCounter,
     isChecking,
     isRequesting,
