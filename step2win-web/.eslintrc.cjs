@@ -30,5 +30,5 @@ module.exports = {
     'react-hooks/exhaustive-deps': 'off',
     '@typescript-eslint/no-explicit-any': 'off',
   },
-  ignorePatterns: ['dist', 'node_modules'],
+  ignorePatterns: ['dist', 'node_modules', 'android', 'ios'],
 };
