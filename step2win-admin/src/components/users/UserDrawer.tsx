@@ -24,6 +24,7 @@ import { consoleApi } from './api'
 import type { UserOverview } from './types'
 import { ActionNotice, AuditActionBadge, ChangeList, Figure, InlineLink, SectionTitle, SignedKES, Timestamp, TrustMeter } from './shared'
 import { UserActions, type UserAction } from './UserActions'
+import { RiskModelPanel } from './RiskModelPanel'
 import { formatDay, humanize, TRUST_LABEL, useAdminRole } from './utils'
 
 type Tab = 'account' | 'activity' | 'challenges' | 'financial' | 'security' | 'support' | 'audit'
@@ -506,6 +507,8 @@ function SecurityTab({ d, onAction }: { d: UserOverview; onAction: (a: UserActio
           <p>{t.updated_at ? <>Updated <Timestamp value={t.updated_at} /></> : 'No trust record yet — defaults to 100'}</p>
         </div>
       </div>
+
+      <RiskModelPanel userId={d.user.id} />
 
       {p && (
         <>

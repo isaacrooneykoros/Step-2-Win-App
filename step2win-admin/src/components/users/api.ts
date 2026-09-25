@@ -7,7 +7,7 @@ import { refreshAccessToken, useAuthStore } from '../../store/authStore'
 import { API_BASE } from '../../config/network'
 import type {
   AuditLogPage, BadgeDef, BadgeInput, ChallengeResults, ChallengeRow, ChallengeStats, ConsoleUser, Paged,
-  StepHourly, StepLogPage, UserOverview, UserStats,
+  StepHourly, StepLogPage, UserOverview, UserRiskScores, UserStats,
 } from './types'
 
 /** Error with the server message plus per-field messages when the API returned them. */
@@ -114,6 +114,10 @@ export const consoleApi = {
     request<{ status: string }>(`/api/admin/users/${id}/delete_user/`, { method: 'DELETE', body: JSON.stringify({ reason }) }),
   actionFlag: (flagId: number, action: string, adminNote: string) =>
     post<{ status: string }>(`/api/admin/fraud/${flagId}/action/`, { action, admin_note: adminNote || undefined }),
+
+  // Risk model (shadow, read-only)
+  userRiskScores: (id: number, days = 30) =>
+    request<UserRiskScores>(`/api/admin/risk-ml/users/${id}/scores/${qs({ days })}`),
 
   // Steps
   stepLogs: (p: Params) => request<StepLogPage>(`/api/admin/steps/logs/${qs(p)}`),

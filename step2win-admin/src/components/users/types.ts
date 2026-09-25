@@ -327,3 +327,53 @@ export interface BadgeInput {
   criteria_type: string
   criteria_value: number | null
 }
+
+// ── Risk model (shadow) ─────────────────────────────────────────────────────
+
+export interface RiskExplanation {
+  code: string
+  feature: string
+  value: number | string | null
+  contribution: number
+  text: string
+}
+
+export interface RiskScoreRow {
+  date: string
+  score: number
+  model_version: string
+  explanations: RiskExplanation[]
+  context: {
+    steps?: number | null
+    entry_fee_exposure_kes?: number | null
+    days_to_deadline?: number | null
+    milestone_gap_before?: number | null
+    no_motion_data?: boolean
+    forest_rarity?: number
+    supervised?: boolean
+  }
+  supervised: boolean
+  updated_at: string
+}
+
+export interface RiskLabelRow {
+  id: number
+  date_start: string
+  date_end: string
+  label: 'cheat' | 'honest' | 'unsure'
+  source: string
+  notes: string
+  created_by: string | null
+  created_at: string
+}
+
+export interface UserRiskScores {
+  user_id: number
+  shadow: true
+  note: string
+  days: number
+  latest: RiskScoreRow | null
+  scores: RiskScoreRow[]
+  labels: RiskLabelRow[]
+  active_models: Partial<Record<'anomaly' | 'supervised', string>>
+}
