@@ -1,0 +1,17 @@
+# OFFLINE ONLY: training / export for apps.risk_ml. NEVER install on the Render web service.
+#
+# Production scores models with pure Python (apps/risk_ml/ml/runtime.py) and needs nothing
+# from this file. Install into a separate virtualenv on a laptop or in a GitHub Action:
+#
+#   python -m venv mlvenv && mlvenv/Scripts/pip install -r backend/requirements-ml.txt
+#
+# Why each one:
+#   scikit-learn  IsolationForest / GradientBoostingClassifier / LogisticRegression, exported to JSON
+#                 (the pure-Python trainers in ml/pytrain.py are the fallback, not a replacement)
+#   numpy, scipy, joblib, threadpoolctl  scikit-learn's own runtime dependencies, pinned for reproducibility
+-r requirements.txt
+scikit-learn==1.5.2
+numpy==2.1.3
+scipy==1.14.1
+joblib==1.6.0
+threadpoolctl==3.7.0

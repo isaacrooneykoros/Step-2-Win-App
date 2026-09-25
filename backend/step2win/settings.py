@@ -100,6 +100,7 @@ INSTALLED_APPS = [
     "apps.admin_api",
     "apps.payments",
     "apps.legal",
+    "apps.risk_ml",
     "axes",
     "auditlog",
 ]
@@ -483,7 +484,17 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.admin_api.tasks.escalate_overdue_support_tickets",
         "schedule": crontab(minute="*/15"),  # every 15 minutes
     },
+    # Shadow risk model: features + anomaly scores for the last 3 days (no enforcement).
+    "risk-ml-features-and-scores": {
+        "task": "apps.risk_ml.tasks.compute_features_and_scores_task",
+        "schedule": crontab(hour=1, minute=30),  # 01:30 UTC (04:30 EAT)
+        "kwargs": {"days": 3},
+    },
 }
+# Shadow risk model (apps.risk_ml). Local-day offset for "late sync" and hour-of-day features.
+RISK_ML_LOCAL_UTC_OFFSET_HOURS = int(os.getenv("RISK_ML_LOCAL_UTC_OFFSET_HOURS", "3"))
+# Score at which a (future) payout hold would trigger; used only to report precision/recall.
+RISK_ML_HOLD_THRESHOLD = float(os.getenv("RISK_ML_HOLD_THRESHOLD", "0.8"))
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
