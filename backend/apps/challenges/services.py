@@ -90,6 +90,7 @@ def finalize_challenge(challenge):
     import logging
 
     from apps.challenges.models import ChallengeResult
+    from apps.challenges.payout_holds import hold_if_needed
     from apps.challenges.tie_resolution import resolve_challenge
     from apps.users.models import User
     from apps.wallet.models import WalletTransaction
@@ -139,6 +140,13 @@ def finalize_challenge(challenge):
                     ),
                     metadata={"challenge_id": challenge.id},
                 )
+
+            elif r.payout_kes > 0 and hold_if_needed(challenge, r, user):
+                # PAYOUT HOLD HOOK (apps/challenges/payout_holds.py): a risky
+                # winner's payout is held for staff review. The entry was released
+                # from locked_balance and a HeldPayout recorded; the wallet is NOT
+                # credited. Clear winners fall through and are paid instantly.
+                pass
 
             elif r.payout_kes > 0:
                 # Winner — credit payout

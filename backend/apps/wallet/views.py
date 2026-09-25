@@ -69,6 +69,9 @@ def wallet_summary(request):
         "amount__sum"
     ] or Decimal("0.00")
 
+    from apps.challenges.payout_holds import open_reviews_for
+
+    under_review = open_reviews_for(user)
     data = {
         "balance": user.wallet_balance,
         "locked_balance": user.locked_balance,
@@ -76,6 +79,10 @@ def wallet_summary(request):
         "total_deposited": total_deposited,
         "total_withdrawn": total_withdrawn,
         "total_earned": total_earned,
+        "payouts_under_review": under_review,
+        "under_review_total": sum(
+            (Decimal(r["amount"]) for r in under_review), Decimal("0.00")
+        ),
     }
 
     serializer = WalletSummarySerializer(data)

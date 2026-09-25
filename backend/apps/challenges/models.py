@@ -432,3 +432,63 @@ class ChallengeMessage(models.Model):
             else (self.user.username if self.user else "Unknown")
         )
         return f"{sender} in {self.challenge.name}: {self.message[:50]}"
+
+
+class HeldPayout(models.Model):
+    """A winner's challenge payout withheld from the wallet pending staff review.
+
+    Created at settlement (apps/challenges/payout_holds.py) instead of crediting
+    the wallet when a hold rule matches. The money is not in the user's balance,
+    so it cannot be withdrawn or re-entered into challenges. Staff either release
+    it (credited like a normal payout) or forfeit it (shared among the challenge's
+    clear qualifiers, or kept by the platform when there are none).
+    """
+
+    STATUS_HELD = "held"
+    STATUS_RELEASED = "released"
+    STATUS_FORFEITED = "forfeited"
+    STATUS_CHOICES = [
+        (STATUS_HELD, "Held for review"),
+        (STATUS_RELEASED, "Released"),
+        (STATUS_FORFEITED, "Forfeited"),
+    ]
+
+    challenge = models.ForeignKey(
+        Challenge, on_delete=models.PROTECT, related_name="held_payouts"
+    )
+    participant = models.OneToOneField(
+        Participant, on_delete=models.PROTECT, related_name="held_payout"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="held_payouts"
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    # [{"code": ..., "label": ..., "detail": {...}}] as evaluated at settlement.
+    reasons = models.JSONField(default=list)
+    # Banned or deleted at settlement: staff can only forfeit.
+    forfeit_only = models.BooleanField(default=False)
+    status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default=STATUS_HELD, db_index=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="decided_payout_holds",
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+    note = models.TextField(blank=True)
+    # What the decision did with the money (transaction ids, shares, revenue row).
+    resolution = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "-created_at"], name="chal_hold_status_idx"),
+            models.Index(fields=["user", "status"], name="chal_hold_user_idx"),
+        ]
+
+    def __str__(self):
+        return f"Held payout #{self.pk} KES {self.amount} ({self.status})"

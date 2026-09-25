@@ -479,6 +479,13 @@ class SystemSettingsSerializer(serializers.Serializer):
     support_escalation_enabled = serializers.BooleanField()
     support_escalation_raise_priority = serializers.BooleanField()
 
+    # Payout review (held challenge payouts)
+    payout_holds_enabled = serializers.BooleanField()
+    payout_hold_trust_score_max = serializers.IntegerField(min_value=0, max_value=100)
+    payout_hold_large_win_kes = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=Decimal("1")
+    )
+
     # Metadata
     updated_at = serializers.DateTimeField(read_only=True)
     updated_by = serializers.SerializerMethodField()

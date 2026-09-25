@@ -318,6 +318,22 @@ def _trust_score_saved(sender, instance, created, raw=False, **kwargs):
     publish_admin_event("trust.score", {"user_id": instance.user_id, "score": _plain(score)})
 
 
+def _held_payout_saved(sender, instance, created, raw=False, **kwargs):
+    """A payout held at settlement (payout.held) or a staff decision on it (payout.decided)."""
+    if raw:
+        return
+    publish_admin_event(
+        "payout.held" if created else "payout.decided",
+        {
+            "id": instance.pk,
+            "user_id": instance.user_id,
+            "challenge_id": instance.challenge_id,
+            "status": getattr(instance, "status", None),
+            "amount": _plain(getattr(instance, "amount", None)),
+        },
+    )
+
+
 # ── Staff actions ────────────────────────────────────────────────────────────
 
 
@@ -357,6 +373,7 @@ _WIRING = {
     "steps.SuspiciousSessionReview": [(post_save, _session_review_saved)],
     "steps.TrustScore": [(post_save, _trust_score_saved)],
     "steps.UserTrustProfile": [(post_save, _trust_score_saved)],
+    "challenges.HeldPayout": [(post_save, _held_payout_saved)],
 }
 
 

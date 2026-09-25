@@ -58,6 +58,10 @@ ENFORCED_BY = {
     "support_category_assignees": "Category rule for new tickets (falls back to the round-robin pool)",
     "support_escalation_enabled": "Escalation job every 15 minutes (Celery beat)",
     "support_escalation_raise_priority": "Escalation job raises priority one level",
+    # apps/challenges/payout_holds.py
+    "payout_holds_enabled": "Challenge settlement: risky winners' payouts wait in Finance > Payout reviews instead of being credited",
+    "payout_hold_trust_score_max": "Challenge settlement: a winner at or below this trust score is held for review",
+    "payout_hold_large_win_kes": "Challenge settlement: payouts at or above this are held when the winner has open medium+ flags in the challenge window",
 }
 
 

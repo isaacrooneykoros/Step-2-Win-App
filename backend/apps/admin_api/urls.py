@@ -24,6 +24,8 @@ from apps.admin_api.views import (AdminBadgeViewSet, AdminChallengeViewSet,
                                   update_system_settings, withdrawal_queue,
                                   withdrawal_stats)
 
+from apps.admin_api import payout_review_views  # noqa: E402  (held payouts queue)
+
 router = DefaultRouter()
 router.register(r"users", AdminUserViewSet, basename="admin-user")
 router.register(r"challenges", AdminChallengeViewSet, basename="admin-challenge")
@@ -130,6 +132,11 @@ urlpatterns = [
     path("finance/ledger/export/", finance_views.finance_ledger_export, name="finance-ledger-export"),
     path("finance/report/", finance_views.finance_report, name="finance-report"),
     path("finance/analytics/", finance_views.finance_analytics, name="finance-analytics"),
+    # Held challenge payouts (apps/admin_api/payout_review_views.py)
+    path("payout-reviews/", payout_review_views.payout_reviews, name="payout-reviews"),
+    path("payout-reviews/<int:hold_id>/", payout_review_views.payout_review_detail, name="payout-review-detail"),
+    path("payout-reviews/<int:hold_id>/release/", payout_review_views.payout_review_release, name="payout-review-release"),
+    path("payout-reviews/<int:hold_id>/forfeit/", payout_review_views.payout_review_forfeit, name="payout-review-forfeit"),
     # Trust & safety console (apps/admin_api/trust_views.py)
     path("trust/summary/", trust_views.trust_summary, name="trust-summary"),
     path("trust/cases/", trust_views.trust_cases, name="trust-cases"),
