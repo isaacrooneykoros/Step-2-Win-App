@@ -52,6 +52,7 @@ const K = {
   jobs: ['admin', 'scheduled-jobs'],
   supportQueue: ['support', 'queue'],
   conversation: ['support', 'conversation'],
+  payoutReviews: ['admin', 'payout-reviews'],
 } as const
 
 const t = (key: QueryKey, gap = FAST): Target => ({ key, gap })
@@ -149,6 +150,11 @@ function targetsFor(entry: EventEntry): Target[] {
     case 'jobs.updated':
     case 'jobs.*bulk':
       return [t(K.jobs, LIST)]
+    case 'payout.held':
+    case 'payout.decided':
+      return [t(K.payoutReviews), ...perEntity(K.userOverview, users)]
+    case 'payout.*bulk':
+      return [t(K.payoutReviews, HEAVY), t(K.userOverview, HEAVY)]
     default:
       return []
   }

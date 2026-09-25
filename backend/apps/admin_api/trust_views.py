@@ -232,30 +232,26 @@ def _notice_to_user(user, admin, subject, message):
     return ticket.id
 
 
-# Mirrors views.action_flag exactly (see module docstring).
-def _apply_trust_action(trust, action):
-    if action == "dismiss":
-        trust.recover(10)
-    elif action == "warn":
-        trust.deduct(5)
-    elif action == "restrict":
-        trust.score = 35
-        trust.save(update_fields=["score", "updated_at"])
-    elif action == "suspend":
-        trust.score = 10
-        trust.save(update_fields=["score", "updated_at"])
-    elif action == "ban":
-        trust.score = 0
-        trust.save(update_fields=["score", "updated_at"])
-    elif action == "unrestrict":
-        trust.score = max(trust.score, 65)
-        trust.save(update_fields=["score", "updated_at"])
-    elif action == "unsuspend":
-        trust.score = max(trust.score, 45)
-        trust.save(update_fields=["score", "updated_at"])
-    elif action == "unban":
-        trust.score = max(trust.score, 35)
-        trust.save(update_fields=["score", "updated_at"])
+# Mirrors views.action_flag exactly (see module docstring). The semantics live on
+# the model (TrustScore.apply_admin_action): restrict / suspend / ban hold the score
+# under an admin lock that automatic recovery cannot undo; only a lift ends it.
+def _apply_trust_action(trust, action, until=None):
+    trust.apply_admin_action(action, until=until)
+
+
+def _lock_until(request):
+    """Optional `lock_days` (1-365) on restrict / suspend / ban: when the lock
+    expires. Absent or invalid = until an admin lifts it."""
+    raw = request.data.get("lock_days")
+    if raw in (None, ""):
+        return None
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if days < 1 or days > 365:
+        return None
+    return timezone.now() + timedelta(days=days)
 
 
 def _read_decision_payload(request):
@@ -281,7 +277,8 @@ def _moderate(request, user, action, reason, message, flag=None):
     """Apply a trust action + audit + optional notice. Returns response payload."""
     trust, _ = TrustScore.objects.select_for_update().get_or_create(user=user)
     before_score, before_status = trust.score, trust.status
-    _apply_trust_action(trust, action)
+    until = _lock_until(request) if action in trust.ADMIN_LOCKS else None
+    _apply_trust_action(trust, action, until=until)
     trust.refresh_from_db()
 
     notice_id = None
@@ -293,6 +290,12 @@ def _moderate(request, user, action, reason, message, flag=None):
         "trust_status": {"old": before_status, "new": trust.status},
         "reason": reason,
     }
+    if trust.admin_ceiling is not None:
+        changes["admin_lock"] = {
+            "status": trust.admin_status,
+            "ceiling": trust.admin_ceiling,
+            "until": trust.admin_locked_until.isoformat() if trust.admin_locked_until else None,
+        }
     if flag is not None:
         changes["flag_id"] = flag.id
         changes["flag_type"] = flag.flag_type
@@ -565,6 +568,20 @@ def _account_payload(user):
             "flags_total": ts.flags_total if ts else 0,
             "updated_at": ts.updated_at.isoformat() if ts else None,
             "has_record": ts is not None,
+            # Admin-imposed lock: automatic recovery cannot lift the score above
+            # `ceiling` until an admin lifts it or `until` passes (null = no expiry).
+            "admin_lock": (
+                {
+                    "status": ts.admin_status,
+                    "ceiling": ts.admin_ceiling,
+                    "until": ts.admin_locked_until.isoformat() if ts.admin_locked_until else None,
+                }
+                if ts is not None and ts.admin_lock_active()
+                else None
+            ),
+            "last_recovered_on": (
+                ts.last_recovered_on.isoformat() if ts is not None and ts.last_recovered_on else None
+            ),
         },
         "trust_profile": (
             {

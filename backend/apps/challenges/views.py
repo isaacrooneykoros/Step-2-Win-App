@@ -171,6 +171,15 @@ def create_challenge(request):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        from .payout_holds import paid_entry_block
+
+        blocked = paid_entry_block(request.user)
+        if blocked:
+            return Response(
+                {"error": blocked, "code": "paid_entry_paused"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         if request.user.challenges_joined < min_joined:
             return Response(
                 {
@@ -279,6 +288,18 @@ def join_challenge(request):
             user = request.user.__class__.objects.select_for_update().get(
                 id=request.user.id
             )
+
+            # Paid entries are paused while the account is suspended / banned or
+            # a payout of theirs is under review (apps/challenges/payout_holds.py).
+            if challenge.entry_fee > 0:
+                from .payout_holds import paid_entry_block
+
+                blocked = paid_entry_block(user)
+                if blocked:
+                    return Response(
+                        {"error": blocked, "code": "paid_entry_paused"},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
 
             # Check if challenge is full
             if challenge.participants.count() >= challenge.max_participants:
@@ -661,6 +682,16 @@ def rematch_challenge(request, pk):
         )
 
     entry_fee = source.entry_fee
+
+    if entry_fee > 0:
+        from .payout_holds import paid_entry_block
+
+        paused = paid_entry_block(request.user)
+        if paused:
+            return Response(
+                {"error": paused, "code": "paid_entry_paused"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
     duration_days = max(1, (source.end_date - source.start_date).days)
 
@@ -1256,6 +1287,28 @@ def feature_challenge(request, pk):
     )
 
 
+def _with_payout_review(result: dict | None, user, challenge) -> dict | None:
+    """Add the viewer's own payout state to their result.
+
+    payout_status: "paid" (credited at settlement), "held" (under review, not in
+    the wallet yet), "released" / "forfeited" (review decided), or None when the
+    result carries no payout. payout_review holds the amount and a neutral
+    message for held / decided payouts. Only ever added to the viewer's own
+    result, never to other participants' rows.
+    """
+    if result is None:
+        return None
+    from .payout_holds import payout_review_for
+
+    review = payout_review_for(user, challenge)
+    paid = result.get("payout_method") != "refund" and Decimal(
+        str(result.get("payout_kes") or 0)
+    ) > 0
+    result["payout_status"] = review["status"] if review else ("paid" if paid else None)
+    result["payout_review"] = review
+    return result
+
+
 @extend_schema(
     responses={
         200: inline_serializer(
@@ -1341,7 +1394,9 @@ def challenge_results(request, pk):
                     results.aggregate(t=models.Sum("payout_kes"))["t"] or 0
                 ),
             },
-            "my_result": _serialize_result(my_result),
+            "my_result": _with_payout_review(
+                _serialize_result(my_result), request.user, challenge
+            ),
             "leaderboard": [_serialize_result(r) for r in results],
         }
     )
@@ -1408,18 +1463,22 @@ def my_recent_results(request):
                 "entry_fee": str(result.challenge.entry_fee),
                 "end_date": str(result.challenge.end_date),
             },
-            "my_result": {
-                "final_steps": result.final_steps,
-                "final_rank": result.final_rank,
-                "qualified": result.qualified,
-                "payout_kes": str(result.payout_kes),
-                "payout_method": result.payout_method,
-                "tied_with_count": result.tied_with_count,
-                "tiebreaker_label": result.tiebreaker_label,
-                "finalized_at": (
-                    result.finalized_at.isoformat() if result.finalized_at else None
-                ),
-            },
+            "my_result": _with_payout_review(
+                {
+                    "final_steps": result.final_steps,
+                    "final_rank": result.final_rank,
+                    "qualified": result.qualified,
+                    "payout_kes": str(result.payout_kes),
+                    "payout_method": result.payout_method,
+                    "tied_with_count": result.tied_with_count,
+                    "tiebreaker_label": result.tiebreaker_label,
+                    "finalized_at": (
+                        result.finalized_at.isoformat() if result.finalized_at else None
+                    ),
+                },
+                request.user,
+                result.challenge,
+            ),
             "leaderboard": [
                 {
                     "username": r.user.username,

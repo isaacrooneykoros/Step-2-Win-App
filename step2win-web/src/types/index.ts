@@ -246,6 +246,22 @@ export interface MyResultEntry {
   tied_with_count: number;
 }
 
+/** paid = credited at settlement; held = under review (not in the wallet yet). */
+export type PayoutStatus = 'paid' | 'held' | 'released' | 'forfeited' | null;
+
+/** A challenge payout held for review (own results and wallet only). */
+export interface PayoutReview {
+  id: number;
+  status: 'held' | 'released' | 'forfeited';
+  amount: string;
+  created_at: string | null;
+  decided_at: string | null;
+  review_hours: number;
+  message: string;
+  challenge_id?: number;
+  challenge_name?: string;
+}
+
 export interface MyRecentResults {
   has_results: boolean;
   message?: string;
@@ -268,6 +284,8 @@ export interface MyRecentResults {
     tied_with_count: number;
     tiebreaker_label: string;
     finalized_at: string | null;
+    payout_status?: PayoutStatus;
+    payout_review?: PayoutReview | null;
   };
   leaderboard?: MyResultEntry[];
   summary?: {
@@ -320,6 +338,9 @@ export interface WalletSummary {
   total_deposited: string;
   total_withdrawn: string;
   total_earned: string;
+  /** Challenge payouts held for review; not part of the balance yet. */
+  payouts_under_review?: PayoutReview[];
+  under_review_total?: string;
 }
 
 // ==================== Steps Types ====================
@@ -423,7 +444,6 @@ export interface ChangePasswordData {
 export interface DeviceBinding {
   device_id: string;
   platform: 'android' | 'ios';
-  device_signature?: string;
 }
 
 export interface DeviceStatus {

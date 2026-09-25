@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, BadgeCheck, CircleSlash, RotateCcw, Trophy } from 'lucide-react';
+import { ArrowRight, BadgeCheck, CircleSlash, Clock, RotateCcw, Trophy } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 import Button from '../ui/Button';
 import { Pill, type Tone } from '../ui/Pill';
@@ -20,6 +20,8 @@ export function resultOutcome(result: NonNullable<MyRecentResults['my_result']>)
   icon: typeof Trophy;
 } {
   if (result.payout_method === 'refund') return { label: 'Refunded', tone: 'info', icon: RotateCcw };
+  if (result.payout_status === 'held') return { label: 'Under review', tone: 'warning', icon: Clock };
+  if (result.payout_status === 'forfeited') return { label: 'Not approved', tone: 'neutral', icon: CircleSlash };
   if (Number(result.payout_kes) > 0) return { label: 'Paid out', tone: 'reward', icon: Trophy };
   if (result.qualified) return { label: 'Qualified', tone: 'success', icon: BadgeCheck };
   return { label: 'Did not qualify', tone: 'neutral', icon: CircleSlash };
@@ -31,7 +33,8 @@ export function ResultsSheet({ open, onClose, results }: ResultsSheetProps) {
   const me = useAuthStore((s) => s.user?.username);
   const { challenge, my_result: mine, summary, leaderboard = [] } = results;
   const outcome = mine ? resultOutcome(mine) : null;
-  const paid = mine ? Number(mine.payout_kes) : 0;
+  const underReview = mine?.payout_status === 'held';
+  const paid = mine && !underReview && mine.payout_status !== 'forfeited' ? Number(mine.payout_kes) : 0;
 
   return (
     <Sheet
@@ -63,6 +66,12 @@ export function ResultsSheet({ open, onClose, results }: ResultsSheetProps) {
           <p className={`num mt-3 text-title-lg ${paid > 0 ? 'text-reward-ink' : 'text-text-primary'}`}>
             {formatKESShort(mine.payout_kes)}
           </p>
+          {underReview && (
+            <p className="mt-1 text-callout text-text-secondary">
+              Your {formatKESShort(mine.payout_kes)} payout is being reviewed. This usually takes up to{' '}
+              {mine.payout_review?.review_hours ?? 48} hours.
+            </p>
+          )}
           <p className="mt-1 text-callout text-text-secondary">
             <span className="num">{formatSteps(mine.final_steps)}</span> steps
             {mine.final_rank ? (

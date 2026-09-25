@@ -8,6 +8,7 @@ import { adminApi } from '../../services/adminApi'
 import type {
   AnalyticsReport, FinanceReport, LedgerFilters, LedgerPage, WithdrawalDetail, WithdrawalFilters, WithdrawalPage,
 } from './types'
+import type { PayoutDecisionResult, PayoutReviewDetail, PayoutReviewList } from './payoutReviewTypes'
 
 export class ApiError extends Error {
   status: number
@@ -116,6 +117,15 @@ export const financeApi = {
   checkStatus: (id: string) =>
     postJson<{ message?: string; result?: unknown }>(`/api/admin/withdrawals/${id}/retry/`),
   stats: () => adminApi.getWithdrawalStats(),
+
+  // Held challenge payouts (apps/admin_api/payout_review_views.py)
+  payoutReviews: (status: string, q?: string) =>
+    getJson<PayoutReviewList>(`/api/admin/payout-reviews/${qs({ status, q: q?.trim() })}`),
+  payoutReview: (id: number) => getJson<PayoutReviewDetail>(`/api/admin/payout-reviews/${id}/`),
+  releasePayout: (id: number, note: string) =>
+    postJson<PayoutDecisionResult>(`/api/admin/payout-reviews/${id}/release/`, { note }),
+  forfeitPayout: (id: number, note: string) =>
+    postJson<PayoutDecisionResult>(`/api/admin/payout-reviews/${id}/forfeit/`, { note }),
 }
 
 export function downloadBlob(blob: Blob, filename: string) {

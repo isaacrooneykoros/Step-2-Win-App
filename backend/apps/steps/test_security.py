@@ -288,11 +288,13 @@ class TrustScoreTests(TestCase):
         self.assertEqual(self.trust.status, "BAN")
 
     def test_trust_recovery(self):
-        """Trust recovery should work correctly."""
+        """Automatic recovery adds at most 1 point per day; an admin restore adds more."""
         self.trust.score = 80
         self.trust.save()
         self.trust.recover(5)
-        self.assertEqual(self.trust.score, 85)
+        self.assertEqual(self.trust.score, 81)
+        self.trust.recover(5, by_admin=True)
+        self.assertEqual(self.trust.score, 86)
 
     def test_trust_recovery_ceiling(self):
         """Trust score should not exceed 100."""

@@ -7,6 +7,7 @@ import { StepsPage } from './pages/StepsPage';
 import { ChallengesPage } from './pages/ChallengesPage';
 import { TransactionsPage } from './pages/TransactionsPage';
 import { AdminWithdrawalsPage } from './pages/AdminWithdrawalsPage';
+import { PayoutReviewsPage } from './pages/PayoutReviewsPage';
 import { BadgesPage } from './pages/BadgesPage';
 import { ModerationPage } from './pages/ModerationPage';
 import { ReportsPage } from './pages/ReportsPage';
@@ -46,6 +47,7 @@ function App() {
           <Route path="challenges" element={<ChallengesPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
+          <Route path="payout-reviews" element={<PayoutReviewsPage />} />
           <Route path="badges" element={<BadgesPage />} />
           <Route path="moderation" element={<ModerationPage />} />
           <Route path="fraud" element={<AdminFraudPage />} />

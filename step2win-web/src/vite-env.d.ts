@@ -11,7 +11,6 @@ interface ImportMetaEnv {
   readonly VITE_APPLE_SERVICES_ID: string;
   /** Optional: popup return URL for web sign-in (default: <origin>/login). */
   readonly VITE_AUTH_REDIRECT_URL: string;
-  readonly VITE_APP_SIGNING_SECRET: string;
   readonly VITE_APP_VERSION: string;
 }
 

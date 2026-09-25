@@ -122,3 +122,10 @@ class WalletSummarySerializer(serializers.Serializer):
     total_deposited = serializers.DecimalField(max_digits=10, decimal_places=2)
     total_withdrawn = serializers.DecimalField(max_digits=10, decimal_places=2)
     total_earned = serializers.DecimalField(max_digits=10, decimal_places=2)
+    # Challenge payouts held for review (not in the balance yet).
+    payouts_under_review = serializers.ListField(
+        child=serializers.DictField(), required=False
+    )
+    under_review_total = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False
+    )

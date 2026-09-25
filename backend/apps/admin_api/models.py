@@ -139,6 +139,23 @@ class SystemSettings(models.Model):
     support_escalation_enabled = models.BooleanField(default=True)
     support_escalation_raise_priority = models.BooleanField(default=True)
 
+    # Payout review (apps/challenges/payout_holds.py): at challenge settlement a
+    # winner's payout is held for staff review instead of credited when a hold
+    # rule matches. Honest winners are paid instantly either way.
+    payout_holds_enabled = models.BooleanField(
+        default=True, help_text="Hold risky challenge payouts for staff review"
+    )
+    payout_hold_trust_score_max = models.PositiveIntegerField(
+        default=60,
+        help_text="Hold when the winner's trust score is at or below this (60 = REVIEW or worse)",
+    )
+    payout_hold_large_win_kes = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=5000,
+        help_text="Payouts at or above this are held when the winner has open medium+ flags in the window",
+    )
+
     # Metadata
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(

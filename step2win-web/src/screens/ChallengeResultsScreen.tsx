@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCircle2, Info, MinusCircle, RotateCcw, Wallet, type LucideIcon } from 'lucide-react';
+import { CheckCircle2, Clock, Info, MinusCircle, RotateCcw, Wallet, type LucideIcon } from 'lucide-react';
 import { challengesService } from '../services/api/challenges';
 import { useAuthStore } from '../store/authStore';
 import { ScreenHeader } from '../components/ui/ScreenHeader';
@@ -27,6 +27,8 @@ type Outcome = { label: string; tone: Tone; icon: LucideIcon };
 
 function outcomeFor(result: ChallengeResultEntry, isRefund: boolean): Outcome {
   if (isRefund || result.payout_method === 'refund') return { label: 'Refunded', tone: 'info', icon: RotateCcw };
+  if (result.payout_status === 'held') return { label: 'Under review', tone: 'warning', icon: Clock };
+  if (result.payout_status === 'forfeited') return { label: 'Not approved', tone: 'neutral', icon: MinusCircle };
   if (toNumber(result.payout_kes) > 0) return { label: 'Won', tone: 'reward', icon: Wallet };
   if (result.qualified) return { label: 'Qualified', tone: 'success', icon: CheckCircle2 };
   return { label: 'Not qualified', tone: 'neutral', icon: MinusCircle };
@@ -133,13 +135,38 @@ export default function ChallengeResultsScreen() {
                     Nobody reached {formatSteps(milestone)} steps, so every entry contribution was refunded in full.
                   </p>
                 </>
+              ) : me.payout_status === 'held' ? (
+                <>
+                  <h2 id="outcome-title" className="mt-4 text-callout text-text-secondary">
+                    Payout under review
+                  </h2>
+                  <p className="num mt-1 block text-display text-text-primary">{formatKES(myPayout)}</p>
+                  <p className="mt-2 text-callout text-text-secondary">
+                    Your {formatKES(myPayout)} payout is being reviewed. This usually takes up to{' '}
+                    {me.payout_review?.review_hours ?? 48} hours.
+                  </p>
+                  <p className="mt-1 text-caption text-text-muted">
+                    It is added to your wallet as soon as the review is done. We'll message you in Support.
+                  </p>
+                </>
+              ) : me.payout_status === 'forfeited' ? (
+                <>
+                  <h2 id="outcome-title" className="mt-4 text-title text-text-primary">
+                    Payout not approved
+                  </h2>
+                  <p className="mt-2 text-callout text-text-secondary">
+                    {me.payout_review?.message ?? 'After review, this payout could not be approved. Contact support if you have questions.'}
+                  </p>
+                </>
               ) : myPayout > 0 ? (
                 <>
                   <h2 id="outcome-title" className="mt-4 text-callout text-text-secondary">
                     You earned
                   </h2>
                   <AnimatedNumber value={myPayout} startFromValue format={(v) => formatKES(v)} className="mt-1 block text-display text-reward-ink" />
-                  <p className="mt-2 text-callout text-text-secondary">Credited to your Step2Win wallet.</p>
+                  <p className="mt-2 text-callout text-text-secondary">
+                    {me.payout_status === 'released' ? 'Reviewed and credited to your Step2Win wallet.' : 'Credited to your Step2Win wallet.'}
+                  </p>
                 </>
               ) : me.qualified ? (
                 <>

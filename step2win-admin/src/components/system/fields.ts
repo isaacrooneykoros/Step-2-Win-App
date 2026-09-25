@@ -3,7 +3,7 @@ import type { SettingKey, SystemSettings } from './api'
 export type FieldKind =
   | 'percent' | 'money' | 'int' | 'decimal' | 'bool' | 'email' | 'text' | 'milestones'
   | 'select' | 'staff' | 'categoryMap'
-export type SectionId = 'access' | 'challenges' | 'withdrawals' | 'support' | 'gamification' | 'notifications'
+export type SectionId = 'access' | 'challenges' | 'withdrawals' | 'payouts' | 'support' | 'gamification' | 'notifications'
 
 export interface FieldDef {
   key: SettingKey
@@ -34,6 +34,7 @@ export const SECTIONS: SectionDef[] = [
   { id: 'access', title: 'Customer access', description: 'Maintenance mode and the switches that pause whole features for customers. Takes effect within seconds.' },
   { id: 'challenges', title: 'Challenges and fees', description: 'The platform fee and the rules for new challenges.' },
   { id: 'withdrawals', title: 'Withdrawals', description: 'The smallest amount customers can cash out and the review time they are told.' },
+  { id: 'payouts', title: 'Payout review', description: 'When a challenge winner’s payout is held for a second look under Finance > Payout reviews instead of being paid instantly.' },
   { id: 'support', title: 'Support desk', description: 'Response targets, who gets new tickets, and what happens when a ticket waits too long.' },
   { id: 'gamification', title: 'XP and rewards', description: 'How experience points are earned from synced steps.', advanced: true },
   { id: 'notifications', title: 'Contacts and email', description: 'Where operational email goes, and whether it is sent.', advanced: true },
@@ -79,6 +80,13 @@ export const FIELDS: FieldDef[] = [
     hint: 'Requests below this are refused. Never lower than the server floor shown under Advanced > Server limits.' },
   { key: 'withdrawal_processing_time', label: 'Review time customers are told', kind: 'int', section: 'withdrawals', unit: 'hours', min: 1, max: 720,
     hint: 'Shown on the withdraw form and in the message after a request is sent.' },
+
+  { key: 'payout_holds_enabled', label: 'Hold risky payouts for review', kind: 'bool', section: 'payouts', risky: true,
+    hint: 'On: a winner with low trust, open high flags, suspicious days, or a large win with open flags in the challenge window is held instead of paid. Banned and closed accounts are always held.' },
+  { key: 'payout_hold_trust_score_max', label: 'Hold at trust score', kind: 'int', section: 'payouts', unit: 'or below', min: 0, max: 100, risky: true,
+    hint: '60 holds REVIEW, RESTRICT and SUSPEND accounts. Lower it to hold fewer payouts.' },
+  { key: 'payout_hold_large_win_kes', label: 'Large win', kind: 'money', section: 'payouts', unit: 'KSh', min: 1, max: 1_000_000, risky: true,
+    hint: 'Payouts at or above this are held when the winner has any open medium or higher flag in the challenge window.' },
 
   { key: 'support_sla_urgent_hours', label: 'Reply target: urgent', kind: 'int', section: 'support', unit: 'hours', min: 1, max: 720 },
   { key: 'support_sla_high_hours', label: 'Reply target: high', kind: 'int', section: 'support', unit: 'hours', min: 1, max: 720 },

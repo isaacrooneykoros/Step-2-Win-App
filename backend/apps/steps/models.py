@@ -80,6 +80,31 @@ class TrustScore(models.Model):
     score = models.IntegerField(default=100)
     flags_total = models.IntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
+    # Automatic recovery is time based: at most one point per calendar day
+    # (the day of the last clean sync that earned a point).
+    last_recovered_on = models.DateField(null=True, blank=True)
+    # Admin-imposed status (restrict / suspend / ban). While the lock is in force
+    # automatic recovery (and a dismissed flag) can never lift the score above
+    # admin_ceiling; only an admin "lift" action, or admin_locked_until passing,
+    # ends it. admin_locked_until NULL with a ceiling = until an admin lifts it.
+    admin_status = models.CharField(max_length=12, blank=True, default="")
+    admin_ceiling = models.IntegerField(null=True, blank=True)
+    admin_locked_until = models.DateTimeField(null=True, blank=True)
+
+    # Admin actions -> (score set, ceiling held while locked). Scores sit inside
+    # the band of the matching status (RESTRICT 21-40, SUSPEND 1-20, BAN 0).
+    ADMIN_LOCKS = {
+        "restrict": (35, 40),
+        "suspend": (10, 20),
+        "ban": (0, 0),
+    }
+    # Admin lift actions -> minimum score after the lift.
+    ADMIN_LIFTS = {
+        "unrestrict": 65,
+        "unsuspend": 45,
+        "unban": 35,
+    }
+    MAX_AUTO_RECOVERY_PER_DAY = 1
 
     @property
     def status(self):
@@ -100,10 +125,99 @@ class TrustScore(models.Model):
         self.flags_total += 1
         self.save(update_fields=["score", "flags_total", "updated_at"])
 
-    def recover(self, points: int = 1):
-        if self.score < 100:
-            self.score = min(100, self.score + points)
-            self.save(update_fields=["score", "updated_at"])
+    # ── admin lock ───────────────────────────────────────────────────────
+
+    def admin_lock_active(self, now=None) -> bool:
+        if self.admin_ceiling is None:
+            return False
+        if self.admin_locked_until is None:
+            return True
+        from django.utils import timezone
+
+        return self.admin_locked_until > (now or timezone.now())
+
+    def recovery_ceiling(self, now=None) -> int:
+        """Highest score recovery may reach right now (100 unless an admin lock holds)."""
+        return self.admin_ceiling if self.admin_lock_active(now) else 100
+
+    def _clear_expired_lock(self, now=None) -> bool:
+        if self.admin_ceiling is not None and not self.admin_lock_active(now):
+            self.admin_status = ""
+            self.admin_ceiling = None
+            self.admin_locked_until = None
+            return True
+        return False
+
+    def recover(self, points: int = 1, *, by_admin: bool = False, today=None) -> int:
+        """Raise the score. Returns the points actually added.
+
+        Automatic recovery (the default, called after a clean sync) is slow and
+        time based: at most MAX_AUTO_RECOVERY_PER_DAY point per calendar day, no
+        matter how many clean syncs arrive. `by_admin=True` (a dismissed flag) may
+        add more at once. Neither path can lift the score above an admin lock's
+        ceiling: only an admin lift action (apply_admin_action) or the lock's
+        expiry does that.
+        """
+        from django.utils import timezone
+
+        now = timezone.now()
+        fields = ["score", "updated_at"]
+        if self._clear_expired_lock(now):
+            fields += ["admin_status", "admin_ceiling", "admin_locked_until"]
+        if not by_admin:
+            day = today or timezone.localdate()
+            if self.last_recovered_on is not None and self.last_recovered_on >= day:
+                if len(fields) > 2:
+                    self.save(update_fields=fields)
+                return 0
+            points = min(points, self.MAX_AUTO_RECOVERY_PER_DAY)
+        ceiling = self.recovery_ceiling(now)
+        target = min(100, ceiling, self.score + max(0, points))
+        added = max(0, target - self.score)
+        if added:
+            self.score = target
+            if not by_admin:
+                self.last_recovered_on = today or timezone.localdate()
+                fields.append("last_recovered_on")
+        if added or len(fields) > 2:
+            self.save(update_fields=fields)
+        return added
+
+    def apply_admin_action(self, action: str, *, until=None) -> None:
+        """Admin trust action (the single implementation for every admin endpoint).
+
+        restrict / suspend / ban set the score and hold it there (see ADMIN_LOCKS)
+        until an admin lifts it or `until` (optional datetime) passes.
+        unrestrict / unsuspend / unban clear the lock and raise the score to the
+        lift minimum. warn deducts 5; dismiss restores 10 (never above a lock).
+        """
+        if action in self.ADMIN_LOCKS:
+            score, ceiling = self.ADMIN_LOCKS[action]
+            self.score = score
+            self.admin_status = action
+            self.admin_ceiling = ceiling
+            self.admin_locked_until = until
+            self.save(
+                update_fields=[
+                    "score", "admin_status", "admin_ceiling", "admin_locked_until", "updated_at",
+                ]
+            )
+        elif action in self.ADMIN_LIFTS:
+            self.score = max(self.score, self.ADMIN_LIFTS[action])
+            self.admin_status = ""
+            self.admin_ceiling = None
+            self.admin_locked_until = None
+            self.save(
+                update_fields=[
+                    "score", "admin_status", "admin_ceiling", "admin_locked_until", "updated_at",
+                ]
+            )
+        elif action == "warn":
+            self.deduct(5)
+        elif action == "dismiss":
+            self.recover(10, by_admin=True)
+        else:
+            raise ValueError(f"Unknown trust action: {action}")
 
     def __str__(self):
         return f"{self.user.username}: {self.score}/100 ({self.status})"
