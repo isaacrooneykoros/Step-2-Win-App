@@ -1,11 +1,10 @@
-import { lazy, Suspense, useEffect, useState, useRef } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useAuthStore } from './store/authStore';
 import { applyThemeMode, loadThemeMode, ThemeMode } from './config/theme';
-import { loadPreferences } from './components/settings/preferences';
 import MainLayout from './components/layout/MainLayout';
 import { PageLoader } from './components/ui/LoadingSpinner';
 import { Toaster, toast } from './components/ui/Toast';
@@ -17,11 +16,79 @@ import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
 import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import { BootSplash, shouldShowBootSplash } from './components/splash/BootSplash';
-import { setOnboardingOpen } from './lib/launchState';
+import { setOnboardingOpen, useOnboardingOpen } from './lib/launchState';
 import type { ReactNode } from 'react';
 
+const ONBOARDING_KEY = 'onboarding_completed_v1';
+/** A cold start here may open with the onboarding. Deep links (e.g. /forgot-password) go straight through. */
+const ONBOARDING_ENTRY_PATHS = ['/', '/login', '/launch'];
+
+type OnboardingNext = 'register' | 'login';
+
+function onboardingCompleted(): boolean {
+  try {
+    return localStorage.getItem(ONBOARDING_KEY) === 'true';
+  } catch {
+    return true;
+  }
+}
+
+function markOnboardingCompleted() {
+  try {
+    localStorage.setItem(ONBOARDING_KEY, 'true');
+  } catch {
+    // Storage unavailable: the onboarding simply shows again on the next cold start.
+  }
+}
+
 // The onboarding (and its 3D scene) is only needed once per install: keep it out of the entry chunk.
-const OnboardingScreen = lazy(() => import('./components/screens/OnboardingScreen'));
+// It is fetched as soon as a device that has not seen it starts, so it is mounted when the splash leaves.
+const loadOnboardingChunk = () => import('./components/screens/OnboardingScreen');
+let onboardingChunk: ReturnType<typeof loadOnboardingChunk> | null = null;
+function preloadOnboarding() {
+  onboardingChunk ??= loadOnboardingChunk();
+  return onboardingChunk;
+}
+/** The chunk failed to load (offline first launch, bad deploy): go straight to sign-in instead. */
+function OnboardingUnavailable({ onComplete }: { onComplete: (next: OnboardingNext) => void }) {
+  useEffect(() => {
+    onComplete('login');
+  }, [onComplete]);
+  return null;
+}
+const OnboardingScreen = lazy(() => preloadOnboarding().catch(() => ({ default: OnboardingUnavailable })));
+
+/** Tells the launch splash that the onboarding has committed underneath it (so the logo can fly into its header). */
+function MountSignal({ onMount }: { onMount: () => void }) {
+  useEffect(() => {
+    onMount();
+  }, [onMount]);
+  return null;
+}
+
+/** First-run onboarding over the signed-out entry; it hands over to Register or Login. */
+function OnboardingGate({ onMounted, onClose }: { onMounted: () => void; onClose: () => void }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleComplete = useCallback(
+    (next: OnboardingNext) => {
+      markOnboardingCompleted();
+      const target = next === 'login' ? '/login' : '/register';
+      // Route first, then close the overlay, so the screen under it is already the right one.
+      if (location.pathname !== target) navigate(target, { replace: true });
+      onClose();
+    },
+    [location.pathname, navigate, onClose],
+  );
+
+  return (
+    <Suspense fallback={<div className="fixed inset-0 z-50 bg-bg-page" aria-busy="true" />}>
+      <OnboardingScreen onComplete={handleComplete} />
+      <MountSignal onMount={onMounted} />
+    </Suspense>
+  );
+}
 
 const HomeScreen = lazy(() => import('./screens/HomeScreen'));
 const ChallengesScreen = lazy(() => import('./screens/ChallengesScreen'));
@@ -96,6 +163,8 @@ function AuthLoadRedirect({
 function NativeBackButtonGuard() {
   const navigate = useNavigate();
   const location = useLocation();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const onboardingOpen = useOnboardingOpen();
   const lastBackPressRef = useRef(0);
   const backPressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -114,8 +183,13 @@ function NativeBackButtonGuard() {
       const timeSinceLastPress = now - lastBackPressRef.current;
       const DOUBLE_TAP_THRESHOLD = 2000; // 2 seconds
 
+      // The first-run onboarding (its own handler already stepped back through the pages) and
+      // the signed-out entry screen are the app's root, like Home: back exits (double-tap).
+      // Navigating to '/' from there would only bounce back to /login.
+      const atRoot = onboardingOpen || location.pathname === '/' || (!isAuthenticated && location.pathname === '/login');
+
       // If we're not on home, go back or navigate to home
-      if (canGoBack) {
+      if (canGoBack && !onboardingOpen) {
         window.history.back();
         lastBackPressRef.current = 0;
         if (backPressTimeoutRef.current) {
@@ -125,7 +199,7 @@ function NativeBackButtonGuard() {
       }
 
       // We're on home: check for double-tap to exit
-      if (location.pathname !== '/') {
+      if (!atRoot) {
         navigate('/', { replace: true });
         lastBackPressRef.current = 0;
         if (backPressTimeoutRef.current) {
@@ -161,7 +235,7 @@ function NativeBackButtonGuard() {
         clearTimeout(backPressTimeoutRef.current);
       }
     };
-  }, [location.pathname, navigate]);
+  }, [location.pathname, navigate, isAuthenticated, onboardingOpen]);
 
   return null;
 }
@@ -169,18 +243,35 @@ function NativeBackButtonGuard() {
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingMounted, setOnboardingMounted] = useState(false);
   const [bootSplash, setBootSplash] = useState(shouldShowBootSplash);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
+  // Where this cold start landed, before any auth redirect rewrites it.
+  const [entryPath] = useState(() => window.location.pathname);
   const init = useAuthStore((state) => state.init);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
 
   useEffect(() => {
+    // A device that has not seen the onboarding may need it right after the splash: fetch it now.
+    if (!onboardingCompleted() && ONBOARDING_ENTRY_PATHS.includes(entryPath)) {
+      void preloadOnboarding().catch(() => null);
+    }
     init().finally(() => {
+      // Signed-out, first run, opened on the default entry: splash → onboarding → Register / Login.
+      // Signed-in users never see it (existing installs updating the app just get the flag).
+      const signedIn = useAuthStore.getState().isAuthenticated;
+      setShowOnboarding(!signedIn && !onboardingCompleted() && ONBOARDING_ENTRY_PATHS.includes(entryPath));
       setLoading(false);
       // Tokens are restored: the first real frame (or the lock screen) replaces the splash.
       hideNativeSplash();
     });
-  }, [init]);
+  }, [init, entryPath]);
+
+  // Any authenticated session (restored, or a sign-in from a deep-linked Register / Login)
+  // counts as having been introduced to the app.
+  useEffect(() => {
+    if (isAuthenticated && !onboardingCompleted()) markOnboardingCompleted();
+  }, [isAuthenticated]);
 
   useEffect(() => {
     applyThemeMode(themeMode);
@@ -205,37 +296,18 @@ export default function App() {
     };
   }, [themeMode]);
 
+  const closeOnboarding = useCallback(() => setShowOnboarding(false), []);
+  const handleOnboardingMounted = useCallback(() => setOnboardingMounted(true), []);
+
+  const onboardingVisible = showOnboarding && !isAuthenticated;
   useEffect(() => {
-    if (!isAuthenticated) {
-      setShowOnboarding(false);
-      return;
-    }
+    setOnboardingOpen(onboardingVisible);
+  }, [onboardingVisible]);
 
-    const onboardingCompleted = localStorage.getItem('onboarding_completed_v1') === 'true';
-    setShowOnboarding(!onboardingCompleted);
-  }, [isAuthenticated]);
-
-  const handleOnboardingComplete = () => {
-    localStorage.setItem('onboarding_completed_v1', 'true');
-    setShowOnboarding(false);
-  };
-
-  useEffect(() => {
-    setOnboardingOpen(showOnboarding);
-  }, [showOnboarding]);
-
-  // Onboarding not seen yet on this install: fetch its chunk while the user is on the login
-  // screen, so it opens instantly after sign-in. Skipped with Data saver.
-  useEffect(() => {
-    if (loading || bootSplash || localStorage.getItem('onboarding_completed_v1') === 'true') return;
-    if (loadPreferences().dataSaver) return;
-    const timer = window.setTimeout(() => {
-      void import('./components/screens/OnboardingScreen').catch(() => null);
-    }, 1200);
-    return () => window.clearTimeout(timer);
-  }, [loading, bootSplash]);
-
-  const splash = bootSplash ? <BootSplash key="boot-splash" ready={!loading} onDone={() => setBootSplash(false)} /> : null;
+  // The splash leaves once auth is restored and, on a first run, the onboarding is mounted
+  // underneath (so its logo can land in the onboarding header).
+  const appReady = !loading && (!showOnboarding || onboardingMounted);
+  const splash = bootSplash ? <BootSplash key="boot-splash" ready={appReady} onDone={() => setBootSplash(false)} /> : null;
 
   if (loading) {
     return (
@@ -291,10 +363,8 @@ export default function App() {
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-          {showOnboarding && (
-            <Suspense fallback={<div className="fixed inset-0 z-50 bg-bg-page" aria-busy="true" />}>
-              <OnboardingScreen onComplete={handleOnboardingComplete} />
-            </Suspense>
+          {onboardingVisible && (
+            <OnboardingGate onMounted={handleOnboardingMounted} onClose={closeOnboarding} />
           )}
           <BiometricLockGate />
           <Toaster />
