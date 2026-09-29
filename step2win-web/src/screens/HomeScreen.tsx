@@ -15,7 +15,9 @@ import { BadgeGlyph } from '../components/ui/BadgeGlyph';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ErrorInline } from '../components/ui/ErrorState';
 import { formatKESShort, formatRelativeTime, formatSteps } from '../lib/format';
-import { useDailyGoal } from '../components/steps/stepUtils';
+import { dateKey, useDailyGoal } from '../components/steps/stepUtils';
+import { StartWalkCard } from '../components/walks/StartWalkCard';
+import { VerificationLine } from '../components/walks/VerificationPanel';
 import { ActiveChallengeCard, ActiveChallengeSkeleton, NoChallengeCard } from '../components/home/ActiveChallengeCard';
 import { WeekStepsCard } from '../components/home/WeekStepsCard';
 import { DailyGoalSheet } from '../components/home/DailyGoalSheet';
@@ -46,6 +48,7 @@ export default function HomeScreen() {
   const lastLiveUpdate = useStepsSyncStore((state) => state.lastStepsUpdateAt);
   useMinuteTick();
   const { goal } = useDailyGoal();
+  const todayKey = dateKey();
 
   const [goalOpen, setGoalOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
@@ -186,6 +189,8 @@ export default function HomeScreen() {
                 )}
               </div>
 
+              <VerificationLine date={todayKey} className="mt-1" />
+
               {today.data && (
                 <StepStatChips
                   className="mt-5 w-full"
@@ -197,6 +202,9 @@ export default function HomeScreen() {
             </>
           )}
         </section>
+
+        {/* Walks: the simplest way to make steps count toward challenges */}
+        <StartWalkCard />
 
         {/* Active challenge */}
         <section>

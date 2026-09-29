@@ -12,10 +12,13 @@ import {
   RefreshCw,
   RotateCcw,
   Scale,
+  ShieldCheck,
   Target,
   UserPlus,
   type LucideIcon,
 } from 'lucide-react';
+import { StartWalkCard } from '../components/walks/StartWalkCard';
+import { HowVerifiedSheet } from '../components/walks/HowVerifiedSheet';
 import { challengesService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { useToast } from '../components/ui/Toast';
@@ -91,6 +94,7 @@ export default function ChallengeDetailScreen() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [rematchOpen, setRematchOpen] = useState(false);
+  const [howOpen, setHowOpen] = useState(false);
 
   const {
     data: challenge,
@@ -401,7 +405,17 @@ export default function ChallengeDetailScreen() {
                   Estimated payout if it ended now: <span className="num font-semibold text-reward-ink">{formatKES(estimatedPayout)}</span>
                 </p>
               )}
+              <div className="mt-4 flex items-start gap-2 border-t border-border-light pt-3">
+                <ShieldCheck size={16} className="mt-0.5 shrink-0 text-brand" aria-hidden />
+                <p className="min-w-0 flex-1 text-caption text-text-muted">
+                  Challenge progress uses verified steps. All your steps still count for your daily goal.{' '}
+                  <button type="button" onClick={() => setHowOpen(true)} className="font-semibold text-brand underline-offset-2 hover:underline">
+                    Why?
+                  </button>
+                </p>
+              </div>
             </Card>
+            {isActive && <StartWalkCard className="mt-3" />}
           </section>
         )}
 
@@ -645,6 +659,8 @@ export default function ChallengeDetailScreen() {
         </dl>
         <p className="mt-3 text-caption text-text-muted">Paid from your wallet balance. You’ll get an invite code to share with the group.</p>
       </Sheet>
+
+      <HowVerifiedSheet open={howOpen} onClose={() => setHowOpen(false)} showBreakdownLink />
 
       <CelebrationModal
         isOpen={showCelebration}
