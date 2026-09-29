@@ -26,6 +26,7 @@ def create_test_user():
             "email": email,
             "password": password,
             "confirm_password": password,
+            "consents": {"terms": True, "health_data": True},
         },
     )
 

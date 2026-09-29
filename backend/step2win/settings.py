@@ -97,6 +97,7 @@ INSTALLED_APPS = [
     "apps.wallet",
     "apps.steps",
     "apps.gamification",
+    "apps.privacy",
     "apps.admin_api",
     "apps.payments",
     "apps.legal",
@@ -519,6 +520,22 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TIMEZONE = TIME_ZONE
+
+# Privacy (apps/privacy): retention rules and "download my data" exports. Kept in their
+# own block so the job list above stays easy to merge. Periods are admin settings
+# (PrivacySettings); see backend/legal/DATA_INVENTORY.md.
+CELERY_BEAT_SCHEDULE.update(
+    {
+        "privacy-process-exports": {
+            "task": "apps.privacy.tasks.process_data_exports_task",
+            "schedule": crontab(minute="*/5"),
+        },
+        "privacy-retention": {
+            "task": "apps.privacy.tasks.run_privacy_retention_task",
+            "schedule": crontab(minute=50),  # hourly at :50 UTC, batched with a time budget
+        },
+    }
+)
 
 if USE_REDIS and os.getenv("REDIS_URL"):
     CACHES = {

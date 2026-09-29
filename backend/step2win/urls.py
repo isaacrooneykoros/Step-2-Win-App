@@ -28,6 +28,7 @@ urlpatterns = [
     path("api/admin/", include("apps.admin_api.urls")),
     path("api/payments/", include("apps.payments.urls")),
     path("api/legal/", include("apps.legal.urls")),
+    path("api/privacy/", include("apps.privacy.urls")),
     path("api/health/", health_check, name="health_check"),
     path("api/app/config/", app_config, name="app_config"),
     # Scheduled jobs trigger (GitHub Actions, X-Cron-Token). See SCHEDULED_JOBS.md.

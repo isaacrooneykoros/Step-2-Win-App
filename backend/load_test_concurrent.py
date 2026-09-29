@@ -185,6 +185,7 @@ def run_worker(
             "phone_number": phone,
             "password": args.password,
             "confirm_password": args.password,
+            "consents": {"terms": True, "health_data": True},
         }
         register_res = call(
             "POST", f"{args.base_url}/api/auth/register/", json=register_payload

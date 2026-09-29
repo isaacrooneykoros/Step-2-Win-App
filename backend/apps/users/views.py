@@ -64,10 +64,27 @@ def register(request):
     if blocked:
         return blocked
 
+    from apps.privacy.consent import (ConsentError,
+                                      record_registration_consents,
+                                      validate_registration_consents)
+
     serializer = RegisterSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+    # Explicit, not pre-ticked consent (Terms/Privacy/18+ and activity data), recorded
+    # with the policy versions in force (apps/privacy/consent.py).
+    try:
+        consent_decisions = validate_registration_consents(request.data)
+    except ConsentError as exc:
+        return Response(
+            {"error": exc.message, "code": exc.code, "consents": exc.message},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    user = serializer.save()
+    with transaction.atomic():
+        user = serializer.save()
+        record_registration_consents(
+            user, consent_decisions, app_version=str(request.data.get("app_version") or "")
+        )
 
     # Generate JWT tokens
     refresh = RefreshToken.for_user(user)
@@ -208,6 +225,19 @@ def _social_sign_in(request, verify):
             {"error": "Account is disabled", "code": "account_disabled"},
             status=status.HTTP_403_FORBIDDEN,
         )
+
+    if resolved.created:
+        # Consents ticked before "Continue with Google/Apple" (optional here: the app's
+        # consent screen asks right after sign-in when they are missing).
+        try:
+            from apps.privacy.consent import (parse_decisions,
+                                              record_registration_consents)
+
+            granted = {k: v for k, v in parse_decisions(request.data).items() if v}
+            if granted:
+                record_registration_consents(user, granted, source="social_signup")
+        except Exception as exc:  # consent capture must never block sign-in
+            logger.error("Consent capture failed (%s sign-up): %s", identity.provider, exc)
 
     refresh = RefreshToken.for_user(user)
     update_last_login(None, user)
