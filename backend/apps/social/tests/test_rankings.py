@@ -62,13 +62,23 @@ class RankingStepsTests(TestCase):
         self.assertEqual(rankings.ranking_steps(self.user, self.ws + timedelta(days=1)), 0)
         self.assertEqual(rankings.weekly_steps_by_user([self.user.id], self.ws), {self.user.id: (13000, 2)})
 
-    def test_single_field_switch(self):
-        """ranking_steps and the weekly aggregate read the same, single field."""
+    def test_single_switch(self):
+        """ranking_steps and the weekly aggregate read the same, single expression."""
+        from django.db.models import F
+
         walk(self.user, self.ws, 8000)
         HealthRecord.objects.filter(user=self.user).update(last_raw_steps=12345)
-        with patch.object(rankings, "RANKING_STEPS_FIELD", "last_raw_steps"):
+        with patch.object(rankings, "day_steps_expression", lambda: F("last_raw_steps")):
             self.assertEqual(rankings.ranking_steps(self.user, self.ws), 12345)
             self.assertEqual(rankings.weekly_steps_by_user([self.user.id], self.ws)[self.user.id][0], 12345)
+
+    def test_money_eligible_steps_rank_and_pre_phase_1b_days_count_in_full(self):
+        walk(self.user, self.ws, 8000)  # eligible_steps NULL: written before Phase 1b
+        walk(self.user, self.ws + timedelta(days=1), 10000)
+        HealthRecord.objects.filter(user=self.user, date=self.ws + timedelta(days=1)).update(eligible_steps=6000)
+        self.assertEqual(rankings.ranking_steps(self.user, self.ws), 8000)
+        self.assertEqual(rankings.ranking_steps(self.user, self.ws + timedelta(days=1)), 6000)
+        self.assertEqual(rankings.weekly_steps_by_user([self.user.id], self.ws), {self.user.id: (14000, 2)})
 
     def test_competition_ranking_shares_ties(self):
         self.assertEqual(rankings.competition_ranks({1: 100, 2: 300, 3: 100, 4: 50}), {2: 1, 1: 2, 3: 2, 4: 4})

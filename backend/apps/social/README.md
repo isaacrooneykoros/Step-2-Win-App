@@ -6,11 +6,13 @@ don't attach money to a competitive leaderboard until anti-cheat is enforced.
 
 ## Which steps rank (one-line switch)
 
-`rankings.py`: `RANKING_STEPS_FIELD = "steps"` is the single place that decides which
-`HealthRecord` field is a day's ranking steps. `ranking_steps(user, date)` and the
-batch `weekly_steps_by_user()` both read it, through `ranking_records()` which drops
-excluded days (`is_suspicious=True`). When Phase 1b adds money-eligible (verified)
-steps per day, change that one line to the new field name.
+`rankings.py`: `day_steps_expression()` is the single place that decides a day's
+ranking steps. It returns the money-eligible expression challenges use
+(`apps.steps.evidence.challenge_steps_expression()`: Phase 1b `eligible_steps`, or the
+credited `steps` for pre-Phase-1b days). `ranking_steps(user, date)` and the batch
+`weekly_steps_by_user()` both read it through `ranking_records()`, which drops excluded
+days (`is_suspicious=True`). To rank on all credited steps instead, change its one
+`return` line to `F("steps")`.
 
 Ranked users: active, not deleted, `show_in_rankings` on, trust score > 20.
 Weeks: Monday to Sunday on the Africa/Nairobi calendar.

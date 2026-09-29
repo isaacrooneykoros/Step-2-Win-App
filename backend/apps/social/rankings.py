@@ -2,16 +2,20 @@
 
 Which steps count
 -----------------
-Everything here reads steps through ONE place: ``RANKING_STEPS_FIELD`` +
+Everything here reads steps through ONE place: ``day_steps_expression()`` via
 ``ranking_records()``, wrapped by ``ranking_steps(user, date)`` (single day) and
 ``weekly_steps_by_user(user_ids, week_start)`` (batch, same rule).
 
-* Today: ``HealthRecord.steps``, the credited day total (already discounted by the
-  anti-cheat engine: unverified / over-cap steps are not in it).
+* MONEY-ELIGIBLE steps, the same per-day rule challenges pay on
+  (``apps.steps.evidence.challenge_steps_expression()``): Phase 1b's
+  ``HealthRecord.eligible_steps``, or the credited ``steps`` for days written before
+  Phase 1b (NULL). While STEP_MONEY_REQUIRES_EVIDENCE is off, eligible == credited.
 * Excluded days (``HealthRecord.is_suspicious``, sticky "strong evidence" days) never
   count.
-* Phase 1b adds money-eligible (verified) steps per day. To rank on those instead,
-  change the single line ``RANKING_STEPS_FIELD = "steps"`` to the new field name.
+* To rank on a different figure (e.g. all credited steps, like goals and streaks),
+  change the single ``return`` line in ``day_steps_expression()``.
+* Phase 1b re-evaluations write ``eligible_steps`` with queryset.update() (no
+  synced_at bump): the nightly full reconcile picks those up.
 
 Who is ranked
 -------------
@@ -50,17 +54,25 @@ from .models import (Team, TeamMembership, TeamWeeklyTotal, WeeklyStepTotal)
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
-# ── THE switch: which HealthRecord field is a day's ranking steps ────────────
-# Change to the Phase 1b money-eligible (verified) field when it exists.
-RANKING_STEPS_FIELD = "steps"
 # Trust scores at or below this (SUSPEND / BAN bands) are left out of rankings.
 RANKING_MIN_TRUST_EXCLUSIVE = 20
 TEAM_LEADERBOARD_SIZE = 50
 
 
+def day_steps_expression():
+    """THE switch: the ORM expression for one day's ranking steps.
+
+    Money-eligible steps, exactly as challenges count them. For all credited steps
+    instead, return F("steps")."""
+    from apps.steps.evidence import challenge_steps_expression
+
+    return challenge_steps_expression()
+
+
 def ranking_records():
-    """HealthRecords that may count for rankings: excluded (suspicious) days never do."""
-    return HealthRecord.objects.filter(is_suspicious=False)
+    """HealthRecords that may count for rankings, annotated with ``rank_steps``.
+    Excluded (suspicious) days never count."""
+    return HealthRecord.objects.filter(is_suspicious=False).annotate(rank_steps=day_steps_expression())
 
 
 def ranking_steps(user, day: date) -> int:
@@ -69,7 +81,7 @@ def ranking_steps(user, day: date) -> int:
     value = (
         ranking_records()
         .filter(user_id=user_id, date=day)
-        .values_list(RANKING_STEPS_FIELD, flat=True)
+        .values_list("rank_steps", flat=True)
         .first()
     )
     return max(0, int(value or 0))
@@ -84,7 +96,7 @@ def weekly_steps_by_user(user_ids, week_start: date) -> dict[int, tuple[int, int
         ranking_records()
         .filter(user_id__in=ids, date__gte=week_start, date__lte=week_start + timedelta(days=6))
         .values("user_id")
-        .annotate(total=Sum(RANKING_STEPS_FIELD), days=Count("id", filter=Q(**{f"{RANKING_STEPS_FIELD}__gt": 0})))
+        .annotate(total=Sum("rank_steps"), days=Count("id", filter=Q(rank_steps__gt=0)))
     )
     return {r["user_id"]: (max(0, int(r["total"] or 0)), int(r["days"] or 0)) for r in rows}
 
