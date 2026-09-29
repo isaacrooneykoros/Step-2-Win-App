@@ -101,6 +101,7 @@ INSTALLED_APPS = [
     "apps.payments",
     "apps.legal",
     "apps.risk_ml",
+    "apps.linkage",
     "axes",
     "auditlog",
 ]
@@ -506,6 +507,17 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.steps.tasks.purge_old_walk_points_task",
         "schedule": crontab(hour=3, minute=45),
     },
+    # Account linkage (anti-cheat Phase 2a): identity graph + clusters, before settlement.
+    "linkage-recompute": {
+        "task": "apps.linkage.tasks.recompute_linkage_task",
+        "schedule": crontab(hour=23, minute=15),  # 23:15 UTC (02:15 EAT)
+    },
+    # Login IP minimisation: clear full IPs of ended/expired sessions, drop network
+    # hashes after 90 days (apps/users/network_privacy.py).
+    "privacy-ip-retention": {
+        "task": "apps.users.tasks.purge_login_ip_data",
+        "schedule": crontab(hour=3, minute=10),  # 03:10 UTC
+    },
 }
 
 # ── Phase 1b: walking evidence, walks, device integrity (backend/ANTICHEAT.md) ──
@@ -536,6 +548,9 @@ PLAY_INTEGRITY_ACCEPT_BASIC = (
 )
 # Fallback when the admin setting can't be read ("shadow" | "enforce").
 STEP_INTEGRITY_POLICY = os.getenv("STEP_INTEGRITY_POLICY", "shadow").strip().lower()
+# Key for the keyed hash of login networks (DeviceSession.network_hash, used by account
+# linkage). Empty = derived from SECRET_KEY. See apps/users/network_privacy.py.
+NETWORK_HASH_SECRET = os.getenv("NETWORK_HASH_SECRET", "").strip()
 # Shadow risk model (apps.risk_ml). Local-day offset for "late sync" and hour-of-day features.
 RISK_ML_LOCAL_UTC_OFFSET_HOURS = int(os.getenv("RISK_ML_LOCAL_UTC_OFFSET_HOURS", "3"))
 # Score at which a (future) payout hold would trigger; used only to report precision/recall.

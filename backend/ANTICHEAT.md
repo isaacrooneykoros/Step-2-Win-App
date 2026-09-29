@@ -455,6 +455,59 @@ counter events are `arrival_batched`. Burst rules still apply only to `live_time
 `"[redacted]"` for accepted and rejected events). Migration `steps.0012` redacts
 existing rows.
 
+## Account linkage (Phase 2a, `apps/linkage`)
+
+Multi-account farms, one person carrying several phones, shared devices and collusion.
+Code: `detectors.py` (edges), `graph.py` (pair rule, clusters), `store.py` (nightly
+recompute), `policy.py` (payout holds), `timeline.py` + `views.py` (staff).
+Tests: `apps/linkage/tests/`.
+
+Identity graph: nodes are accounts; an edge is one kind of evidence between two accounts.
+
+| Edge | Strength | Weight | Evidence |
+|---|---|---|---|
+| `shared_device` | strong | 1.00 | same device id in `DeviceRegistration` (full history of every bound device) |
+| `shared_payout_account` | strong | 1.00 | same M-Pesa number / bank / paybill account (user phone, deposits, payouts, withdrawals) where at least one account withdraws or is paid to it |
+| `shared_deposit_number` | medium | 0.50 | same M-Pesa number used only for deposits (a parent topping up a child) |
+| `shared_business_number` | weak | 0.05 | a payout/deposit number or account shared by more than 10 accounts (`business_number_min_accounts`): a business, agent or till number; context only, shown as "Shared business number (N accounts)" |
+| `co_location` | medium | 0.30 / 0.45 / 0.60 | GPS fixes within ~100 m and 5 min for 15+ min on 1 / 2 / 3+ days (`LocationWaypoint`; places with more than 8 accounts ignored) |
+| `twin_curves` | medium | 0.30 / 0.45 / 0.60 | near-identical hourly step curves on 1 / 2 / 3+ days (risk_ml `twin_pairs`) |
+| `handover` | medium | 0.40 | steps alternate A, B, A in disjoint hours on 2+ days, or daily totals anti-correlated (r ≤ −0.7 over 10+ days); only for pairs with other evidence |
+| `joint_challenges` | medium | 0.30 / 0.40 | both qualified in the same 3+ small challenges (≤ 50 participants, last 90 days); 0.40 when they also joined within 30 min each time |
+| `phone_sequence` | weak | 0.10 / 0.25 | profile numbers within 99 / 10, registered within 14 days |
+| `shared_network` | weak | 0.15 | login from the same public /24 (IPv6 /48), compared by keyed hash (`DeviceSession.network_hash`, 90 days); networks with more than 6 accounts (carrier NAT, campus) and private addresses ignored |
+
+A pair is **linked** when it has a strong edge, or medium evidence adding up to ≥ 1.0
+from at least two different kinds. Weak edges never link (review context only).
+Clusters = connected components of linked pairs, pairs marked as a known household
+left out. Nightly job `linkage-recompute` (23:15 UTC, before the 00:05 UTC settlement)
+upserts edges, deactivates edges whose evidence is gone and rebuilds clusters;
+idempotent. 5,000 synthetic accounts: ~3 s, ~11 MB peak.
+
+Payout policy (hold reason `linked_accounts`, `payout_holds.hold_reasons`):
+1. several accounts of one group in the same paid challenge → every winner but the
+   first-registered account is held;
+2. the same PHONE (`shared_device`) as an account that received a payout in the last
+   180 days (other challenges) → held. A shared payout number alone does not trigger
+   this rule (families share M-Pesa numbers; switch
+   `strong_link_paid_includes_payout_number` to include it) but still counts for rule 1.
+The group also uses strong links computed live at settlement (new or re-bound accounts).
+A forfeited prize is never shared with the held account's linked accounts. If the
+linkage check itself fails, settlement pays as if there were no link (the other hold
+rules still apply), logs at ERROR and sends an ops alert (`OPS_ALERT_WEBHOOK_URL`). Links never
+ban, suspend or change steps; the customer sees the standard "being reviewed" message.
+Staff can mark accounts as a **known household** (audited) to suppress holds for those
+pairs; switches and thresholds are in `LinkageSettings` (Finance > Payout reviews).
+
+Privacy: evidence stores masked identifiers ("ending 123", "…a1b2"), a keyed hash of the
+network prefix, counts and dates; never raw numbers, IPs or coordinates. Login IPs
+(`apps/users/network_privacy.py`): the full IP is kept only while the session is active
+(cleared on logout/revoke/password reset/deletion, when the refresh token expires, and
+after 90 days at the latest); only an HMAC of the /24 (/48) is kept for linkage, for 90
+days (key `NETWORK_HASH_SECRET`, else derived from SECRET_KEY). Screens show "41.90.x.x".
+Nightly job `privacy-ip-retention`; migration `users.0015` converted existing rows. An account's
+edges, cluster membership and household marks are deleted when the account is deleted.
+
 ## Changelog
 
 ### Phase 1b (2026-09-29) — money needs real walking evidence

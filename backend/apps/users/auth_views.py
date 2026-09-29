@@ -106,7 +106,7 @@ class CustomLoginView(TokenObtainPairView):
 
             logger.info(
                 f"Login: user={user.username} | device={session.device_name} | "
-                f"ip={session.ip_address}"
+                f"ip={session.masked_ip}"
             )
 
         except Exception as e:
@@ -159,8 +159,8 @@ class CustomLogoutView(APIView):
             token.blacklist()
 
             # Deactivate the DeviceSession
-            DeviceSession.objects.filter(user=request.user, refresh_jti=jti).update(
-                is_active=False
+            DeviceSession.end_sessions(
+                DeviceSession.objects.filter(user=request.user, refresh_jti=jti)
             )
 
             logger.info(f"Logout: user={request.user.username} | jti={jti[:8]}...")
@@ -260,7 +260,8 @@ class ActiveSessionsView(APIView):
                     "id": str(s.id),
                     "device_name": s.display_name,
                     "device_type": s.device_type,
-                    "ip_address": s.ip_address,
+                    # Masked ("41.90.x.x"); the full IP is never shown.
+                    "ip_address": s.masked_ip,
                     "last_active_at": s.last_active_at.isoformat(),
                     "created_at": s.created_at.isoformat(),
                     "is_current": False,  # Frontend marks current session
