@@ -31,8 +31,9 @@ import java.util.TreeMap;
  *      UNKNOWN ("not analysed"). Missing sensors therefore always mean UNKNOWN, never SHAKE.
  * The ledger stores the resulting per-hour buckets next to its hour totals (same retention,
  * same atomic write), so verified + shake + unknown + vehicle + walk == hour steps always.
- * A minute still in progress is judged together with the previous minute when it has fewer
- * than 4 windows (provisional verdicts need context).
+ * A minute with fewer than 16 windows (still in progress, or analysis just started) is judged
+ * together with the previous minute: a machine's steady cadence needs ~20 s to show, and
+ * VERIFIED needs at least 8 gait windows. The first ~20 s of analysis are therefore "unknown".
  *
  * ── Battery ─────────────────────────────────────────────────────────────────────
  * Motion analysis (accelerometer ~50 Hz + gyroscope / gravity when present) runs ONLY while:
@@ -188,7 +189,7 @@ public final class EvidenceTracker {
     synchronized int gaitVerdict(Minute m) {
         WindowTally t = m.tally;
         int counter = m.counter;
-        if (t.moving() < 4) {
+        if (t.moving() < 4 || t.windows() < 2 * WindowTally.MIN_STEADY_WINDOWS) {
             Minute prev = minutes.get(m.minute - 1);
             if (prev != null && prev.tally.windows() > 0) {
                 WindowTally combined = new WindowTally();

@@ -67,9 +67,12 @@ public class GaitClassifierTest {
         assertEquals(name + ": " + o, WindowTally.VERIFIED, o.minuteVerdict);
     }
 
+    /**
+     * The minute's steps must be "shake". (Single windows of a machine may still look like gait:
+     * a steady motor is only unmasked by its cadence staying constant over the minute.)
+     */
     private static void assertShake(String name, Outcome o) {
         assertEquals(name + ": " + o, WindowTally.SHAKE, o.minuteVerdict);
-        assertTrue(name + ": " + o, o.gaitShare() < 0.5);
     }
 
     // ── honest walking ───────────────────────────────────────────────────────

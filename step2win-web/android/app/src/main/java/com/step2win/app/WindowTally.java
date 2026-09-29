@@ -6,6 +6,8 @@ package com.step2win.app;
  * hardware counter counted in that span.
  *
  * VERIFIED needs all of:
+ * - at least {@link #MIN_STEADY_WINDOWS} gait windows (~20 s; a minute that just started is
+ *   judged together with the previous one),
  * - gait (walking / running) in at least half of the windows that saw movement,
  * - shake-like windows in at most a quarter of them,
  * - the counter's step count roughly agrees with the steps the accelerometer saw (within a
@@ -116,7 +118,9 @@ public final class WindowTally {
         if (shake >= 2 && shake * 2 >= moving) return SHAKE;
         int gait = walking + running;
         boolean steadyDoubt = !Double.isNaN(cv) && cv < DOUBT_CADENCE_CV;
-        if (!steadyDoubt && gait * 2 >= moving && shake * 4 <= moving && cadenceAgrees(counterSteps, expectedSteps)) {
+        // at least ~20 s of gait: enough context to rule out a machine-steady cadence
+        if (!steadyDoubt && gait >= MIN_STEADY_WINDOWS && gait * 2 >= moving && shake * 4 <= moving
+            && cadenceAgrees(counterSteps, expectedSteps)) {
             return VERIFIED;
         }
         return UNKNOWN;
@@ -131,6 +135,7 @@ public final class WindowTally {
         if (shake >= 2 && shake * 2 >= moving) return "shake_like";
         if (!Double.isNaN(cv) && cv < DOUBT_CADENCE_CV) return "very_steady_cadence";
         int gait = walking + running;
+        if (gait < MIN_STEADY_WINDOWS) return "too_little_gait";
         if (gait * 2 < moving) return "inconclusive";
         if (shake * 4 > moving) return "mixed";
         if (!cadenceAgrees(counterSteps, expectedSteps)) return "counter_accel_mismatch";
