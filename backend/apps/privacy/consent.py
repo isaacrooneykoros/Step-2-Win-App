@@ -284,10 +284,15 @@ def validate_registration_consents(data) -> dict[str, bool]:
     """The ``consents`` object sent with registration: required purposes must be true.
 
     Returns the decisions to record after the account exists. Raises ConsentError when a
-    required box is missing (unless PrivacySettings.require_consent_at_registration is off).
+    required box is missing. Clients that send a ``consents`` object (the current web app and
+    app) are always checked. Only a registration with no ``consents`` at all (an older app
+    build that has no checkboxes) is let through, and only while
+    PrivacySettings.require_consent_at_registration is off; those users are asked to accept
+    on first launch of an updated app.
     """
     decisions = parse_decisions(data)
-    if PrivacySettings.load().require_consent_at_registration:
+    sent_consents = isinstance(data, dict) and data.get("consents") is not None
+    if sent_consents or PrivacySettings.load().require_consent_at_registration:
         missing = [p for p in REQUIRED_PURPOSES if decisions.get(p) is not True]
         if missing:
             raise ConsentError(

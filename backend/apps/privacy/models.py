@@ -58,9 +58,11 @@ class PrivacySettings(models.Model):
 
     # ── Consent ────────────────────────────────────────────────────────────────
     require_consent_at_registration = models.BooleanField(
-        default=True,
-        help_text="Registration is refused unless the Terms/Privacy and activity-data boxes are ticked. "
-        "Turn off only if an old app build that can't send them is still in wide use.",
+        # Off at launch: the app already on phones has no consent checkboxes. Current clients
+        # are checked regardless; turn this on once the updated app is distributed.
+        default=False,
+        help_text="Also refuse registrations that send no consent answers at all (old app builds). "
+        "Current apps are always checked. Turn on once the updated app is distributed.",
     )
     # Users whose accepted version is below these are asked to accept again. Raised
     # automatically when a document is published with "notify users" on.

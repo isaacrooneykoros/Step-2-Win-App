@@ -29,7 +29,7 @@ class Migration(migrations.Migration):
                 ('retention_batch_size', models.PositiveIntegerField(default=1000)),
                 ('export_link_hours', models.PositiveIntegerField(default=72, help_text='How long a finished export can be downloaded.')),
                 ('export_cooldown_hours', models.PositiveIntegerField(default=24, help_text='A user can request one export per this many hours.')),
-                ('require_consent_at_registration', models.BooleanField(default=True, help_text="Registration is refused unless the Terms/Privacy and activity-data boxes are ticked. Turn off only if an old app build that can't send them is still in wide use.")),
+                ('require_consent_at_registration', models.BooleanField(default=False, help_text="Also refuse registrations that send no consent answers at all (old app builds). Current apps are always checked. Turn on once the updated app is distributed.")),
                 ('min_terms_version', models.PositiveIntegerField(default=0)),
                 ('min_privacy_version', models.PositiveIntegerField(default=0)),
                 ('updated_at', models.DateTimeField(auto_now=True)),

@@ -23,6 +23,7 @@ import { Sheet } from '../components/ui/Sheet';
 import { StickyFooter } from '../components/challenge-detail/StickyFooter';
 import { RouteSvg } from '../components/walks/RouteSvg';
 import { NoStepSensorNotice } from '../components/walks/StartWalkCard';
+import { requestConsent } from '../components/privacy/ConsentHost';
 import { formatDistance, formatDuration, formatPace } from '../components/walks/walkFormat';
 import { formatSteps } from '../lib/format';
 import { openAppSettings } from '../plugins/appSystem';
@@ -169,7 +170,8 @@ function BeforeStart({ walk }: { walk: WalkStore }) {
           leftIcon={<Footprints size={18} aria-hidden />}
           isLoading={starting}
           loadingText="Getting ready…"
-          onClick={() => void startNewWalk()}
+          // Location consent (Kenya DPA; doubles as Play's prominent disclosure) before the first walk.
+          onClick={() => void requestConsent('location_walks').then((ok) => { if (ok) void startNewWalk(); })}
         >
           {walk.problem ? 'Try again' : 'Start walk'}
         </Button>

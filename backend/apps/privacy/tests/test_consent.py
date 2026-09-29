@@ -31,7 +31,10 @@ class RegistrationConsentTests(APITestCase):
         publish("terms_and_conditions", 2)
         publish("privacy_policy", 4)
 
-    def test_registration_refused_without_consents(self):
+    def test_registration_refused_without_consents_when_switch_is_on(self):
+        s = PrivacySettings.load()
+        s.require_consent_at_registration = True
+        s.save()
         res = self.client.post(REGISTER, registration(), format="json")
         self.assertEqual(res.status_code, 400)
         self.assertEqual(res.data["code"], "consent_required")
@@ -62,6 +65,24 @@ class RegistrationConsentTests(APITestCase):
         self.assertFalse(rows["location_walks"].granted)
         self.assertEqual(rows["terms"].source, "registration")
         self.assertEqual(consent_mod.missing_required(user), [])
+
+    def test_old_app_without_consents_can_register_while_switch_is_off_by_default(self):
+        self.assertFalse(PrivacySettings.load().require_consent_at_registration)
+        res = self.client.post(REGISTER, registration(), format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+
+    def test_switch_on_refuses_old_apps_that_send_no_consents(self):
+        s = PrivacySettings.load()
+        s.require_consent_at_registration = True
+        s.save()
+        res = self.client.post(REGISTER, registration(), format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertFalse(User.objects.filter(username="otieno").exists())
+
+    def test_current_clients_are_checked_even_with_the_switch_off(self):
+        self.assertFalse(PrivacySettings.load().require_consent_at_registration)
+        res = self.client.post(REGISTER, registration(consents={"terms": True, "health_data": False}), format="json")
+        self.assertEqual(res.status_code, 400)
 
     def test_switch_allows_old_clients(self):
         s = PrivacySettings.load()
