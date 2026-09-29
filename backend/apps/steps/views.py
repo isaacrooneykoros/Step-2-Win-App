@@ -523,6 +523,21 @@ def _encode_polyline(points: list[tuple[float, float]]) -> str:
     return "".join(encoded)
 
 
+def user_local_today(user):
+    """The user's current local date from the time zone their phone last reported
+    (Phase 1b); the server (UTC) date when it never did."""
+    offset = (
+        StepSession.objects.filter(user=user, tz_offset_minutes__isnull=False)
+        .order_by("-started_at")
+        .values_list("tz_offset_minutes", flat=True)
+        .first()
+    )
+    now = timezone.now()
+    if offset is None:
+        return now.date()
+    return (now + timedelta(minutes=int(offset))).date()
+
+
 def recompute_challenge_progress(user, day, record=None) -> None:
     """Recompute the user's active challenge entries that include `day`.
 
@@ -1663,7 +1678,7 @@ def sync_health(request):
 @throttle_classes([DashboardReadRateThrottle])
 def today_health(request):
     """Today's steps + distance + calories + active minutes."""
-    today = timezone.now().date()
+    today = user_local_today(request.user)
     record = HealthRecord.objects.filter(user=request.user, date=today).first()
 
     if record:
@@ -1709,7 +1724,7 @@ def health_summary(request):
     """
     Aggregated stats for the Steps Detail screen and Home dashboard.
     """
-    today = timezone.now().date()
+    today = user_local_today(request.user)
     week_start = today - timedelta(days=6)
 
     week_qs = HealthRecord.objects.filter(user=request.user, date__gte=week_start)
@@ -1798,7 +1813,7 @@ def health_history(request):
 @throttle_classes([DashboardReadRateThrottle])
 def weekly_steps(request):
     """7-day step array for the home screen bar chart."""
-    today = timezone.now().date()
+    today = user_local_today(request.user)
     week = [today - timedelta(days=i) for i in range(6, -1, -1)]
     records = {
         r.date: r.steps
