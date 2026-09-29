@@ -261,8 +261,11 @@ HealthKit provenance (source device / app) and can tighten this.
   credit even when synced later (tiers are still computed and shown). Recommended: set
   it to the day the Phase 1b app update is live in the Play Store / App Store, so users
   on the old app aren't surprised before they could update.
-- `STEP_MONEY_REQUIRES_EVIDENCE=False` (env) is the emergency switch: tiers are still
-  recorded, but every credited step counts toward challenges.
+- `STEP_MONEY_REQUIRES_EVIDENCE` (env) is **off by default**: tiers are recorded and shown,
+  but every credited step counts toward challenges. Apps already installed can't send
+  walking evidence, so switch it on only once the Phase 1b app update is distributed:
+  set `STEP_MONEY_REQUIRES_EVIDENCE=true` and `STEP_EVIDENCE_CUTOVER_DATE` to the release
+  date. Setting it back to false is the emergency switch.
 - Users still on an old app (no evidence) see `app_update_needed`.
 
 ### Sync payload (new optional fields, all validated server-side)

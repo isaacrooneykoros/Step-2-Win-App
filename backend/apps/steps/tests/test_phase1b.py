@@ -267,6 +267,8 @@ class IntegrityEvaluationTests(SimpleTestCase):
 # ── API ───────────────────────────────────────────────────────────────────────
 
 
+# Production default is off until the updated app is out; these tests cover the rule when on.
+@override_settings(STEP_MONEY_REQUIRES_EVIDENCE=True)
 class P1bSyncBase(Phase0SyncBase):
     def sync_ev(self, steps, hours=None, *, no_evidence=False, **kwargs):
         extra = {}

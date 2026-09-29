@@ -509,10 +509,13 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 # ── Phase 1b: walking evidence, walks, device integrity (backend/ANTICHEAT.md) ──
-# Money-eligible steps need walking evidence. False = tiers are computed and shown but
-# every credited step still counts toward challenges (emergency switch).
+# Money-eligible steps need walking evidence. OFF by default: apps already on people's
+# phones can't send walking evidence, so turning this on before the updated app is out
+# would stop their new steps counting toward challenges. Once the update is distributed,
+# set STEP_MONEY_REQUIRES_EVIDENCE=true and STEP_EVIDENCE_CUTOVER_DATE to the release date.
+# Off = tiers are still computed and shown, and every credited step counts toward challenges.
 STEP_MONEY_REQUIRES_EVIDENCE = (
-    os.getenv("STEP_MONEY_REQUIRES_EVIDENCE", "True").strip().lower() == "true"
+    os.getenv("STEP_MONEY_REQUIRES_EVIDENCE", "False").strip().lower() == "true"
 )
 # Days BEFORE this date (YYYY-MM-DD, device-local day) keep full challenge credit
 # (grandfathered). Empty = the cut-over is the deploy: each day keeps the credit it had

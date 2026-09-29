@@ -49,7 +49,7 @@ KNOWN_OFFSET_TOLERANCE_HOURS = 0.5
 
 
 def money_requires_evidence() -> bool:
-    return bool(getattr(settings, "STEP_MONEY_REQUIRES_EVIDENCE", True))
+    return bool(getattr(settings, "STEP_MONEY_REQUIRES_EVIDENCE", False))
 
 
 def _int(value, lo: int = 0, hi: int = MAX_HOUR_STEPS) -> int:
