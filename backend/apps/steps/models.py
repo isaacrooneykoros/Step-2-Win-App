@@ -46,6 +46,11 @@ class HealthRecord(models.Model):
     # reasons with plain-language messages), written at every sync. Contains no rule
     # weights or thresholds. Served by GET /api/steps/verification/.
     verification = models.JSONField(default=dict, blank=True)
+    # Phase 1b: credited steps that count toward challenge money (wearable + walk
+    # session + sensor-verified tiers, see apps/steps/evidence.py). NULL = a day
+    # written before Phase 1b: grandfathered, its credited `steps` count in full.
+    # Goals, streaks and XP keep using `steps` (all credited steps).
+    eligible_steps = models.IntegerField(null=True, blank=True)
 
     class Meta:
         unique_together = ["user", "date"]
@@ -494,6 +499,15 @@ class StepSession(models.Model):
     trust_adjustment = models.FloatField(default=0.0)
     policy_version = models.CharField(max_length=64, null=True, blank=True)
     ml_model_version = models.CharField(max_length=64, null=True, blank=True)
+    # Device integrity (Play Integrity / App Attest), see apps/steps/integrity.py.
+    # unchecked = no token yet; verified / failed = decided by the verifier;
+    # unavailable = the verifier isn't configured (recorded, never blocks).
+    integrity_status = models.CharField(max_length=16, default="unchecked")
+    integrity_verdict = models.JSONField(default=dict, blank=True)
+    integrity_checked_at = models.DateTimeField(null=True, blank=True)
+    # Phone clock context at session start (minutes east of UTC, IANA name).
+    tz_offset_minutes = models.IntegerField(null=True, blank=True)
+    tz_name = models.CharField(max_length=64, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -680,3 +694,98 @@ class SuspiciousSessionReview(models.Model):
 
     def __str__(self):
         return f"Review {self.id} — {self.user.username} — {self.status}"
+
+
+class WalkSession(models.Model):
+    """A user-started walk ("Start a walk"): GPS route + motion evidence, foreground only.
+
+    Raw GPS points are kept for WALK_RAW_POINTS_RETENTION_DAYS (then deleted by the
+    retention job, apps/steps/walks.py::purge_old_walk_points); the simplified route
+    (Douglas-Peucker, encoded polyline) is kept. A verified session's steps count in the
+    `walk_session` evidence tier.
+    """
+
+    STATUS_CHOICES = [
+        ("active", "Active"),
+        ("finished", "Finished"),
+        ("abandoned", "Abandoned"),
+    ]
+    VERDICT_CHOICES = [
+        ("pending", "Pending"),
+        ("verified", "Verified"),
+        ("unverified", "Unverified"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="walk_sessions"
+    )
+    device = models.ForeignKey(
+        DeviceRegistration, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    client_walk_id = models.CharField(max_length=64, blank=True, default="")
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="active")
+    verdict = models.CharField(max_length=12, choices=VERDICT_CHOICES, default="pending")
+    # Stable reason codes (see apps/steps/walks.py); never thresholds.
+    verdict_reasons = models.JSONField(default=list, blank=True)
+    started_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+    local_date = models.DateField(db_index=True)
+    tz_offset_minutes = models.IntegerField(null=True, blank=True)
+    steps = models.IntegerField(default=0)
+    # Steps that count toward challenges (0 unless verified; see walks.finish_walk).
+    verified_steps = models.IntegerField(default=0)
+    # On-device gait evidence during the walk (steps that looked like walking / shaking).
+    gait_verified_steps = models.IntegerField(default=0)
+    gait_shake_steps = models.IntegerField(default=0)
+    step_source = models.CharField(max_length=24, blank=True, default="")
+    distance_m = models.FloatField(default=0.0)
+    duration_s = models.IntegerField(default=0)
+    avg_speed_mps = models.FloatField(default=0.0)
+    max_speed_mps = models.FloatField(default=0.0)
+    vehicle_seconds = models.IntegerField(default=0)
+    # Device-local hours (0-23) with vehicle-speed movement during the walk.
+    vehicle_hours = models.JSONField(default=list, blank=True)
+    mock_location = models.BooleanField(default=False)
+    auto_ended = models.BooleanField(default=False)
+    points_count = models.IntegerField(default=0)
+    raw_points = models.JSONField(default=list, blank=True)
+    raw_points_purged_at = models.DateTimeField(null=True, blank=True)
+    simplified_polyline = models.TextField(blank=True, default="")
+    integrity_nonce = models.CharField(max_length=64, blank=True, default="")
+    integrity_status = models.CharField(max_length=16, default="unchecked")
+    integrity_verdict = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [
+            models.Index(fields=["user", "local_date"], name="steps_walk_user_day_idx"),
+            models.Index(fields=["user", "-started_at"], name="steps_walk_user_start_idx"),
+            models.Index(fields=["status", "ended_at"], name="steps_walk_status_end_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} walk {self.id} {self.status}/{self.verdict}"
+
+
+class WalkPrivacyZone(models.Model):
+    """Private zone around home: route points inside it are hidden from shared views.
+
+    Stored as salted hashes of the geohash cells covering the circle, never as raw
+    coordinates: the server can answer "is this point inside?" but doesn't keep where
+    the zone is.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="walk_privacy_zone",
+    )
+    salt = models.CharField(max_length=64)
+    precision = models.PositiveSmallIntegerField(default=7)
+    radius_m = models.PositiveIntegerField(default=300)
+    cell_hashes = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
