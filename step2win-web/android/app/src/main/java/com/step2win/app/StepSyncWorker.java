@@ -28,17 +28,6 @@ public class StepSyncWorker extends Worker {
         if (reason == null) reason = "periodic";
         float raw = StepCounterReader.readAndRecord(context, 4_000L);
 
-        // Phase 1c: Health Connect (opt-in) in the background only where Health Connect
-        // allows background reads; otherwise the app reads it on open / resume. Our own
-        // step capture above never depends on it.
-        if (!SyncPolicy.appInForeground) {
-            try {
-                HealthSources.refresh(context, true, false);
-            } catch (Throwable t) {
-                Log.w(TAG, "health connect background read skipped", t);
-            }
-        }
-
         String status = "skipped";
         if (SyncPolicy.appInForeground) {
             status = "app_in_foreground"; // the open app drives syncs itself
@@ -47,6 +36,17 @@ public class StepSyncWorker extends Worker {
             options.foreground = false;
             options.reason = "worker:" + reason;
             status = StepSyncEngine.run(context, options).status;
+        }
+
+        // Phase 1c: Health Connect (opt-in) in the background only where Health Connect
+        // allows background reads (else the app reads it on open / resume), after our own
+        // steps went up; what it reads uploads with the next sync. Never affects capture.
+        if (!SyncPolicy.appInForeground) {
+            try {
+                HealthSources.refresh(context, true, false);
+            } catch (Throwable t) {
+                Log.w(TAG, "health connect background read skipped", t);
+            }
         }
         Log.i(TAG, "worker " + reason + " raw=" + raw + " today=" + StepLedger.todayTotal(context) + " -> " + status);
         StepSyncScheduler.afterRun(context, reason);

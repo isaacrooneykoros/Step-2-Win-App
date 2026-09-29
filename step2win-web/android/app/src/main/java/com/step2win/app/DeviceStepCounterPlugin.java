@@ -478,18 +478,27 @@ public class DeviceStepCounterPlugin extends Plugin {
             } else {
                 StepCounterReader.readAndRecord(context, 2_500L);
             }
-            // Phase 1c: Health Connect (opt-in) on app open / resume, rate-limited; its
-            // summaries upload after our own steps. Never blocks or fails the step sync.
-            try {
-                HealthSources.refresh(context, !SyncPolicy.appInForeground, false);
-            } catch (Throwable ignored) {
-                // Health Connect missing / crashed: our own counting carries on
-            }
             StepSyncEngine.Options options = new StepSyncEngine.Options();
             options.force = force;
             options.foreground = SyncPolicy.appInForeground;
             options.reason = reason;
             StepSyncEngine.Result result = StepSyncEngine.run(context, options);
+            // Phase 1c: Health Connect (opt-in) on app open / resume, rate-limited, AFTER our
+            // own steps went up (a slow provider never delays them); new summaries upload
+            // in a second, health-only pass. Never fails the step sync.
+            try {
+                String health = HealthSources.refresh(context, !SyncPolicy.appInForeground, false);
+                String userKey = StepSyncEngine.currentUserKey(context);
+                if (("ok".equals(health) || "partial".equals(health))
+                    && HealthSources.pendingUploads(context, userKey).length() > 0
+                    && !"backoff".equals(result.status) && !"throttled".equals(result.status)
+                    && !"offline".equals(result.status)) {
+                    StepSyncEngine.Result second = StepSyncEngine.run(context, options);
+                    if ("ok".equals(second.status) && !"ok".equals(result.status)) result = second;
+                }
+            } catch (Throwable ignored) {
+                // Health Connect missing / crashed: our own counting carries on
+            }
             try {
                 call.resolve(JSObject.fromJSONObject(result.toJson()));
             } catch (Exception error) {

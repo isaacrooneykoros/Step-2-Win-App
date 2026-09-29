@@ -334,6 +334,35 @@ public class HealthSourceTest {
     }
 
     @Test
+    public void aSlowProviderRunsOutOfBudgetWithoutReadingAnything() {
+        FakeGateway gw = new FakeGateway();
+        HealthSourceReader.Outcome out = HealthSourceReader.read(gw, true, 34, EAT, TODAY, null, null, at(12, 0), 0L);
+        assertEquals("error", out.status);
+        assertTrue(out.days.isEmpty());
+        assertNull(out.nextToken);
+        assertTrue(gw.readDays.isEmpty());
+    }
+
+    @Test
+    public void todayIsReadFirst() {
+        FakeGateway gw = new FakeGateway();
+        read(gw, true, null, null);
+        assertEquals(TODAY.toString(), gw.readDays.get(0));
+    }
+
+    @Test
+    public void failedWorkoutReadKeepsTheCachedWorkouts() throws Exception {
+        FakeGateway gw = new FakeGateway();
+        gw.workoutsThrow = true;
+        JSONObject fresh = read(gw, true, null, null).days.get(TODAY.toString());
+        assertTrue(fresh.optBoolean(HealthSourceReader.WORKOUTS_FAILED));
+        JSONObject cached = new JSONObject("{\"workouts\":[{\"origin\":\"com.strava\",\"start\":\"a\",\"end\":\"b\",\"route\":null}]}");
+        JSONObject merged = HealthSourceReader.mergeWithCached(fresh, cached);
+        assertFalse(merged.has(HealthSourceReader.WORKOUTS_FAILED));
+        assertEquals(1, merged.getJSONArray("workouts").length());
+    }
+
+    @Test
     public void originPreviewSeparatesManualSteps() {
         FakeGateway gw = new FakeGateway();
         gw.samples.add(sample(SAMSUNG, 1, 2, 9, 0, 9, 30, 3000));

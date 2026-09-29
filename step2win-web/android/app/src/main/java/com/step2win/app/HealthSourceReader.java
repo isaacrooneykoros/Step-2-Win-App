@@ -28,6 +28,28 @@ final class HealthSourceReader {
     private HealthSourceReader() {}
 
     static final int MAX_DAYS = 3;
+    /** Marker on a day payload whose workouts couldn't be read this time (not sent to the server). */
+    static final String WORKOUTS_FAILED = "workouts_failed";
+
+    /**
+     * Merge a fresh day payload with the cached one: keep the workouts (when this read
+     * couldn't get them) and routes a background read can't see. Returns the payload to store.
+     */
+    static JSONObject mergeWithCached(JSONObject fresh, JSONObject cached) {
+        if (fresh == null) return cached;
+        if (fresh.optBoolean(WORKOUTS_FAILED, false)) {
+            fresh.remove(WORKOUTS_FAILED);
+            if (cached != null && cached.optJSONArray("workouts") != null) {
+                try {
+                    fresh.put("workouts", cached.optJSONArray("workouts"));
+                } catch (Exception ignored) {
+                    // keep the fresh (empty) list
+                }
+            }
+        }
+        HealthSourceCore.keepKnownRoutes(fresh, cached);
+        return fresh;
+    }
     private static final int MAX_CHANGE_PAGES = 10;
 
     static final class Outcome {
@@ -42,8 +64,17 @@ final class HealthSourceReader {
         boolean backgroundSupported;
     }
 
+    /** Whole read at most this long (each SDK call also has its own timeout). */
+    static final long DEFAULT_BUDGET_MS = 45_000L;
+
     static Outcome read(HealthConnectGateway gw, boolean optedIn, int sdkInt, ZoneId zone, LocalDate today,
                         String token, Set<String> cachedDates, long nowMs) {
+        return read(gw, optedIn, sdkInt, zone, today, token, cachedDates, nowMs, DEFAULT_BUDGET_MS);
+    }
+
+    static Outcome read(HealthConnectGateway gw, boolean optedIn, int sdkInt, ZoneId zone, LocalDate today,
+                        String token, Set<String> cachedDates, long nowMs, long budgetMs) {
+        final long deadlineNs = System.nanoTime() + Math.max(0L, budgetMs) * 1_000_000L;
         Outcome out = new Outcome();
         if (!optedIn) {
             out.status = "off";
@@ -125,7 +156,13 @@ final class HealthSourceReader {
         boolean routes = out.granted.contains(HealthSourceCore.PERM_ROUTES);
         int tzOffsetMinutes = zone.getRules().getOffset(Instant.ofEpochMilli(nowMs)).getTotalSeconds() / 60;
         boolean partial = false;
-        for (LocalDate day : new TreeSet<>(toRead)) {
+        // Today first: if the provider is slow, the day that matters most is read.
+        for (LocalDate day : new TreeSet<>(toRead).descendingSet()) {
+            if (System.nanoTime() >= deadlineNs) {
+                partial = true;
+                nextToken = null; // the days not read are re-read next time
+                break;
+            }
             Instant start = day.atStartOfDay(zone).toInstant();
             Instant end = day.plusDays(1).atStartOfDay(zone).toInstant();
             List<HealthSourceCore.StepSample> samples;
@@ -140,6 +177,11 @@ final class HealthSourceReader {
             Map<String, long[]> aggregated = new HashMap<>();
             for (HealthSourceCore.StepSample s : samples) {
                 if (aggregated.containsKey(s.origin) || s.origin.isEmpty()) continue;
+                if (System.nanoTime() >= deadlineNs) {
+                    aggregated.put(s.origin, null); // out of time: the raw records' sums
+                    partial = true;
+                    continue;
+                }
                 try {
                     aggregated.put(s.origin, gw.aggregateHourly(s.origin, day, zone));
                 } catch (Exception e) {
@@ -148,19 +190,35 @@ final class HealthSourceReader {
                 }
             }
             List<HealthSourceCore.Workout> workouts = new ArrayList<>();
+            boolean workoutsFailed = false;
             if (exercise) {
-                try {
-                    workouts = gw.readWorkouts(start, end, routes);
-                } catch (Exception e) {
-                    partial = true;
+                if (System.nanoTime() >= deadlineNs) {
+                    workoutsFailed = true;
+                } else {
+                    try {
+                        workouts = gw.readWorkouts(start, end, routes);
+                    } catch (Exception e) {
+                        workoutsFailed = true;
+                    }
                 }
+                partial = partial || workoutsFailed;
             }
             JSONArray hours = HealthSourceCore.buildHours(samples, aggregated, day, zone);
             JSONArray wk = HealthSourceCore.buildWorkouts(workouts);
-            out.days.put(day.toString(), HealthSourceCore.dayPayload(hours, wk, Instant.ofEpochMilli(nowMs), tzOffsetMinutes));
+            JSONObject payload = HealthSourceCore.dayPayload(hours, wk, Instant.ofEpochMilli(nowMs), tzOffsetMinutes);
+            if (workoutsFailed) {
+                try {
+                    // The caller keeps the workouts it already had for this day.
+                    payload.put(WORKOUTS_FAILED, true);
+                } catch (Exception ignored) {
+                    // plain value
+                }
+            }
+            out.days.put(day.toString(), payload);
         }
         out.nextToken = nextToken;
-        out.status = partial ? "partial" : "ok";
+        out.status = partial ? (out.days.isEmpty() ? "error" : "partial") : "ok";
+        if (out.days.isEmpty() && partial) out.message = "timeout";
         return out;
     }
 

@@ -32,6 +32,8 @@ final class HealthSources {
     private static final String KEY_TOKEN = "changes_token";
     private static final String KEY_DAYS = "days";
     private static final String KEY_UPLOADED = "uploaded_";
+    private static final String KEY_UPLOADED_AT = "uploaded_at_";
+    static final long TODAY_MIN_UPLOAD_INTERVAL_MS = 10 * 60_000L;
     private static final String KEY_LAST_READ = "last_read_at";
     private static final String KEY_LAST_STATUS = "last_status";
     private static final String KEY_LAST_MESSAGE = "last_message";
@@ -121,8 +123,7 @@ final class HealthSources {
         if ("ok".equals(out.status) || "partial".equals(out.status)) {
             try {
                 for (Map.Entry<String, JSONObject> d : out.days.entrySet()) {
-                    HealthSourceCore.keepKnownRoutes(d.getValue(), days.optJSONObject(d.getKey()));
-                    days.put(d.getKey(), d.getValue());
+                    days.put(d.getKey(), HealthSourceReader.mergeWithCached(d.getValue(), days.optJSONObject(d.getKey())));
                 }
                 prune(days, LocalDate.now().minusDays(HealthSourceReader.MAX_DAYS + 4));
             } catch (Exception ignored) {
@@ -161,13 +162,20 @@ final class HealthSources {
         if (userKey == null || !p.getBoolean(KEY_OPTED_IN, false)) return out;
         JSONObject days = readJson(p, KEY_DAYS);
         JSONObject uploaded = readJson(p, KEY_UPLOADED + userKey);
+        JSONObject uploadedAt = readJson(p, KEY_UPLOADED_AT + userKey);
+        String today = LocalDate.now().toString();
+        long now = System.currentTimeMillis();
         try {
             for (Iterator<String> it = days.keys(); it.hasNext(); ) {
                 String date = it.next();
                 JSONObject payload = days.optJSONObject(date);
                 if (payload == null) continue;
                 String hash = HealthSourceCore.contentHash(payload);
-                if (!hash.equals(uploaded.optString(date, ""))) out.put(date, payload);
+                if (hash.equals(uploaded.optString(date, ""))) continue;
+                // Today changes all day long (every walk): re-send it at most every 10 min.
+                // Past days (late batch syncs) go up at once.
+                if (today.equals(date) && now - uploadedAt.optLong(date, 0L) < TODAY_MIN_UPLOAD_INTERVAL_MS) continue;
+                out.put(date, payload);
             }
         } catch (Exception ignored) {
             // partial is fine
@@ -178,13 +186,17 @@ final class HealthSources {
     static void markUploaded(Context context, String userKey, String date, JSONObject payload) {
         SharedPreferences p = prefs(context);
         JSONObject uploaded = readJson(p, KEY_UPLOADED + userKey);
+        JSONObject uploadedAt = readJson(p, KEY_UPLOADED_AT + userKey);
         try {
             uploaded.put(date, HealthSourceCore.contentHash(payload));
+            uploadedAt.put(date, System.currentTimeMillis());
             prune(uploaded, LocalDate.now().minusDays(14));
+            prune(uploadedAt, LocalDate.now().minusDays(14));
         } catch (Exception ignored) {
             return;
         }
         p.edit().putString(KEY_UPLOADED + userKey, uploaded.toString())
+            .putString(KEY_UPLOADED_AT + userKey, uploadedAt.toString())
             .putLong(KEY_LAST_UPLOAD, System.currentTimeMillis()).apply();
     }
 
