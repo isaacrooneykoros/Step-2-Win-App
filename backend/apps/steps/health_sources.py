@@ -80,6 +80,9 @@ CORROBORATION_TOLERANCE = 0.15
 CORROBORATION_MIN_STEPS = 250
 DISAGREE_MIN_EXCESS = 10_000
 DISAGREE_MIN_RATIO = 2.5
+# Wearable steps this far above the phone's own count (and >= 3x it): MEDIUM review flag,
+# still credited (a watch-only day is normal; a huge one deserves a look before money).
+WEARABLE_REVIEW_MIN_EXCESS = 20_000
 WORKOUT_MIN_SECONDS = 120
 WORKOUT_MIN_ROUTE_POINTS = 10
 WORKOUT_MIN_DISTANCE_M = 300
@@ -519,6 +522,9 @@ def plan_day(
     disagreement = excess >= DISAGREE_MIN_EXCESS and T >= DISAGREE_MIN_RATIO * max(base, 1)
     extra_wearable = max(0, W - sensor_raw)
     extra_phone_app = max(0, T - sensor_raw) - extra_wearable
+    # A watch far above everything the phone saw is normal (phone left at home), so it is
+    # credited; a very large gap is still worth a person's look (MEDIUM flag only).
+    wearable_review = extra_wearable >= WEARABLE_REVIEW_MIN_EXCESS and W >= 3 * max(sensor_raw, 1)
     withheld = 0
     if disagreement:
         withheld = extra_phone_app
@@ -596,6 +602,7 @@ def plan_day(
         "extra_phone_app": extra_phone_app,
         "withheld": withheld,
         "disagreement": disagreement,
+        "wearable_review": wearable_review,
         "adjusted_evidence": adjusted,
         "wearable_steps": W,
         "corroborated": corroborated,
@@ -654,6 +661,7 @@ def public_summary(summary: dict[str, Any], plan: dict[str, Any], *, applied_wea
         "workout_steps": plan["workout_steps"],
         "withheld": plan["withheld"],
         "disagreement": plan["disagreement"],
+        "wearable_review": plan.get("wearable_review", False),
         "not_counted": dict(summary["not_counted"]),
         "origins": [
             {k: o[k] for k in ("label", "trust", "kind", "steps", "counted_steps")} for o in summary["origins"][:12]

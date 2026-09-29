@@ -93,9 +93,27 @@ def flag_disagreement(user, record) -> None:
     """Wild disagreement between a phone health app and everything else: a MEDIUM flag
     for review (payout holds' existing rules decide about money). No trust change."""
     health = (record.anticheat or {}).get("health") or {}
+    from .views import _record_flag
+
+    if health.get("wearable_review"):
+        _record_flag(
+            user,
+            record.date,
+            "health_wearable_far_above_phone",
+            "medium",
+            {
+                "wearable_total": health.get("wearable_total"),
+                "sensor_raw": health.get("sensor_raw"),
+                "origins": [
+                    {"label": o.get("label"), "kind": o.get("kind"), "steps": o.get("steps")}
+                    for o in (health.get("origins") or [])[:6]
+                ],
+                "note": "Watch / band steps far above the phone's own count (credited; "
+                "a phone left at home is common). Review before large payouts.",
+            },
+        )
     if not health.get("disagreement"):
         return
-    from .views import _record_flag
 
     _record_flag(
         user,

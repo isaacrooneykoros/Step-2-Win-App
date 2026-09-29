@@ -136,6 +136,8 @@ class PlanDayTests(SimpleTestCase):
         p = self.plan(spread(SAMSUNG, 30000, device="watch"), sensor_raw=4000)
         self.assertFalse(p["disagreement"])
         self.assertEqual(p["extra_wearable"], 26000)
+        self.assertTrue(p["wearable_review"])  # credited, but a MEDIUM review flag
+        self.assertFalse(self.plan(spread(SAMSUNG, 9000, device="watch"), sensor_raw=4000)["wearable_review"])
 
     def _run(self, *, distance, route_points=200, type_="running", minutes=30, origin=STRAVA, method="active"):
         start = datetime(2026, 9, 28, 6, 0, tzinfo=dt_timezone.utc)  # 09:00 EAT
@@ -284,6 +286,17 @@ class AndroidHealthConnectTests(HealthSourcesApiBase):
         self.assertEqual(rec.eligible_steps, 8000)
         self.assertIn("wearable_verified", self.codes(rec))
         self.assertEqual(rec.anticheat["health"]["applied_wearable_extra"], 5000)
+
+    def test_huge_watch_day_is_credited_with_a_review_flag(self):
+        self.sensor(3000)
+        self.upload(spread(SAMSUNG, 30000, device="watch"))
+        rec = self.record(self.day())
+        self.assertEqual(rec.steps, 30000)
+        self.assertEqual(rec.tier_wearable, 30000)
+        flag = FraudFlag.objects.get(user=self.user, flag_type="health_wearable_far_above_phone")
+        self.assertEqual(flag.severity, "medium")
+        self.assertFalse(rec.is_suspicious)
+        self.assertNotIn("sources_disagree_under_review", self.codes(rec))
 
     def test_later_sensor_syncs_never_compound_the_extra(self):
         self.sensor(3000)

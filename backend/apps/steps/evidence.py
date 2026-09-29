@@ -4,7 +4,8 @@ Every credited step of a day falls in one tier:
 
 - ``grandfathered``   credit the day already had when it first met Phase 1b (days and
                       part-days before the cut-over keep their credit in full).
-- ``wearable``        reserved for Phase 1c (attested watch / band data).
+- ``wearable``        Phase 1c: watch / band steps from a trusted Health Connect / Apple
+                      Health origin (apps/steps/health_sources.py).
 - ``walk_session``    steps of a user-started walk the server verified (GPS route +
                       motion + consistency checks, apps/steps/walks.py).
 - ``sensor_verified`` phone step-counter steps covered by on-device walking evidence
