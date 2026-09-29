@@ -72,16 +72,24 @@ JOB_OPTIONS: dict[str, dict[str, int]] = {
     "check-wallet-balance-consistency": {"priority": 110, "lease_seconds": 30 * 60},
     "cleanup-inactive-sessions": {"priority": 120, "lease_seconds": 15 * 60},
     "cleanup-old-suspicious-activities": {"priority": 130, "lease_seconds": 15 * 60},
+    # Login IP retention (data minimisation): clears full IPs / old network hashes.
+    "privacy-ip-retention": {"priority": 125, "lease_seconds": 15 * 60},
     # Shadow risk model (apps.risk_ml): analytics only, never touches money, so it runs
     # last. Pure-Python batches over every active user for 3 days: a generous lease.
+    # Walk raw-point retention (privacy): small batched updates, never touches money.
+    "purge-old-walk-points": {"priority": 135, "lease_seconds": 15 * 60},
     "risk-ml-features-and-scores": {"priority": 140, "lease_seconds": 60 * 60},
+    # Account linkage graph (apps.linkage): feeds payout holds at the next settlement
+    # (00:05 UTC) but moves no money itself. Batched; 5,000 users take well under a
+    # minute, the lease covers large growth.
+    "linkage-recompute": {"priority": 135, "lease_seconds": 60 * 60},
     # Social rankings (apps.social): bragging rights only, never money; before the
     # heavy shadow risk model (kept last). The 10-minute
     # refresh touches only changed users; the nightly reconcile and the Monday archive
     # walk every user with steps that week.
-    "social-refresh-weekly-totals": {"priority": 134, "lease_seconds": 9 * 60},
-    "social-reconcile-weekly-totals": {"priority": 135, "lease_seconds": 30 * 60},
-    "social-finalize-week": {"priority": 136, "lease_seconds": 45 * 60},
+    "social-refresh-weekly-totals": {"priority": 136, "lease_seconds": 9 * 60},
+    "social-reconcile-weekly-totals": {"priority": 137, "lease_seconds": 30 * 60},
+    "social-finalize-week": {"priority": 138, "lease_seconds": 45 * 60},
 }
 
 

@@ -3,7 +3,7 @@ import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
-import { Home, Trophy, Wallet, User, Footprints, Bell, MapPin, Activity } from 'lucide-react';
+import { Home, Trophy, Wallet, User, Footprints, Bell, Activity } from 'lucide-react';
 import { useStepsWebSocket } from '../../hooks/useStepsWebSocket';
 import { SocialNotifier } from '../social/SocialNotifier';
 import { useHealthSync, useSmartStepSync } from '../../hooks/useHealthSync';
@@ -21,17 +21,13 @@ import {
   requestNotificationPermission,
   syncReminderNotifications,
 } from '../../services/notifications';
-import {
-  checkAdvancedPermissionSnapshot,
-  requestForegroundLocationPermission,
-  type LocationPermissionState,
-} from '../../services/locationPermissions';
+import { resumeWalkIfAny } from '../../services/walkSession';
 
 const PERMISSIONS_BOOTSTRAP_DONE_KEY = 'permissions_bootstrap_done_v1';
 
 // Four destinations keep the bar calm. Step activity lives under Home (its hero ring links to /steps).
 const navItems = [
-  { to: '/', icon: Home, label: 'Home', match: (p: string) => p === '/' || p.startsWith('/steps') },
+  { to: '/', icon: Home, label: 'Home', match: (p: string) => p === '/' || p.startsWith('/steps') || p.startsWith('/walk') },
   { to: '/challenges', icon: Trophy, label: 'Challenges', match: (p: string) => p.startsWith('/challenges') },
   { to: '/wallet', icon: Wallet, label: 'Wallet', match: (p: string) => p.startsWith('/wallet') },
   {
@@ -73,7 +69,6 @@ export default function MainLayout() {
   const onboardingOpen = useOnboardingOpen();
   const bootSplashActive = useBootSplashActive();
   const [notificationPermission, setNotificationPermission] = useState<'prompt' | 'prompt-with-rationale' | 'granted' | 'denied' | 'unavailable'>('prompt');
-  const [locationPermission, setLocationPermission] = useState<LocationPermissionState>('prompt');
 
   const isNative = Capacitor.isNativePlatform();
   const updateUser = useAuthStore((state) => state.updateUser);
@@ -98,10 +93,11 @@ export default function MainLayout() {
     return isNative && notificationPermission !== 'granted';
   }, [isNative, notificationPermission]);
 
-
-  const canRequestLocationPermission = useMemo(() => {
-    return isNative && locationPermission !== 'granted';
-  }, [isNative, locationPermission]);
+  // A walk that was running when the app was closed or reloaded picks up where it left off
+  // (or is finished and uploaded if it ended meanwhile).
+  useEffect(() => {
+    if (isNative) void resumeWalkIfAny();
+  }, [isNative]);
 
   // Step sync while the app is open: event-driven (new steps / walking), not a timer.
   // With the app closed, Android's WorkManager job and iOS's CoreMotion history take over.
@@ -149,10 +145,8 @@ export default function MainLayout() {
       }
 
       const status = await checkNotificationPermission();
-      const advanced = await checkAdvancedPermissionSnapshot();
       if (!cancelled) {
         setNotificationPermission(status);
-        setLocationPermission(advanced.location);
       }
     };
 
@@ -176,7 +170,7 @@ export default function MainLayout() {
     }
 
     // Camera is asked when the user scans an invite QR code, not here.
-    if (!canRequestDevicePermission && !canRequestNotificationPermission && !canRequestLocationPermission) {
+    if (!canRequestDevicePermission && !canRequestNotificationPermission) {
       localStorage.setItem(PERMISSIONS_BOOTSTRAP_DONE_KEY, 'true');
       setShowPermissionModal(false);
       return;
@@ -185,7 +179,7 @@ export default function MainLayout() {
     if (onboardingOpen || bootSplashActive) return;
     const timer = window.setTimeout(() => setShowPermissionModal(true), 700);
     return () => window.clearTimeout(timer);
-  }, [canRequestDevicePermission, canRequestLocationPermission, canRequestNotificationPermission, onboardingOpen, bootSplashActive]);
+  }, [canRequestDevicePermission, canRequestNotificationPermission, onboardingOpen, bootSplashActive]);
 
   // Android's permission dialog doesn't background the app, so nothing else notices the answer:
   // re-read it right away so the "Allow access" banner doesn't stay stuck on top.
@@ -220,7 +214,7 @@ export default function MainLayout() {
    * closed first, so an interrupted chain (app killed, a dialog dismissed, a request failing)
    * never brings the sheet back on the next launch, and nothing is left open behind the dialogs.
    * Only permissions that show a plain dialog are asked here: camera is asked when scanning an
-   * invite, and background location (a full Settings page on Android 11+) lives in Settings.
+   * invite, and location when the user starts their first walk.
    */
   const handleEnableEverything = async () => {
     localStorage.setItem(PERMISSIONS_BOOTSTRAP_DONE_KEY, 'true');
@@ -239,12 +233,7 @@ export default function MainLayout() {
     } catch {
       // Keep going.
     }
-    try {
-      const locationGranted = await requestForegroundLocationPermission();
-      setLocationPermission(locationGranted ? 'granted' : 'denied');
-    } catch {
-      // Keep going.
-    }
+    // Location is not asked here: it is asked when the user starts their first walk.
     refreshPermissionViews();
   };
 
@@ -371,15 +360,9 @@ export default function MainLayout() {
             subtitle="Challenge reminders, results and payout updates."
             granted={notificationPermission === 'granted'}
           />
-          <PermissionRow
-            icon={MapPin}
-            title="Location"
-            subtitle="Draws your walking route on the activity map."
-            granted={locationPermission === 'granted'}
-          />
         </div>
         <p className="mt-3 text-caption text-text-muted">
-          Camera is only asked for when you scan an invite code. Background location is optional and can be turned on in Settings.
+          Location is only asked for when you start a walk, and camera when you scan an invite code.
         </p>
       </Sheet>
     </div>

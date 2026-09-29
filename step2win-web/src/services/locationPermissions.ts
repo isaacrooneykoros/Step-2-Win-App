@@ -5,40 +5,28 @@ export type LocationPermissionState = 'prompt' | 'prompt-with-rationale' | 'gran
 
 export type AdvancedPermissionSnapshot = {
   location: LocationPermissionState;
-  backgroundLocation: LocationPermissionState;
   exactAlarm: 'granted' | 'denied' | 'unavailable';
 };
 
 /**
- * Android: foreground + background location and exact alarms. iOS: location while using the app
- * only — no background route tracking and no exact-alarm setting, so both report 'unavailable'.
+ * Location while using the app only. It is asked when the user starts their first walk;
+ * background location is never requested.
  */
 export async function checkAdvancedPermissionSnapshot(): Promise<AdvancedPermissionSnapshot> {
   if (!hasNativeStepCounter()) {
-    return {
-      location: 'unavailable',
-      backgroundLocation: 'unavailable',
-      exactAlarm: 'unavailable',
-    };
+    return { location: 'unavailable', exactAlarm: 'unavailable' };
   }
 
   try {
     const status = await DeviceStepCounter.checkAdvancedPermissions();
-    const ios = isIOSApp();
     return {
       location: status.location,
-      backgroundLocation: ios ? 'unavailable' : status.backgroundLocation,
       // Reminders are scheduled inexactly and the app no longer requests SCHEDULE_EXACT_ALARM
       // (Google Play restricts it), so there is nothing for the user to grant.
       exactAlarm: 'unavailable',
     };
   } catch {
-    const ios = isIOSApp();
-    return {
-      location: 'denied',
-      backgroundLocation: ios ? 'unavailable' : 'denied',
-      exactAlarm: 'unavailable',
-    };
+    return { location: 'denied', exactAlarm: 'unavailable' };
   }
 }
 
@@ -51,16 +39,6 @@ export async function requestForegroundLocationPermission(): Promise<boolean> {
   return result.location === 'granted';
 }
 
-/** Android only (iOS records routes only while the app is open). */
-export async function requestBackgroundLocationPermission(): Promise<boolean> {
-  if (!hasNativeStepCounter() || isIOSApp()) {
-    return false;
-  }
-
-  const result = await DeviceStepCounter.requestBackgroundLocationPermission();
-  return result.backgroundLocation === 'granted';
-}
-
 /** Android 12+ only. */
 export async function openExactAlarmPermissionSettings(): Promise<boolean> {
   if (!hasNativeStepCounter() || isIOSApp()) {
@@ -69,6 +47,28 @@ export async function openExactAlarmPermissionSettings(): Promise<boolean> {
 
   const result = await DeviceStepCounter.openExactAlarmSettings();
   return !!result.opened;
+}
+
+/**
+ * One fresh position (used once, e.g. to set the home privacy zone). The caller asks for the
+ * permission first; the WebView's geolocation uses the app's location permission.
+ */
+export async function getCurrentCoordinates(): Promise<{ latitude: number; longitude: number; accuracy: number }> {
+  if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+    throw new Error('unavailable');
+  }
+  const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 20_000,
+      maximumAge: 60_000,
+    });
+  });
+  return {
+    latitude: position.coords.latitude,
+    longitude: position.coords.longitude,
+    accuracy: Math.max(0, Math.round(position.coords.accuracy || 0)),
+  };
 }
 
 export async function captureCurrentWaypoint() {

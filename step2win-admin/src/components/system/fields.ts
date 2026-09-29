@@ -87,6 +87,12 @@ export const FIELDS: FieldDef[] = [
     hint: '60 holds REVIEW, RESTRICT and SUSPEND accounts. Lower it to hold fewer payouts.' },
   { key: 'payout_hold_large_win_kes', label: 'Large win', kind: 'money', section: 'payouts', unit: 'KSh', min: 1, max: 1_000_000, risky: true,
     hint: 'Payouts at or above this are held when the winner has any open medium or higher flag in the challenge window.' },
+  { key: 'device_integrity_policy', label: 'Device integrity (Play Integrity)', kind: 'select', section: 'payouts', risky: true,
+    options: [
+      { value: 'shadow', label: 'Shadow: record verdicts only' },
+      { value: 'enforce', label: 'Enforce: failed devices count for goals only' },
+    ],
+    hint: 'Enforce only after the Play Integrity service account is configured and the shadow verdicts look right. Enforced, steps from sessions that fail the check stop counting toward challenges; goals and streaks are unaffected.' },
 
   { key: 'support_sla_urgent_hours', label: 'Reply target: urgent', kind: 'int', section: 'support', unit: 'hours', min: 1, max: 720 },
   { key: 'support_sla_high_hours', label: 'Reply target: high', kind: 'int', section: 'support', unit: 'hours', min: 1, max: 720 },

@@ -38,7 +38,7 @@ class FinalizeTwiceTests(TestCase):
         b = make_user(wallet_balance=Decimal("400.00"), locked_balance=Decimal("100.00"))
         c = Challenge.objects.create(
             creator=a, name="Done", entry_fee=Decimal("100.00"), milestone=10000,
-            start_date=date.today() - timedelta(days=7), end_date=date.today() - timedelta(days=1),
+            start_date=timezone.now().date() - timedelta(days=7), end_date=timezone.now().date() - timedelta(days=1),
             status="active", total_pool=Decimal("200.00"),
         )
         Participant.objects.create(challenge=c, user=a, steps=15000)

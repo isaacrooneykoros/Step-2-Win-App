@@ -110,6 +110,8 @@ const SyncOutboxScreen = lazy(() => import('./screens/SyncOutboxScreen'));
 const StepsDetailScreen = lazy(() => import('./screens/StepsDetailScreen'));
 const StepsHistoryScreen = lazy(() => import('./screens/StepsHistoryScreen'));
 const StepsDayDetailScreen = lazy(() => import('./screens/StepsDayDetailScreen'));
+const WalkScreen = lazy(() => import('./screens/WalkScreen'));
+const WalkSummaryScreen = lazy(() => import('./screens/WalkSummaryScreen'));
 const SupportScreen = lazy(() => import('./screens/SupportScreen'));
 const ActiveSessionsScreen = lazy(() => import('./screens/ActiveSessionsScreen'));
 const LegalDocumentScreen = lazy(() => import('./screens/LegalDocumentScreen'));
@@ -349,6 +351,8 @@ export default function App() {
               <Route path="/steps" element={withSuspense(<StepsDetailScreen />)} />
               <Route path="/steps/history" element={withSuspense(<StepsHistoryScreen />)} />
               <Route path="/steps/history/:date" element={withSuspense(<StepsDayDetailScreen />)} />
+              <Route path="/walk" element={withSuspense(<WalkScreen />)} />
+              <Route path="/walks/:id" element={withSuspense(<WalkSummaryScreen />)} />
               <Route path="/challenges" element={withSuspense(<ChallengesScreen />)} />
               <Route path="/challenges/lobby" element={withSuspense(<ChallengesLobbyScreen />)} />
               <Route path="/challenges/lobby/:id" element={withSuspense(<ChallengePreviewScreen />)} />

@@ -4,6 +4,10 @@ from .models import HealthRecord, HourlyStepRecord, LocationWaypoint
 
 
 class HealthRecordSerializer(serializers.ModelSerializer):
+    # Steps of the day that count toward challenges (verified walking evidence; see
+    # apps/steps/evidence.py). `steps` counts for goals, streaks and XP.
+    challenge_steps = serializers.SerializerMethodField()
+
     class Meta:
         model = HealthRecord
         fields = [
@@ -12,12 +16,20 @@ class HealthRecordSerializer(serializers.ModelSerializer):
             "source",
             "synced_at",
             "steps",
+            "challenge_steps",
             "distance_km",
             "calories_active",
             "active_minutes",
             "is_suspicious",
         ]
         read_only_fields = ["id", "synced_at", "is_suspicious"]
+
+    def get_challenge_steps(self, obj) -> int:
+        from .evidence import money_steps
+
+        if obj.is_suspicious:
+            return 0
+        return min(int(obj.steps or 0), money_steps(obj))
 
 
 class HealthSyncSerializer(serializers.Serializer):
@@ -188,6 +200,23 @@ class StepSessionStartSerializer(serializers.Serializer):
         allow_null=True,
         allow_blank=True,
     )
+    # Phase 1b: phone clock context, install id and shadow device signals.
+    tz_offset_minutes = serializers.IntegerField(
+        min_value=-12 * 60, max_value=14 * 60, required=False, allow_null=True
+    )
+    tz_name = serializers.CharField(
+        max_length=64, required=False, allow_null=True, allow_blank=True
+    )
+    install_id = serializers.CharField(
+        max_length=64, required=False, allow_null=True, allow_blank=True
+    )
+    device_signals = serializers.JSONField(required=False, allow_null=True)
+
+
+class StepSessionIntegritySerializer(serializers.Serializer):
+    session_id = serializers.UUIDField()
+    session_token = serializers.CharField(max_length=255)
+    integrity_token = serializers.CharField(max_length=20_000)
 
 
 class StepSessionStartResponseSerializer(serializers.Serializer):
@@ -413,6 +442,23 @@ class HealthSyncSerializerV2(serializers.Serializer):
         max_value=100000,
         required=False,
         allow_null=True,
+    )
+    # Phase 1b (see apps/steps/evidence.py). All optional: old apps keep syncing, but
+    # without walking evidence their new steps count for goals only.
+    tz_offset_minutes = serializers.IntegerField(
+        min_value=-12 * 60, max_value=14 * 60, required=False, allow_null=True
+    )
+    tz_name = serializers.CharField(
+        max_length=64, required=False, allow_null=True, allow_blank=True
+    )
+    install_id = serializers.CharField(
+        max_length=64, required=False, allow_null=True, allow_blank=True
+    )
+    evidence_source = serializers.ChoiceField(
+        choices=["android_gait_v1", "ios_coremotion"], required=False, allow_null=True
+    )
+    evidence_hours = serializers.ListField(
+        child=serializers.DictField(), required=False, allow_null=True, max_length=48
     )
 
     def validate_date(self, value):

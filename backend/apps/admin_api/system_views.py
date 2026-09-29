@@ -62,6 +62,8 @@ ENFORCED_BY = {
     "payout_holds_enabled": "Challenge settlement: risky winners' payouts wait in Finance > Payout reviews instead of being credited",
     "payout_hold_trust_score_max": "Challenge settlement: a winner at or below this trust score is held for review",
     "payout_hold_large_win_kes": "Challenge settlement: payouts at or above this are held when the winner has open medium+ flags in the challenge window",
+    # apps/steps/integrity.py + apps/steps/evidence.py
+    "device_integrity_policy": "Step sync and walks: with enforce, steps from sessions that failed Play Integrity count for goals only, not toward challenges",
 }
 
 

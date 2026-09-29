@@ -19,6 +19,7 @@ import { dateKey, dayLabel, dayLabelLong, formatHour, periodCovering, useDailyGo
 import { formatSteps } from '../lib/format';
 import { shareContent } from '../lib/share';
 import { toast } from '../components/ui/Toast';
+import { VerificationPanel } from '../components/walks/VerificationPanel';
 
 export default function StepsDayDetailScreen() {
   const { date = '' } = useParams<{ date: string }>();
@@ -144,6 +145,12 @@ export default function StepsDayDetailScreen() {
               <StepStatChips className="mt-6" distance={distance} calories={calories} activeMins={activeMins} hideZero />
             </section>
 
+            {/* Why: goals vs challenges */}
+            <section>
+              <SectionHeader title="How your steps counted" />
+              <VerificationPanel date={date} isToday={isToday} />
+            </section>
+
             {/* Hourly */}
             <section>
               <SectionHeader title="Hour by hour" />
@@ -193,7 +200,7 @@ export default function StepsDayDetailScreen() {
                     <div className="min-w-0">
                       <p className="text-callout font-semibold text-text-primary">No route recorded</p>
                       <p className="mt-0.5 text-caption text-text-muted">
-                        Allow location access in Settings to see where you walked.
+                        Start a walk in Step2Win to record your route. Routes are only recorded during walks you start.
                       </p>
                     </div>
                   </div>

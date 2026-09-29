@@ -34,6 +34,8 @@ import { BodyCalibrationSheet } from '../components/settings/BodyCalibrationShee
 import { StrideWizardSheet } from '../components/settings/StrideWizardSheet';
 import { StepTrackingSheet } from '../components/settings/StepTrackingSheet';
 import { PermissionsSheet } from '../components/settings/PermissionsSheet';
+import { PRIVACY_ZONE_QUERY_KEY, PrivacyZoneSheet } from '../components/settings/PrivacyZoneSheet';
+import { stepsService } from '../services/api/steps';
 import { LogoutSheet } from '../components/settings/LogoutSheet';
 import { DeleteAccountSheet } from '../components/settings/DeleteAccountSheet';
 import { clearLocalUserData } from '../lib/accountCleanup';
@@ -41,7 +43,7 @@ import { useCellularConnection } from '../hooks/useCellularConnection';
 
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || '1.0.0';
 
-type SheetId = 'photo' | 'contact' | 'goal' | 'password' | 'body' | 'wizard' | 'steps' | 'permissions' | 'logout' | 'delete';
+type SheetId = 'photo' | 'contact' | 'goal' | 'password' | 'body' | 'wizard' | 'steps' | 'permissions' | 'privacyZone' | 'logout' | 'delete';
 
 export default function SettingsScreen() {
   const navigate = useNavigate();
@@ -97,8 +99,14 @@ export default function SettingsScreen() {
     navigate('/login', { replace: true });
   }, [deletedUserId, logout, navigate, queryClient]);
 
-  // Only count permissions this platform has (iOS: no background location / exact alarms).
-  const permissionStates = [permissions.camera, permissions.location, permissions.backgroundLocation, permissions.exactAlarm].filter(
+  const privacyZone = useQuery({
+    queryKey: PRIVACY_ZONE_QUERY_KEY,
+    queryFn: stepsService.getPrivacyZone,
+    staleTime: 5 * 60_000,
+  });
+
+  // Only count permissions this platform has (iOS: no exact alarms).
+  const permissionStates = [permissions.camera, permissions.location, permissions.exactAlarm].filter(
     (s) => s !== 'unavailable',
   );
   const allowedCount = permissionStates.filter((s) => s === 'granted').length;
@@ -135,7 +143,12 @@ export default function SettingsScreen() {
           onOpenCalibration={() => setSheet('body')}
           onCellular={onCellular}
         />
-        <PrivacySection onOpenPermissions={() => setSheet('permissions')} summary={permissionSummary} />
+        <PrivacySection
+          onOpenPermissions={() => setSheet('permissions')}
+          summary={permissionSummary}
+          onOpenPrivacyZone={() => setSheet('privacyZone')}
+          privacyZone={privacyZone.data ?? null}
+        />
         <AppearanceSection themeMode={themeMode} onThemeChange={onThemeChange} preferences={preferences} setPreference={setPreference} />
         <SupportSection />
 
@@ -174,6 +187,7 @@ export default function SettingsScreen() {
         onConnect={() => void connectDevice()}
       />
       <PermissionsSheet open={sheet === 'permissions'} onClose={close} permissions={permissions} />
+      <PrivacyZoneSheet open={sheet === 'privacyZone'} onClose={close} zone={privacyZone} />
       <LogoutSheet open={sheet === 'logout'} onClose={close} onConfirm={onLogout} username={profile?.username} />
       <DeleteAccountSheet open={sheet === 'delete'} onClose={close} onDeleted={onAccountDeleted} />
     </div>

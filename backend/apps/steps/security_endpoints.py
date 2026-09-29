@@ -13,7 +13,9 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from . import integrity
 from .anti_cheat import finalize_step_session
+from .evidence import clean_tz_offset
 from .models import (AntiCheatPolicy, DeviceRegistration, StepSession,
                      StepSyncEvent, SuspiciousSessionReview, UserTrustProfile)
 from .security import (create_session_token, get_active_policy_version,
@@ -23,6 +25,7 @@ from .security import (create_session_token, get_active_policy_version,
 from .serializers import (AntiCheatPolicyPublicSerializer,
                           StepSessionEndResponseSerializer,
                           StepSessionEndSerializer,
+                          StepSessionIntegritySerializer,
                           StepSessionStartResponseSerializer,
                           StepSessionStartSerializer,
                           UserTrustProfileSerializer)
@@ -65,6 +68,10 @@ def start_step_session(request):
     platform = serializer.validated_data["platform"]
     app_version = serializer.validated_data.get("app_version")
     ml_model_version = serializer.validated_data.get("ml_model_version")
+    tz_offset = clean_tz_offset(serializer.validated_data.get("tz_offset_minutes"))
+    tz_name = (serializer.validated_data.get("tz_name") or "")[:64]
+    install_id = (serializer.validated_data.get("install_id") or "")[:64]
+    signals = integrity.clean_device_signals(serializer.validated_data.get("device_signals"))
 
     try:
         with transaction.atomic():
@@ -91,7 +98,7 @@ def start_step_session(request):
             # Create new session
             session_token = create_session_token()
             session_token_hash = hash_session_token(session_token)
-            server_nonce = create_session_token(length=16)
+            server_nonce = integrity.new_nonce()
 
             session = StepSession.objects.create(
                 user=request.user,
@@ -101,6 +108,19 @@ def start_step_session(request):
                 expires_at=timezone.now() + timedelta(hours=12),
                 policy_version=get_active_policy_version(),
                 ml_model_version=ml_model_version,
+                tz_offset_minutes=tz_offset,
+                tz_name=tz_name,
+                install_id=install_id,
+                # Phase 1b: Play Integrity verdict (the nonce is server_nonce). Shadow
+                # heuristics from the app are stored, never enforced.
+                integrity_status=(
+                    "unchecked" if integrity.verifier_configured() else "unavailable"
+                ),
+                integrity_verdict=(
+                    {"heuristics": signals, "heuristic_flags": integrity.heuristic_flags(signals)}
+                    if signals
+                    else {}
+                ),
             )
 
             # Get policy version
@@ -114,6 +134,10 @@ def start_step_session(request):
             "expires_at": session.expires_at.isoformat(),
             "sequence_start": 1,
             "policy_version": policy_version,
+            # Play Integrity: the nonce to bind the token to, and whether to send one.
+            "integrity_nonce": server_nonce,
+            "integrity_requested": platform == "android"
+            and integrity.verifier_configured(),
         }
 
         return Response(response_data, status=status.HTTP_201_CREATED)
@@ -253,3 +277,28 @@ def get_active_policy(request):
             {"detail": "Failed to retrieve policy"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def step_session_integrity(request):
+    """
+    Play Integrity token for a step session (Phase 1b).
+
+    Request: {"session_id", "session_token", "integrity_token"}; the token must be
+    bound to the session's integrity_nonce (returned by session/start/).
+    Response: {"integrity_status": verified | failed | unavailable | error}.
+    Shadow by default: the verdict is recorded; only the admin "enforce" policy makes
+    a failed session's steps count for goals only. Never a fraud flag.
+    """
+    serializer = StepSessionIntegritySerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    data = serializer.validated_data
+    session = StepSession.objects.filter(id=data["session_id"], user=request.user).first()
+    if session is None:
+        return Response({"detail": "Session not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not verify_session_token(data["session_token"], session.session_token_hash):
+        return Response({"detail": "Invalid session token"}, status=status.HTTP_401_UNAUTHORIZED)
+    result = integrity.record_integrity(session, data["integrity_token"], nonce_field="server_nonce")
+    return Response({"integrity_status": result}, status=status.HTTP_200_OK)

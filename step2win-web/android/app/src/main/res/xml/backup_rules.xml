@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 6-11 auto backup (android:fullBackupContent). Step data is per install and per phone:
+  it must never be restored onto a reinstall or a new phone.
+  - step2win_install: install_id (a reinstall must get a new one)
+  - step2win_step_ledger / device_step_counter_prefs: hardware-counter baselines, boot count,
+    device id and step session; restoring them on another boot / phone would miscount steps
+  - step2win_sync, step2win_walk, step2win_motion_state, walk_points.jsonl: upload state, walk
+    state and points, vehicle timeline
+  A reinstall resumes the day from the server instead (GET /api/steps/resume/).
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="step2win_install.xml" />
+    <exclude domain="sharedpref" path="step2win_step_ledger.xml" />
+    <exclude domain="sharedpref" path="device_step_counter_prefs.xml" />
+    <exclude domain="sharedpref" path="step2win_sync.xml" />
+    <exclude domain="sharedpref" path="step2win_walk.xml" />
+    <exclude domain="sharedpref" path="step2win_motion_state.xml" />
+    <exclude domain="file" path="walk_points.jsonl" />
+</full-backup-content>

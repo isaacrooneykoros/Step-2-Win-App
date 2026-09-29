@@ -7,8 +7,8 @@ export interface DeviceStepCounterPermissionStatus {
 }
 
 export interface DeviceStepCounterAdvancedPermissionStatus extends DeviceStepCounterPermissionStatus {
+  /** Foreground location only (asked at the first "Start a walk"). Background location is never requested. */
   location: PermissionState;
-  backgroundLocation: PermissionState;
   exactAlarm: 'granted' | 'denied';
   /** iOS only: false — exact alarms are an Android concept. */
   exactAlarmApplicable?: boolean;
@@ -58,6 +58,107 @@ export interface DeviceStepCounterReading {
    */
   gait_available?: boolean | null;
   sensor_source?: 'cmpedometer';
+  /**
+   * How burst_steps_5s was measured: "live_timed" only when every step carries its own
+   * sensor timestamp (Android STEP_DETECTOR SensorEvent.timestamp); otherwise "arrival_batched".
+   */
+  burst_source?: 'live_timed' | 'arrival_batched' | null;
+  /** Phase 1b walking evidence (see WalkingEvidenceHour). iOS: 'ios_coremotion'. */
+  evidence_source?: 'android_gait_v1' | 'ios_coremotion' | null;
+  evidence_hours?: WalkingEvidenceHour[] | null;
+  /** Random id of this app install (new after a reinstall). */
+  install_id?: string;
+}
+
+/**
+ * Per local hour of the day: every counted phone-counter step of the hour falls in exactly one
+ * bucket. Cumulative for the day and this install (each upload repeats the whole day).
+ * - verified: steps while on-device gait analysis saw walking or running
+ * - shake:    steps while the motion clearly did not look like walking (shaking, swinging, vibration)
+ * - unknown:  steps nothing measured (app closed, no walking service) or inconclusive / missing sensor
+ * - vehicle:  steps while Activity Recognition said IN_VEHICLE / ON_BICYCLE (or GPS vehicle speed in a walk)
+ * - walk:     steps inside a user-started walk session (the server verifies those via the walk)
+ */
+export interface WalkingEvidenceHour {
+  hour: number;
+  verified: number;
+  shake: number;
+  unknown: number;
+  vehicle: number;
+  walk: number;
+  /** Minutes of the hour with at least one step. */
+  active_minutes: number;
+  /** Minutes of the hour in which gait was actually analysed. */
+  gait_minutes: number;
+}
+
+/** Supplementary device signals (shadow only on the server). */
+export interface DeviceSignals {
+  emulator: boolean;
+  rooted: boolean;
+  debuggable: boolean;
+  adb_enabled: boolean;
+  has_step_counter: boolean;
+  has_step_detector: boolean;
+  has_accelerometer: boolean;
+  has_gyroscope: boolean;
+  has_gravity: boolean;
+}
+
+export type WalkGpsStatus = 'ok' | 'searching' | 'off' | 'denied' | 'unavailable';
+
+/** One GPS fix of a walk. Fast fixes are kept (spd flags vehicle speed); mock = from a mock provider. */
+export interface WalkPoint {
+  /** ISO time of the fix. */
+  t: string;
+  lat: number;
+  lng: number;
+  /** Horizontal accuracy (m). */
+  acc: number;
+  /** Speed (m/s) from the fix or derived; null when unknown. */
+  spd: number | null;
+  mock: boolean;
+}
+
+export interface WalkState {
+  active: boolean;
+  walkId: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  elapsedS: number;
+  steps: number;
+  distanceM: number;
+  /** Walk steps by on-device gait verdict. verified + shake + unknown == steps. */
+  gaitVerifiedSteps: number;
+  gaitShakeSteps: number;
+  gaitUnknownSteps: number;
+  /** Seconds moving at vehicle speed (GPS) or in a vehicle / on a bike (Activity Recognition). */
+  vehicleSeconds: number;
+  mockLocation: boolean;
+  /** True when the walk ended by itself after long inactivity. */
+  autoEnded: boolean;
+  gpsStatus: WalkGpsStatus;
+  /** 'step_counter' (hardware counter) | 'accelerometer' (phones without TYPE_STEP_COUNTER) | 'cmpedometer' (iOS). */
+  stepSource: 'step_counter' | 'accelerometer' | 'cmpedometer';
+  /** Points recorded but not yet taken with takeWalkPoints / stopWalk. */
+  pointsPending: number;
+}
+
+export interface WalkStartResult {
+  started: boolean;
+  /** Why it didn't start. */
+  reason?: 'location_permission' | 'activity_permission' | 'gps_off' | 'already_active' | 'unsupported';
+  stepSource?: WalkState['stepSource'];
+}
+
+export interface StepSensorCapabilities {
+  hasStepCounter: boolean;
+  hasStepDetector: boolean;
+  hasAccelerometer: boolean;
+  hasGyroscope: boolean;
+  hasGravity: boolean;
+  /** Can a walk count steps at all (step counter or accelerometer fallback). */
+  walkSupported: boolean;
 }
 
 export interface DeviceStepCounterBackgroundStatus {
@@ -148,7 +249,6 @@ export interface DeviceStepCounterPlugin {
   requestPermissions(): Promise<DeviceStepCounterPermissionStatus>;
   checkAdvancedPermissions(): Promise<DeviceStepCounterAdvancedPermissionStatus>;
   requestLocationPermissions(): Promise<{ location: PermissionState }>;
-  requestBackgroundLocationPermission(): Promise<{ backgroundLocation: PermissionState }>;
   openExactAlarmSettings(): Promise<{ opened: boolean; supported: boolean }>;
   startStepSession(): Promise<{
     device_id: string;
@@ -191,6 +291,21 @@ export interface DeviceStepCounterPlugin {
     eventName: 'stepsChanged',
     listener: (data: { steps: number; date: string; cadence_spm: number }) => void,
   ): Promise<{ remove: () => Promise<void> }>;
+
+  // ── Phase 1b: walks, device integrity, capabilities ──
+  /** Starts the user's walk: foreground service (location|health), high-accuracy GPS, gait evidence. */
+  startWalk(options: { walkId: string; autoEndMinutes?: number }): Promise<WalkStartResult>;
+  getWalkState(): Promise<WalkState>;
+  /** Drains up to `max` buffered points (oldest first) for upload / live drawing. */
+  takeWalkPoints(options?: { max?: number }): Promise<{ points: WalkPoint[] }>;
+  /** Ends the walk (GPS off, service stopped). Returns the final state and every point not yet taken. */
+  stopWalk(): Promise<WalkState & { points: WalkPoint[] }>;
+  /** Play Integrity (Android) token for a server nonce. token null when unavailable (not configured, no Play services). */
+  requestIntegrityToken(options: { nonce: string }): Promise<{ token: string | null; error?: string }>;
+  getDeviceSignals(): Promise<DeviceSignals>;
+  getSensorCapabilities(): Promise<StepSensorCapabilities>;
+  /** Fires while a walk is active (about every 2 s). */
+  addListener(eventName: 'walkUpdate', listener: (state: WalkState) => void): Promise<{ remove: () => Promise<void> }>;
 
   // ── iOS: CoreMotion history for offline catch-up (the phone keeps ~7 days) ──
   getStepHistory(options: { days: number }): Promise<{ days: StepHistoryDay[] }>;

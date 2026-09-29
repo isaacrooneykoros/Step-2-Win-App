@@ -1,3 +1,5 @@
+import type { DeviceSignals, WalkingEvidenceHour, WalkPoint } from '../plugins/deviceStepCounter';
+
 // ==================== User Types ====================
 
 export interface User {
@@ -533,6 +535,15 @@ export interface StepSyncForm {
   payload_hash?: string | null;
   steps_delta?: number | null;
   steps_total?: number | null;
+  /** Minutes east of UTC (EAT = 180). */
+  tz_offset_minutes?: number | null;
+  /** IANA zone name, e.g. "Africa/Nairobi". */
+  tz_name?: string | null;
+  /** Random id of this app install. */
+  install_id?: string | null;
+  burst_source?: 'live_timed' | 'arrival_batched' | null;
+  evidence_source?: 'android_gait_v1' | 'ios_coremotion' | null;
+  evidence_hours?: WalkingEvidenceHour[] | null;
 }
 
 export interface StepSessionStartRequest {
@@ -540,6 +551,10 @@ export interface StepSessionStartRequest {
   platform: 'android' | 'ios' | 'web';
   app_version?: string | null;
   ml_model_version?: string | null;
+  tz_offset_minutes?: number | null;
+  tz_name?: string | null;
+  install_id?: string | null;
+  device_signals?: DeviceSignals | null;
 }
 
 export interface StepSessionStartResponse {
@@ -549,6 +564,130 @@ export interface StepSessionStartResponse {
   expires_at: string;
   sequence_start: number;
   policy_version: string;
+  integrity_nonce?: string | null;
+  integrity_requested?: boolean;
+}
+
+export type IntegrityStatus = 'verified' | 'failed' | 'unavailable' | 'error' | 'unchecked';
+
+export interface StepResumeResponse {
+  date: string;
+  last_raw_steps: number;
+  synced_at: string | null;
+}
+
+// ==================== Walks & verification (Phase 1b) ====================
+
+export type ReasonSeverity = 'positive' | 'info' | 'review';
+
+export interface WalkReason {
+  code: string;
+  severity: ReasonSeverity;
+  user_message: string;
+}
+
+export interface WalkSummary {
+  id: number | string;
+  status: 'active' | 'finished' | 'abandoned';
+  verdict: 'pending' | 'verified' | 'unverified';
+  started_at: string;
+  ended_at: string | null;
+  local_date: string;
+  duration_s: number;
+  steps: number;
+  verified_steps: number;
+  distance_m: number;
+  avg_speed_mps: number | null;
+  max_speed_mps: number | null;
+  auto_ended: boolean;
+  mock_location: boolean;
+  /** Google encoded polyline of the simplified route (owner only; "" if none). */
+  polyline: string;
+  /** Route with the ends and privacy zone removed (what others may see). */
+  shared_polyline: string;
+  reasons: WalkReason[];
+}
+
+export interface WalkStartRequest {
+  client_walk_id: string;
+  started_at: string;
+  tz_offset_minutes: number;
+  tz_name: string;
+  install_id: string;
+  platform: 'android' | 'ios' | 'web';
+  step_source: 'step_counter' | 'accelerometer' | 'cmpedometer';
+}
+
+export interface WalkStartResponse extends WalkSummary {
+  integrity_nonce?: string | null;
+  integrity_requested?: boolean;
+}
+
+/** Walk counters sent with every points upload and at finish. */
+export interface WalkCounters {
+  steps: number;
+  gait_verified_steps: number;
+  gait_shake_steps: number;
+  gait_unknown_steps: number;
+  vehicle_seconds: number;
+  mock_location: boolean;
+}
+
+export interface WalkPointsRequest extends WalkCounters {
+  points: WalkPoint[];
+}
+
+export interface WalkPointsResponse {
+  points_count: number;
+  distance_m: number;
+  duration_s: number;
+}
+
+export interface WalkFinishRequest extends WalkCounters {
+  ended_at: string;
+  auto_ended: boolean;
+  points?: WalkPoint[];
+}
+
+export interface PrivacyZoneStatus {
+  enabled: boolean;
+  radius_m: number | null;
+}
+
+export interface VerificationReason {
+  code: string;
+  steps_affected: number | null;
+  severity: ReasonSeverity;
+  user_message: string;
+}
+
+export interface VerificationTiers {
+  walk_session: number;
+  sensor_verified: number;
+  wearable: number;
+  earlier_credit: number;
+  unverified: number;
+}
+
+/** GET /api/steps/verification/ day (version 2). */
+export interface DayBreakdown {
+  version: number;
+  date: string;
+  /** What the phone reported. */
+  counted_steps: number;
+  /** Counted for goals, streaks and XP. */
+  goal_steps: number;
+  /** Count toward challenges (0 while under review). */
+  challenge_steps: number;
+  credited_steps: number;
+  unverified_steps: number;
+  under_review: boolean;
+  tiers: VerificationTiers;
+  reasons: VerificationReason[];
+}
+
+export interface VerificationResponse {
+  days: DayBreakdown[];
 }
 
 export interface StepSessionEndRequest {

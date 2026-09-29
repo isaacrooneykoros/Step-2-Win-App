@@ -27,6 +27,15 @@ if (keystorePropertiesFile != null) {
 def hasReleaseSigning = keystorePropertiesFile != null &&
         ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].every { keystoreProperties.getProperty(it)?.trim() }
 
+// Play Integrity: Google Cloud project number (Play Console > App integrity). Gradle property
+// PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER (e.g. in ~/.gradle/gradle.properties or -P...) or the
+// environment variable of the same name. 0 = not configured: requestIntegrityToken() then
+// answers {token: null, error: 'not_configured'} and the server records "unchecked".
+def playIntegrityCloudProjectNumber = {
+    def raw = (project.findProperty('PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER') ?: System.getenv('PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER') ?: '0').toString().trim()
+    return raw.isLong() ? raw : '0'
+}()
+
 android {
     namespace = "com.step2win.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -37,11 +46,15 @@ android {
         versionCode 1
         versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField "long", "PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER", "${playIntegrityCloudProjectNumber}L"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
+    }
+    buildFeatures {
+        buildConfig true
     }
     signingConfigs {
         if (hasReleaseSigning) {
@@ -77,6 +90,8 @@ repositories {
 
 dependencies {
     implementation 'com.google.android.gms:play-services-location:21.3.0'
+    // Device integrity (Phase 1b): Play Integrity classic requests with the server's nonce.
+    implementation 'com.google.android.play:integrity:1.4.0'
     // Background step sync (periodic, survives reboots and app kills, respects Doze).
     implementation 'androidx.work:work-runtime:2.10.3'
     implementation fileTree(include: ['*.jar'], dir: 'libs')
@@ -85,6 +100,8 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
+    // Real org.json for JVM unit tests (android.jar only has stubs that throw).
+    testImplementation 'org.json:json:20240303'
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

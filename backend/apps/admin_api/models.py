@@ -156,6 +156,15 @@ class SystemSettings(models.Model):
         help_text="Payouts at or above this are held when the winner has open medium+ flags in the window",
     )
 
+    # Device integrity (apps/steps/integrity.py): "shadow" records Play Integrity
+    # verdicts without consequences; "enforce" makes steps from sessions that failed
+    # integrity count for goals only (not toward challenge money).
+    device_integrity_policy = models.CharField(
+        max_length=10,
+        default="shadow",
+        help_text="shadow = record only; enforce = failed devices' steps don't count toward challenges",
+    )
+
     # Metadata
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(

@@ -25,9 +25,11 @@ import type { UserOverview } from './types'
 import { ActionNotice, AuditActionBadge, ChangeList, Figure, InlineLink, SectionTitle, SignedKES, Timestamp, TrustMeter } from './shared'
 import { UserActions, type UserAction } from './UserActions'
 import { RiskModelPanel } from './RiskModelPanel'
+import { LinkedAccountsPanel } from './LinkedAccountsPanel'
+import { EvidenceTimeline } from './EvidenceTimeline'
 import { formatDay, humanize, TRUST_LABEL, useAdminRole } from './utils'
 
-type Tab = 'account' | 'activity' | 'challenges' | 'financial' | 'security' | 'support' | 'audit'
+type Tab = 'account' | 'activity' | 'challenges' | 'financial' | 'security' | 'evidence' | 'support' | 'audit'
 
 interface Props {
   userId: number | null
@@ -69,6 +71,7 @@ export function UserDrawer({ userId, onClose }: Props) {
     { value: 'challenges' as const, label: 'Challenges', count: d?.challenges.length },
     { value: 'financial' as const, label: 'Financial' },
     { value: 'security' as const, label: 'Security', count: d ? openFlags : undefined },
+    { value: 'evidence' as const, label: 'Evidence' },
     { value: 'support' as const, label: 'Support', count: d?.tickets.length },
     { value: 'audit' as const, label: 'Audit', count: d?.audit.length },
   ]
@@ -130,6 +133,12 @@ export function UserDrawer({ userId, onClose }: Props) {
             {tab === 'challenges' && <ChallengesTab d={d} />}
             {tab === 'financial' && <FinancialTab d={d} />}
             {tab === 'security' && <SecurityTab d={d} onAction={setAction} />}
+            {tab === 'evidence' && (
+              <div className="space-y-6">
+                <LinkedAccountsPanel userId={d.user.id} />
+                <EvidenceTimeline userId={d.user.id} />
+              </div>
+            )}
             {tab === 'support' && <SupportTab d={d} />}
             {tab === 'audit' && <AuditTab d={d} />}
           </div>
@@ -196,7 +205,7 @@ function AccountTab({ d, isSuperuser, isSelf, onAction }: { d: UserOverview; isS
                   {[s.os_version, s.app_version && `app ${s.app_version}`, s.country].filter(Boolean).join(' · ') || 'No device details'}
                 </span>
               </span>
-              <span className="mono text-xs text-ink-secondary">{s.ip_address ?? '—'}</span>
+              <span className="mono text-xs text-ink-secondary" title="Masked network; full IPs are not kept after sign-out">{s.ip_address ?? 'hidden'}</span>
               <span className="text-xs text-ink-muted"><Timestamp value={s.last_active_at} /></span>
               <StatusBadge size="sm" tone={s.is_active ? 'success' : 'neutral'} label={s.is_active ? 'Active' : 'Signed out'} />
             </li>

@@ -1,21 +1,16 @@
 package com.step2win.app;
 
+import android.app.AlarmManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.app.AlarmManager;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
-import android.os.Build;
-import android.provider.Settings;
-import android.net.Uri;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.Settings;
 
-import androidx.core.content.ContextCompat;
-
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
@@ -25,18 +20,26 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
-import java.time.LocalDate;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayDeque;
+import java.util.Iterator;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
+/**
+ * Android side of the 'DeviceStepCounter' Capacitor plugin (contract:
+ * src/plugins/deviceStepCounter.ts; iOS: DeviceStepCounterPlugin.swift).
+ *
+ * Live sensors come from {@link MotionHub} (client "app" while the app is in front). Location
+ * is foreground-only: it is asked at the first "Start a walk" and used only during walks
+ * ({@link WalkSessionService}). Background location is never requested.
+ */
 @CapacitorPlugin(
     name = "DeviceStepCounter",
     permissions = {
@@ -44,14 +47,11 @@ import org.json.JSONObject;
         @Permission(alias = "location", strings = {
             "android.permission.ACCESS_COARSE_LOCATION",
             "android.permission.ACCESS_FINE_LOCATION"
-        }),
-        @Permission(alias = "backgroundLocation", strings = {"android.permission.ACCESS_BACKGROUND_LOCATION"})
+        })
     }
 )
 public class DeviceStepCounterPlugin extends Plugin {
     private static final String PREFS = StepCaptureForegroundService.PREFS;
-    private static final String KEY_DATE = "baseline_date";
-    private static final String KEY_BASELINE = "baseline_value";
     private static final String KEY_LATEST_RAW = StepCaptureForegroundService.KEY_LATEST_RAW;
     private static final String KEY_BACKGROUND_RUNNING = StepCaptureForegroundService.KEY_BACKGROUND_RUNNING;
     private static final String KEY_DEVICE_ID = "device_id";
@@ -63,172 +63,54 @@ public class DeviceStepCounterPlugin extends Plugin {
     private static final String KEY_SESSION_NEXT_SEQUENCE = "step_session_next_sequence";
     private static final String KEY_SESSION_LAST_TOTAL = "step_session_last_total";
 
-    private SensorManager sensorManager;
-    private Sensor stepCounterSensor;
-    private Sensor linearAccelerationSensor;
-    private Sensor gravitySensor;
-    private Sensor accelerometerSensor;
-    private Sensor gyroscopeSensor;
-
-    private final float[] latestLinear = new float[] {0f, 0f, 0f};
-    private final float[] latestGravity = new float[] {0f, 0f, 0f};
-    private final float[] latestAccelerometer = new float[] {0f, 0f, 0f};
-    private boolean hasLinear = false;
-    private boolean hasGravity = false;
-    private boolean hasAccelerometer = false;
-    private float latestGyroMagnitude = 0f;
-
-    private final GaitAnalyzer gaitAnalyzer = GaitAnalyzer.SHARED;
-    private final ExecutorService syncExecutor = Executors.newSingleThreadExecutor();
-    private long lastLedgerWriteAtMs = 0L;
-    private long lastStepsEventAtMs = 0L;
-    private int lastEmittedSteps = -1;
-    private long lastMovementAtMs = 0L;
     private static final long LEDGER_WRITE_EVERY_MS = 15_000L;
     private static final long STEPS_EVENT_EVERY_MS = 3_000L;
+    private static final int MAX_POINTS_PER_TAKE = 5000;
 
-    private float latestSensorSteps = -1f;
-    private float lastSensorValue = -1f;
-    private long lastSensorEventAtMs = 0L;
-    private boolean listenerRegistered = false;
-    private final ArrayDeque<Long> stepTimesMillis = new ArrayDeque<>();
+    private MotionHub hub;
+    private final GaitAnalyzer gaitAnalyzer = GaitAnalyzer.SHARED;
+    private final ExecutorService syncExecutor = Executors.newSingleThreadExecutor();
+    private volatile long lastLedgerWriteAtMs = 0L;
+    private long lastStepsEventAtMs = 0L;
+    private int lastEmittedSteps = -1;
+    private volatile long lastMovementAtMs = 0L;
+    private boolean hubHeld = false;
 
-    private final SensorEventListener sensorListener = new SensorEventListener() {
+    private final MotionHub.Listener hubListener = new MotionHub.Listener() {
         @Override
-        public void onSensorChanged(SensorEvent event) {
-            if (event == null || event.values == null || event.values.length == 0 || event.sensor == null) {
-                return;
+        public void onCounter(float raw, int delta, long wallMs) {
+            if (delta > 0) lastMovementAtMs = wallMs;
+            if (wallMs - lastLedgerWriteAtMs >= LEDGER_WRITE_EVERY_MS) {
+                lastLedgerWriteAtMs = wallMs;
+                StepLedger.record(getContext(), raw);
+                getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putFloat(KEY_LATEST_RAW, raw).apply();
             }
-
-            int sensorType = event.sensor.getType();
-            if (sensorType == Sensor.TYPE_STEP_COUNTER) {
-                float raw = event.values[0];
-
-                long nowMs = System.currentTimeMillis();
-                if (lastSensorValue < 0f || raw < lastSensorValue) {
-                    stepTimesMillis.clear();
-                } else {
-                    int delta = Math.round(raw - lastSensorValue);
-                    if (delta > 0) {
-                        // Same 4-steps-per-second clamp as before, for the cadence/burst numbers.
-                        long elapsedMs = Math.max(1L, nowMs - lastSensorEventAtMs);
-                        int maxDelta = Math.max(1, (int) Math.ceil(elapsedMs / 250.0));
-                        int acceptedDelta = Math.min(delta, maxDelta);
-                        for (int i = 0; i < acceptedDelta; i++) {
-                            stepTimesMillis.addLast(nowMs);
-                        }
-                        lastMovementAtMs = nowMs;
-                    }
-                }
-
-                // Keep the true hardware value: the ledger turns readings into per-hour steps
-                // (with the same 4-steps/s clamp) and handles reboots and midnight.
-                latestSensorSteps = raw;
-                lastSensorValue = raw;
-                lastSensorEventAtMs = nowMs;
-                trimOldStepTimes(nowMs);
-                StepSyncEngine.liveCadenceSpm = stepTimesMillis.size();
-                StepSyncEngine.liveBurst5s = countStepsInWindow(nowMs, 5_000L);
-                StepSyncEngine.liveUpdatedAt = nowMs;
-
-                if (nowMs - lastLedgerWriteAtMs >= LEDGER_WRITE_EVERY_MS) {
-                    lastLedgerWriteAtMs = nowMs;
-                    StepLedger.record(getContext(), raw);
-                    getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                        .putFloat(KEY_LATEST_RAW, raw).apply();
-                }
-                maybeEmitSteps(nowMs, raw);
-                return;
-            }
-
-            if (sensorType == Sensor.TYPE_LINEAR_ACCELERATION && event.values.length >= 3) {
-                latestLinear[0] = event.values[0];
-                latestLinear[1] = event.values[1];
-                latestLinear[2] = event.values[2];
-                hasLinear = true;
-            } else if (sensorType == Sensor.TYPE_GRAVITY && event.values.length >= 3) {
-                latestGravity[0] = event.values[0];
-                latestGravity[1] = event.values[1];
-                latestGravity[2] = event.values[2];
-                hasGravity = true;
-            } else if (sensorType == Sensor.TYPE_ACCELEROMETER && event.values.length >= 3) {
-                latestAccelerometer[0] = event.values[0];
-                latestAccelerometer[1] = event.values[1];
-                latestAccelerometer[2] = event.values[2];
-                hasAccelerometer = true;
-                if (!hasGravity) {
-                    // Low-pass estimate of gravity when TYPE_GRAVITY is unavailable.
-                    final float alpha = 0.92f;
-                    latestGravity[0] = alpha * latestGravity[0] + (1f - alpha) * latestAccelerometer[0];
-                    latestGravity[1] = alpha * latestGravity[1] + (1f - alpha) * latestAccelerometer[1];
-                    latestGravity[2] = alpha * latestGravity[2] + (1f - alpha) * latestAccelerometer[2];
-                    hasGravity = true;
-                }
-            } else if (sensorType == Sensor.TYPE_GYROSCOPE && event.values.length >= 3) {
-                float gx = event.values[0];
-                float gy = event.values[1];
-                float gz = event.values[2];
-                latestGyroMagnitude = (float) Math.sqrt(gx * gx + gy * gy + gz * gz);
-            }
-
-            feedGaitAnalyzer();
+            maybeEmitSteps(wallMs, raw);
         }
+    };
 
-        private void feedGaitAnalyzer() {
-            if (!hasGravity) {
-                return;
-            }
-
-            float lx;
-            float ly;
-            float lz;
-            if (hasLinear) {
-                lx = latestLinear[0];
-                ly = latestLinear[1];
-                lz = latestLinear[2];
-            } else if (hasAccelerometer) {
-                lx = latestAccelerometer[0] - latestGravity[0];
-                ly = latestAccelerometer[1] - latestGravity[1];
-                lz = latestAccelerometer[2] - latestGravity[2];
-            } else {
-                return;
-            }
-
-            gaitAnalyzer.addSample(
-                System.currentTimeMillis(),
-                lx,
-                ly,
-                lz,
-                latestGravity[0],
-                latestGravity[1],
-                latestGravity[2],
-                latestGyroMagnitude
-            );
-        }
-
-        @Override
-        public void onAccuracyChanged(Sensor sensor, int accuracy) {
-            // no-op
+    private final WalkSessionService.UpdateListener walkListener = state -> {
+        try {
+            notifyListeners("walkUpdate", JSObject.fromJSONObject(state));
+        } catch (Exception ignored) {
+            // bridge gone
         }
     };
 
     @Override
     public void load() {
-        sensorManager = (SensorManager) getContext().getSystemService(Context.SENSOR_SERVICE);
-        if (sensorManager != null) {
-            stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
-            linearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
-            gravitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY);
-            accelerometerSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-            gyroscopeSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
-        }
+        hub = MotionHub.get(getContext());
+        WalkSessionService.updateListener = walkListener;
+        StepCaptureForegroundService.clearLegacyWaypoints(getContext());
     }
+
+    // ── permissions ──────────────────────────────────────────────────────────
 
     @PluginMethod
     public void checkPermissions(PluginCall call) {
         JSObject ret = new JSObject();
-        PermissionState state = activityRecognitionState();
-        ret.put("activityRecognition", permissionStateToString(state));
+        ret.put("activityRecognition", permissionStateToString(activityRecognitionState()));
         call.resolve(ret);
     }
 
@@ -237,14 +119,14 @@ public class DeviceStepCounterPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("activityRecognition", permissionStateToString(activityRecognitionState()));
         ret.put("location", permissionStateToString(getPermissionState("location")));
-        ret.put("backgroundLocation", permissionStateToString(getPermissionState("backgroundLocation")));
-
         boolean exactAlarmAllowed = true;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             AlarmManager alarmManager = (AlarmManager) getContext().getSystemService(Context.ALARM_SERVICE);
             exactAlarmAllowed = alarmManager != null && alarmManager.canScheduleExactAlarms();
         }
         ret.put("exactAlarm", exactAlarmAllowed ? "granted" : "denied");
+        ret.put("exactAlarmApplicable", true);
+        ret.put("platform", "android");
         call.resolve(ret);
     }
 
@@ -256,10 +138,10 @@ public class DeviceStepCounterPlugin extends Plugin {
             call.resolve(ret);
             return;
         }
-
         requestPermissionForAlias("activityRecognition", call, "permissionCallback");
     }
 
+    /** Foreground location (asked at the first "Start a walk"). */
     @PluginMethod
     public void requestLocationPermissions(PluginCall call) {
         if (getPermissionState("location") == PermissionState.GRANTED) {
@@ -272,24 +154,6 @@ public class DeviceStepCounterPlugin extends Plugin {
     }
 
     @PluginMethod
-    public void requestBackgroundLocationPermission(PluginCall call) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            JSObject ret = new JSObject();
-            ret.put("backgroundLocation", "granted");
-            call.resolve(ret);
-            return;
-        }
-
-        if (getPermissionState("backgroundLocation") == PermissionState.GRANTED) {
-            JSObject ret = new JSObject();
-            ret.put("backgroundLocation", "granted");
-            call.resolve(ret);
-            return;
-        }
-        requestPermissionForAlias("backgroundLocation", call, "backgroundLocationPermissionCallback");
-    }
-
-    @PluginMethod
     public void openExactAlarmSettings(PluginCall call) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             JSObject ret = new JSObject();
@@ -298,17 +162,36 @@ public class DeviceStepCounterPlugin extends Plugin {
             call.resolve(ret);
             return;
         }
-
         Intent intent = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM);
         intent.setData(Uri.parse("package:" + getContext().getPackageName()));
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         getContext().startActivity(intent);
-
         JSObject ret = new JSObject();
         ret.put("opened", true);
         ret.put("supported", true);
         call.resolve(ret);
     }
+
+    @SuppressWarnings("unused")
+    @PermissionCallback
+    public void permissionCallback(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("activityRecognition", permissionStateToString(activityRecognitionState()));
+        if (activityRecognitionState() == PermissionState.GRANTED && SyncPolicy.appInForeground) {
+            ensureHub();
+        }
+        call.resolve(ret);
+    }
+
+    @SuppressWarnings("unused")
+    @PermissionCallback
+    public void locationPermissionCallback(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("location", permissionStateToString(getPermissionState("location")));
+        call.resolve(ret);
+    }
+
+    // ── step session (replay protection) ─────────────────────────────────────
 
     @PluginMethod
     public void startStepSession(PluginCall call) {
@@ -317,13 +200,11 @@ public class DeviceStepCounterPlugin extends Plugin {
         ret.put("platform", "android");
         ret.put("app_version", getAppVersion());
         ret.put("ml_model_version", getCurrentMlModelVersion());
-
         SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String sessionId = prefs.getString(KEY_SESSION_ID, null);
         String sessionToken = prefs.getString(KEY_SESSION_TOKEN, null);
         String expiresAt = prefs.getString(KEY_SESSION_EXPIRES_AT, null);
         int nextSequence = prefs.getInt(KEY_SESSION_NEXT_SEQUENCE, 1);
-
         if (sessionId != null && sessionToken != null && expiresAt != null) {
             if (!isExpiredIso(expiresAt)) {
                 ret.put("session_id", sessionId);
@@ -334,7 +215,6 @@ public class DeviceStepCounterPlugin extends Plugin {
                 clearActiveStepSessionPrefs(prefs);
             }
         }
-
         call.resolve(ret);
     }
 
@@ -345,12 +225,10 @@ public class DeviceStepCounterPlugin extends Plugin {
         String expiresAt = call.getString("expires_at", null);
         Integer nextSequenceValue = call.getInt("next_sequence_number");
         int nextSequence = nextSequenceValue != null ? nextSequenceValue : 1;
-
         if (sessionId == null || sessionToken == null || expiresAt == null) {
             call.reject("Missing session fields.");
             return;
         }
-
         SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         prefs.edit()
             .putString(KEY_SESSION_ID, sessionId)
@@ -359,7 +237,6 @@ public class DeviceStepCounterPlugin extends Plugin {
             .putInt(KEY_SESSION_NEXT_SEQUENCE, Math.max(1, nextSequence))
             .putInt(KEY_SESSION_LAST_TOTAL, 0)
             .apply();
-
         JSObject ret = new JSObject();
         ret.put("saved", true);
         call.resolve(ret);
@@ -374,93 +251,108 @@ public class DeviceStepCounterPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /** Next sequence number of the active step session (strictly increasing). */
+    @PluginMethod
+    public void claimSequence(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("sequence_number", StepSyncEngine.claimSequence(getContext()));
+        call.resolve(ret);
+    }
+
+    // ── steps ────────────────────────────────────────────────────────────────
+
+    /** Phase 1b fields shared by every reading. */
+    private void putEvidenceFields(JSObject ret, StepLedger.Day day) {
+        ret.put("evidence_source", StepSyncEngine.EVIDENCE_SOURCE);
+        ret.put("evidence_hours", StepSyncEngine.evidenceHoursJson(day));
+        ret.put("install_id", InstallInfo.installId(getContext()));
+        ret.put("tz_offset_minutes", InstallInfo.tzOffsetMinutes());
+        ret.put("tz_name", InstallInfo.tzName());
+    }
+
     @PluginMethod
     public void getTodaySteps(PluginCall call) {
         if (activityRecognitionState() != PermissionState.GRANTED) {
             call.reject("Activity recognition permission not granted.");
             return;
         }
-
-        if (stepCounterSensor == null || sensorManager == null) {
-            JSObject ret = new JSObject();
-            ret.put("steps", StepLedger.todayTotal(getContext()));
-            ret.put("date", today());
+        Context context = getContext();
+        if (!hub.hasStepCounter()) {
+            // No hardware counter: only walk steps (accelerometer) can be in the ledger.
+            StepLedger.Day day = StepLedger.getDay(context, today());
             long nowMs = System.currentTimeMillis();
+            JSObject ret = new JSObject();
+            ret.put("steps", day.total);
+            ret.put("date", day.date);
             ret.put("timestamp", nowMs);
             ret.put("timestamp_client", Instant.ofEpochMilli(nowMs).toString());
             ret.put("available", false);
+            ret.put("cadence_spm", 0);
+            ret.put("burst_steps_5s", 0);
+            ret.put("burst_source", "arrival_batched");
             ret.put("device_id", getOrCreateDeviceId());
             ret.put("platform", "android");
             ret.put("app_version", getAppVersion());
             ret.put("ml_model_version", getCurrentMlModelVersion());
+            ret.put("background_running", false);
+            putEvidenceFields(ret, day);
             call.resolve(ret);
             return;
         }
 
-        final String today = today();
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (SyncPolicy.appInForeground) ensureHub();
 
-        ensureListenerRegistered();
-
-        float raw = latestSensorSteps;
+        float raw = hub.latestRaw();
         if (raw < 0f) {
             // Listener just registered (or the app isn't in front): read the counter directly.
-            raw = StepCounterReader.readOnce(getContext(), 2_500L);
-            if (raw >= 0f) latestSensorSteps = raw;
+            raw = StepCounterReader.readOnce(context, 2_500L);
         }
         if (raw >= 0f) {
-            StepLedger.record(getContext(), raw);
+            StepLedger.record(context, raw);
             lastLedgerWriteAtMs = System.currentTimeMillis();
-        } else if (StepLedger.lastReadingAt(getContext()) == 0L) {
+        } else if (StepLedger.lastReadingAt(context) == 0L) {
             call.reject("Step sensor is warming up. Try again in a moment.");
             return;
         }
 
-        // Today's steps from the durable ledger: survives reboots and app kills, and
-        // includes the steps taken while the app was closed (the old per-day baseline
-        // dropped everything before the first read of the day, and zeroed a day on reboot).
-        int stepsToday = StepLedger.todayTotal(getContext());
+        // Today's steps from the durable ledger: survives reboots and app kills, and includes
+        // the steps taken while the app was closed (and a reinstall resume, if any).
+        StepLedger.Day day = StepLedger.getDay(context, today());
+        int stepsToday = day.total;
         long nowMs = System.currentTimeMillis();
-        trimOldStepTimes(nowMs);
-        int cadenceSpm = stepTimesMillis.size();
-        int burst5s = countStepsInWindow(nowMs, 5_000L);
+        boolean liveFresh = nowMs - StepSyncEngine.liveUpdatedAt < 2 * 60_000L;
+        int cadenceSpm = liveFresh ? StepSyncEngine.liveCadenceSpm : 0;
+        int burst5s = liveFresh ? StepSyncEngine.liveBurst5s : 0;
         GaitAnalyzer.Snapshot gait = gaitAnalyzer.getSnapshot();
 
-        SharedPreferences prefsForSession = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        String sessionId = prefsForSession.getString(KEY_SESSION_ID, null);
-        String sessionToken = prefsForSession.getString(KEY_SESSION_TOKEN, null);
-        String expiresAt = prefsForSession.getString(KEY_SESSION_EXPIRES_AT, null);
-        int nextSequence = prefsForSession.getInt(KEY_SESSION_NEXT_SEQUENCE, 1);
-        int lastReportedTotal = prefsForSession.getInt(KEY_SESSION_LAST_TOTAL, -1);
-
+        String sessionId = prefs.getString(KEY_SESSION_ID, null);
+        String sessionToken = prefs.getString(KEY_SESSION_TOKEN, null);
+        String expiresAt = prefs.getString(KEY_SESSION_EXPIRES_AT, null);
+        int nextSequence = prefs.getInt(KEY_SESSION_NEXT_SEQUENCE, 1);
+        int lastReportedTotal = prefs.getInt(KEY_SESSION_LAST_TOTAL, -1);
         if (expiresAt != null && isExpiredIso(expiresAt)) {
-            clearActiveStepSessionPrefs(prefsForSession);
+            clearActiveStepSessionPrefs(prefs);
             sessionId = null;
             sessionToken = null;
-            expiresAt = null;
             nextSequence = 1;
             lastReportedTotal = -1;
         }
-
-        // Reading steps no longer consumes a sequence number: numbers are claimed only when
-        // an upload is actually sent (StepSyncEngine / claimSequence()), so two readers can
-        // never hand the server a repeated or decreasing sequence.
+        // Reading steps doesn't consume a sequence number: numbers are claimed only when an
+        // upload is actually sent (StepSyncEngine / claimSequence()).
         int stepsDelta = lastReportedTotal >= 0 ? Math.max(0, stepsToday - lastReportedTotal) : stepsToday;
 
         int cadenceOut = cadenceSpm;
-        if (gait.validatedCadenceSpm > 0) {
-            cadenceOut = Math.max(cadenceOut, gait.validatedCadenceSpm);
-        }
+        if (gait.validatedCadenceSpm > 0) cadenceOut = Math.max(cadenceOut, gait.validatedCadenceSpm);
+        // The burst is reported as measured: mixing in the analyzer's estimate would make a
+        // "live_timed" value partly untimed.
         int burstOut = burst5s;
-        if (gait.validatedBurst5s > 0) {
-            burstOut = Math.max(burstOut, gait.validatedBurst5s);
-        }
 
         JSObject ret = new JSObject();
         ret.put("steps", stepsToday);
         ret.put("steps_total", stepsToday);
         ret.put("steps_delta", stepsDelta);
-        ret.put("date", today);
+        ret.put("date", day.date);
         ret.put("timestamp", nowMs);
         ret.put("timestamp_client", Instant.ofEpochMilli(nowMs).toString());
         ret.put("available", true);
@@ -473,6 +365,7 @@ public class DeviceStepCounterPlugin extends Plugin {
         ret.put("ml_model_version", gait.mlModelVersion);
         ret.put("cadence_spm", cadenceOut);
         ret.put("burst_steps_5s", burstOut);
+        ret.put("burst_source", liveFresh ? StepSyncEngine.burstSource() : "arrival_batched");
         ret.put("gait_state", gait.gaitState);
         ret.put("gait_confidence", gait.confidence);
         ret.put("gait_dominant_freq_hz", gait.dominantFreqHz);
@@ -490,7 +383,9 @@ public class DeviceStepCounterPlugin extends Plugin {
         ret.put("ml_window_count", gait.mlWindowCount);
         ret.put("ml_confidence_stability", gait.mlConfidenceStability);
         ret.put("motion_entropy", gait.motionEntropy);
+        ret.put("gait_available", true);
         ret.put("background_running", prefs.getBoolean(KEY_BACKGROUND_RUNNING, false));
+        putEvidenceFields(ret, day);
         call.resolve(ret);
     }
 
@@ -554,7 +449,7 @@ public class DeviceStepCounterPlugin extends Plugin {
         if (weight != null && weight > 0) editor.putFloat(SyncPolicy.KEY_WEIGHT_KG, weight.floatValue());
         Boolean dataSaver = call.getBoolean("dataSaver");
         if (dataSaver != null) editor.putBoolean(SyncPolicy.KEY_DATA_SAVER, dataSaver);
-        com.getcapacitor.JSArray windows = call.getArray("challengeWindows");
+        JSArray windows = call.getArray("challengeWindows");
         if (windows != null) editor.putString(SyncPolicy.KEY_CHALLENGES, windows.toString());
         editor.commit();
         StepSyncScheduler.ensurePeriodic(context);
@@ -573,7 +468,7 @@ public class DeviceStepCounterPlugin extends Plugin {
         final boolean force = Boolean.TRUE.equals(call.getBoolean("force", false));
         final String reason = call.getString("reason", "app");
         final Context context = getContext();
-        final float raw = latestSensorSteps;
+        final float raw = hub.latestRaw();
         syncExecutor.execute(() -> {
             if (raw >= 0f) {
                 StepLedger.record(context, raw);
@@ -602,88 +497,172 @@ public class DeviceStepCounterPlugin extends Plugin {
         }
     }
 
-    /** Claims the next sequence number of the active step session (strictly increasing). */
-    @PluginMethod
-    public void claimSequence(PluginCall call) {
-        JSObject ret = new JSObject();
-        ret.put("sequence_number", StepSyncEngine.claimSequence(getContext()));
-        call.resolve(ret);
-    }
-
+    /** Background route points no longer exist (no background location): always empty. */
     @PluginMethod
     public void getPendingWaypoints(PluginCall call) {
-        JSONObject pending = StepCaptureForegroundService.readPendingWaypoints(getContext());
         JSObject ret = new JSObject();
-        ret.put("date", pending.optString("date", today()));
-        JSONArray source = pending.optJSONArray("waypoints");
-        if (source == null) {
-            source = new JSONArray();
-        }
-
-        com.getcapacitor.JSArray items = new com.getcapacitor.JSArray();
-        for (int i = 0; i < source.length(); i++) {
-            JSONObject src = source.optJSONObject(i);
-            if (src == null) {
-                continue;
-            }
-
-            JSObject item = new JSObject();
-            item.put("hour", src.optInt("hour", 0));
-            item.put("recorded_at", src.optString("recorded_at", ""));
-            item.put("latitude", src.optDouble("latitude", 0));
-            item.put("longitude", src.optDouble("longitude", 0));
-            item.put("accuracy_m", src.optDouble("accuracy_m", 0));
-            items.put(item);
-        }
-        ret.put("waypoints", items);
+        ret.put("date", today());
+        ret.put("waypoints", new JSArray());
         call.resolve(ret);
     }
 
     @PluginMethod
     public void clearPendingWaypoints(PluginCall call) {
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        // Note: the native uploader clears uploaded points itself; this stays for the web layer.
-        // Optional `date` + `upTo` (recorded_at of the last uploaded point): only drop points that
-        // were uploaded, so a point captured between read and clear is never lost.
-        String date = call.getString("date", null);
-        String upTo = call.getString("upTo", null);
-        int remaining = 0;
-        synchronized (StepCaptureForegroundService.class) {
-            String storedDate = prefs.getString(StepCaptureForegroundService.KEY_WAYPOINTS_DATE, today());
-            if (upTo != null && date != null && date.equals(storedDate)) {
-                JSONArray kept = new JSONArray();
-                try {
-                    Instant cutoff = Instant.parse(upTo);
-                    JSONArray source = new JSONArray(prefs.getString(StepCaptureForegroundService.KEY_WAYPOINTS_JSON, "[]"));
-                    for (int i = 0; i < source.length(); i++) {
-                        JSONObject item = source.optJSONObject(i);
-                        if (item == null) continue;
-                        try {
-                            if (Instant.parse(item.optString("recorded_at", "")).isAfter(cutoff)) {
-                                kept.put(item);
-                            }
-                        } catch (Exception ignoredItem) {
-                            // Unparseable timestamp: drop it.
-                        }
-                    }
-                } catch (Exception ignored) {
-                    // Corrupt buffer: fall through and clear it.
-                }
-                remaining = kept.length();
-                prefs.edit().putString(StepCaptureForegroundService.KEY_WAYPOINTS_JSON, kept.toString()).commit();
-            } else if (upTo == null) {
-                prefs.edit()
-                    .putString(StepCaptureForegroundService.KEY_WAYPOINTS_JSON, "[]")
-                    .putString(StepCaptureForegroundService.KEY_WAYPOINTS_DATE, today())
-                    .commit();
-            }
-        }
-
+        StepCaptureForegroundService.clearLegacyWaypoints(getContext());
         JSObject ret = new JSObject();
         ret.put("cleared", true);
-        ret.put("remaining", remaining);
+        ret.put("remaining", 0);
         call.resolve(ret);
     }
+
+    // ── walks ────────────────────────────────────────────────────────────────
+
+    @PluginMethod
+    public void startWalk(PluginCall call) {
+        String walkId = call.getString("walkId", null);
+        if (walkId == null || walkId.trim().isEmpty()) {
+            call.reject("walkId is required.");
+            return;
+        }
+        Context context = getContext();
+        JSObject ret = new JSObject();
+        String active = WalkSessionService.activeWalkId(context);
+        String source = hub.hasStepCounter() ? "step_counter" : "accelerometer";
+        if (active != null) {
+            ret.put("started", active.equals(walkId));
+            if (!active.equals(walkId)) ret.put("reason", "already_active");
+            ret.put("stepSource", source);
+            call.resolve(ret);
+            return;
+        }
+        String reason = null;
+        if (!hub.hasStepCounter() && !hub.hasAccelerometer()) {
+            reason = "unsupported";
+        } else if (activityRecognitionState() != PermissionState.GRANTED) {
+            reason = "activity_permission";
+        } else if (!WalkSessionService.hasFineLocation(context)) {
+            reason = "location_permission";
+        } else if (!WalkSessionService.locationEnabled(context)) {
+            reason = "gps_off";
+        }
+        if (reason != null) {
+            ret.put("started", false);
+            ret.put("reason", reason);
+            ret.put("stepSource", source);
+            call.resolve(ret);
+            return;
+        }
+        Double autoEndMinutes = call.getDouble("autoEndMinutes");
+        long autoEndMs = autoEndMinutes != null && autoEndMinutes > 0
+            ? (long) (Math.max(3.0, Math.min(60.0, autoEndMinutes)) * 60_000L)
+            : WalkTracker.DEFAULT_AUTO_END_MS;
+        try {
+            WalkSessionService.start(context, walkId.trim(), autoEndMs);
+        } catch (RuntimeException notAllowed) {
+            ret.put("started", false);
+            ret.put("reason", "unsupported");
+            ret.put("stepSource", source);
+            call.resolve(ret);
+            return;
+        }
+        ret.put("started", true);
+        ret.put("stepSource", source);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getWalkState(PluginCall call) {
+        try {
+            call.resolve(JSObject.fromJSONObject(WalkSessionService.state(getContext())));
+        } catch (Exception error) {
+            call.reject("Walk state unavailable");
+        }
+    }
+
+    @PluginMethod
+    public void takeWalkPoints(PluginCall call) {
+        Integer max = call.getInt("max");
+        int n = max != null && max > 0 ? Math.min(max, MAX_POINTS_PER_TAKE) : 500;
+        JSObject ret = new JSObject();
+        ret.put("points", WalkSessionService.takePoints(getContext(), n));
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void stopWalk(PluginCall call) {
+        try {
+            JSONObject state = WalkSessionService.stop(getContext());
+            JSObject ret = JSObject.fromJSONObject(state);
+            ret.put("points", WalkSessionService.takePoints(getContext(), MAX_POINTS_PER_TAKE));
+            ret.put("pointsPending", WalkSessionService.pendingPoints(getContext()));
+            call.resolve(ret);
+        } catch (Exception error) {
+            call.reject("Walk could not be stopped");
+        }
+    }
+
+    // ── device integrity / capabilities ──────────────────────────────────────
+
+    @PluginMethod
+    public void requestIntegrityToken(PluginCall call) {
+        String nonce = call.getString("nonce", null);
+        JSObject ret = new JSObject();
+        if (nonce == null || nonce.length() < 16) {
+            ret.put("token", JSObject.NULL);
+            ret.put("error", "bad_nonce");
+            call.resolve(ret);
+            return;
+        }
+        if (DeviceIntegrity.cloudProjectNumber() <= 0) {
+            ret.put("token", JSObject.NULL);
+            ret.put("error", "not_configured");
+            call.resolve(ret);
+            return;
+        }
+        try {
+            DeviceIntegrity.startTokenRequest(getContext(), nonce)
+                .addOnSuccessListener(response -> {
+                    JSObject ok = new JSObject();
+                    String token = response != null ? response.token() : null;
+                    ok.put("token", token != null ? token : JSObject.NULL);
+                    if (token == null) ok.put("error", "empty_token");
+                    call.resolve(ok);
+                })
+                .addOnFailureListener(error -> {
+                    JSObject failed = new JSObject();
+                    failed.put("token", JSObject.NULL);
+                    failed.put("error", DeviceIntegrity.errorCode(error));
+                    call.resolve(failed);
+                });
+        } catch (Throwable error) {
+            ret.put("token", JSObject.NULL);
+            ret.put("error", DeviceIntegrity.errorCode(error));
+            call.resolve(ret);
+        }
+    }
+
+    @PluginMethod
+    public void getDeviceSignals(PluginCall call) {
+        try {
+            call.resolve(JSObject.fromJSONObject(DeviceIntegrity.signals(getContext())));
+        } catch (Exception error) {
+            call.reject("Device signals unavailable");
+        }
+    }
+
+    @PluginMethod
+    public void getSensorCapabilities(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("hasStepCounter", hub.hasStepCounter());
+        ret.put("hasStepDetector", hub.hasStepDetector());
+        ret.put("hasAccelerometer", hub.hasAccelerometer());
+        ret.put("hasGyroscope", hub.hasGyroscope());
+        ret.put("hasGravity", hub.hasGravity());
+        ret.put("walkSupported", hub.hasStepCounter() || hub.hasAccelerometer());
+        call.resolve(ret);
+    }
+
+    // ── lifecycle ────────────────────────────────────────────────────────────
 
     private PermissionState activityRecognitionState() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
@@ -692,14 +671,29 @@ public class DeviceStepCounterPlugin extends Plugin {
         return getPermissionState("activityRecognition");
     }
 
+    private synchronized void ensureHub() {
+        if (hubHeld || hub == null) return;
+        hub.addListener(hubListener);
+        hub.acquire(MotionHub.CLIENT_APP);
+        hubHeld = true;
+    }
+
+    private synchronized void releaseHub() {
+        if (!hubHeld || hub == null) return;
+        hub.removeListener(hubListener);
+        hub.release(MotionHub.CLIENT_APP);
+        hubHeld = false;
+    }
+
     @Override
     protected void handleOnPause() {
         super.handleOnPause();
         SyncPolicy.appInForeground = false;
-        if (latestSensorSteps >= 0f) {
-            StepLedger.record(getContext(), latestSensorSteps);
+        float raw = hub.latestRaw();
+        if (raw >= 0f) {
+            StepLedger.record(getContext(), raw);
         }
-        unregisterListener();
+        releaseHub();
         // Leaving the app mid-walk on a challenge day: hand gait analysis to the walking
         // service (starting it now, while the activity is still visible, is allowed).
         boolean walkingNow = System.currentTimeMillis() - lastMovementAtMs < 90_000L;
@@ -715,8 +709,19 @@ public class DeviceStepCounterPlugin extends Plugin {
         // The open app analyses motion itself; the walking service isn't needed now.
         StepCaptureForegroundService.stop(getContext());
         if (activityRecognitionState() == PermissionState.GRANTED) {
-            ensureListenerRegistered();
+            ensureHub();
         }
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        SyncPolicy.appInForeground = false;
+        if (WalkSessionService.updateListener == walkListener) {
+            WalkSessionService.updateListener = null;
+        }
+        syncExecutor.shutdown();
+        releaseHub();
+        super.handleOnDestroy();
     }
 
     /** "stepsChanged" events so the web layer syncs on meaningful change instead of polling. */
@@ -737,140 +742,11 @@ public class DeviceStepCounterPlugin extends Plugin {
         JSObject data = new JSObject();
         data.put("steps", steps);
         data.put("date", today());
-        data.put("cadence_spm", stepTimesMillis.size());
+        data.put("cadence_spm", StepSyncEngine.liveCadenceSpm);
         notifyListeners("stepsChanged", data);
     }
 
-    @Override
-    protected void handleOnDestroy() {
-        SyncPolicy.appInForeground = false;
-        syncExecutor.shutdown();
-        unregisterListener();
-        synchronized (this) {
-            if (sensorThread != null) {
-                sensorThread.quitSafely();
-                sensorThread = null;
-                sensorHandlerInstance = null;
-            }
-        }
-        super.handleOnDestroy();
-    }
-
-    @SuppressWarnings("unused")
-    @PermissionCallback
-    public void permissionCallback(PluginCall call) {
-        JSObject ret = new JSObject();
-        ret.put("activityRecognition", permissionStateToString(activityRecognitionState()));
-        call.resolve(ret);
-    }
-
-    @SuppressWarnings("unused")
-    @PermissionCallback
-    public void locationPermissionCallback(PluginCall call) {
-        JSObject ret = new JSObject();
-        ret.put("location", permissionStateToString(getPermissionState("location")));
-        call.resolve(ret);
-    }
-
-    @SuppressWarnings("unused")
-    @PermissionCallback
-    public void backgroundLocationPermissionCallback(PluginCall call) {
-        JSObject ret = new JSObject();
-        ret.put("backgroundLocation", permissionStateToString(getPermissionState("backgroundLocation")));
-        call.resolve(ret);
-    }
-
-    private void ensureListenerRegistered() {
-        if (listenerRegistered || sensorManager == null || stepCounterSensor == null) {
-            return;
-        }
-        // ~200 motion events/s run through GaitAnalyzer: deliver them on a background thread,
-        // never the UI thread (UI-thread delivery caused ANRs on slower devices).
-
-        boolean stepRegistered = sensorManager.registerListener(
-            sensorListener,
-            stepCounterSensor,
-            SensorManager.SENSOR_DELAY_NORMAL,
-            sensorHandler()
-        );
-
-        boolean motionRegistered = false;
-        if (linearAccelerationSensor != null) {
-            motionRegistered = sensorManager.registerListener(
-                sensorListener,
-                linearAccelerationSensor,
-                SensorManager.SENSOR_DELAY_GAME,
-            sensorHandler()
-            ) || motionRegistered;
-        }
-
-        if (gravitySensor != null) {
-            motionRegistered = sensorManager.registerListener(
-                sensorListener,
-                gravitySensor,
-                SensorManager.SENSOR_DELAY_GAME,
-            sensorHandler()
-            ) || motionRegistered;
-        }
-
-        if (accelerometerSensor != null && gravitySensor == null) {
-            motionRegistered = sensorManager.registerListener(
-                sensorListener,
-                accelerometerSensor,
-                SensorManager.SENSOR_DELAY_GAME,
-            sensorHandler()
-            ) || motionRegistered;
-        }
-
-        if (gyroscopeSensor != null) {
-            motionRegistered = sensorManager.registerListener(
-                sensorListener,
-                gyroscopeSensor,
-                SensorManager.SENSOR_DELAY_GAME,
-            sensorHandler()
-            ) || motionRegistered;
-        }
-
-        listenerRegistered = stepRegistered || motionRegistered;
-    }
-
-    private android.os.HandlerThread sensorThread;
-    private android.os.Handler sensorHandlerInstance;
-
-    private synchronized android.os.Handler sensorHandler() {
-        if (sensorHandlerInstance == null) {
-            sensorThread = new android.os.HandlerThread("Step2WinSensors");
-            sensorThread.start();
-            sensorHandlerInstance = new android.os.Handler(sensorThread.getLooper());
-        }
-        return sensorHandlerInstance;
-    }
-
-    private void unregisterListener() {
-        if (!listenerRegistered || sensorManager == null) {
-            return;
-        }
-        sensorManager.unregisterListener(sensorListener);
-        listenerRegistered = false;
-    }
-
-    private void trimOldStepTimes(long nowMs) {
-        long cutoff = nowMs - 60_000L;
-        while (!stepTimesMillis.isEmpty() && stepTimesMillis.peekFirst() < cutoff) {
-            stepTimesMillis.pollFirst();
-        }
-    }
-
-    private int countStepsInWindow(long nowMs, long windowMs) {
-        long cutoff = nowMs - windowMs;
-        int count = 0;
-        for (Long ts : stepTimesMillis) {
-            if (ts >= cutoff) {
-                count++;
-            }
-        }
-        return count;
-    }
+    // ── helpers ──────────────────────────────────────────────────────────────
 
     private static String permissionStateToString(PermissionState state) {
         if (state == PermissionState.GRANTED) {
@@ -892,7 +768,6 @@ public class DeviceStepCounterPlugin extends Plugin {
         if (stored != null && !stored.isEmpty()) {
             return stored;
         }
-
         String androidId = Settings.Secure.getString(getContext().getContentResolver(), Settings.Secure.ANDROID_ID);
         String deviceId = (androidId != null && !androidId.trim().isEmpty()) ? androidId : UUID.randomUUID().toString();
         prefs.edit().putString(KEY_DEVICE_ID, deviceId).apply();
@@ -902,10 +777,6 @@ public class DeviceStepCounterPlugin extends Plugin {
     private String getAppVersion() {
         SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String stored = prefs.getString(KEY_APP_VERSION, null);
-        if (stored != null && !stored.isEmpty()) {
-            return stored;
-        }
-
         String version = "unknown";
         try {
             PackageInfo packageInfo = getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0);
@@ -913,9 +784,10 @@ public class DeviceStepCounterPlugin extends Plugin {
                 version = packageInfo.versionName;
             }
         } catch (PackageManager.NameNotFoundException ignored) {
-            // Fall back to unknown.
+            // Fall back to the stored / unknown value.
         }
-        prefs.edit().putString(KEY_APP_VERSION, version).apply();
+        if ("unknown".equals(version) && stored != null && !stored.isEmpty()) return stored;
+        if (!version.equals(stored)) prefs.edit().putString(KEY_APP_VERSION, version).apply();
         return version;
     }
 

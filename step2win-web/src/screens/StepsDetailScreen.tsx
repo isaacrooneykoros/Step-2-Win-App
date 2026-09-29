@@ -15,6 +15,9 @@ import { ErrorInline, LoadError } from '../components/ui/ErrorState';
 import { HourlyChart } from '../components/steps/HourlyChart';
 import { dateKey, formatHour, useDailyGoal } from '../components/steps/stepUtils';
 import { formatSteps } from '../lib/format';
+import { VerificationPanel } from '../components/walks/VerificationPanel';
+import { NoStepSensorNotice, StartWalkCard } from '../components/walks/StartWalkCard';
+import { RecentWalks } from '../components/walks/RecentWalks';
 
 export default function StepsDetailScreen() {
   const navigate = useNavigate();
@@ -91,6 +94,22 @@ export default function StepsDetailScreen() {
               )}
             </>
           )}
+        </section>
+
+        {/* Why: goals vs challenges */}
+        <section>
+          <SectionHeader title="How your steps counted" />
+          <VerificationPanel date={todayKey} isToday />
+        </section>
+
+        {/* Walks */}
+        <section>
+          <SectionHeader title="Walks" subtitle="Walks with GPS count toward challenges" />
+          <div className="space-y-3">
+            <NoStepSensorNotice />
+            <StartWalkCard />
+            <RecentWalks />
+          </div>
         </section>
 
         {/* Hourly */}
