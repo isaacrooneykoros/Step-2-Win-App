@@ -3,6 +3,7 @@ package com.step2win.app;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.os.SystemClock;
 import android.util.Log;
 
 import com.google.android.gms.location.ActivityTransition;
@@ -10,9 +11,14 @@ import com.google.android.gms.location.ActivityTransitionEvent;
 import com.google.android.gms.location.ActivityTransitionResult;
 
 /**
- * Walking started -> start the walking service (only with an active challenge today).
- * Walking stopped -> the service winds down by itself after a few idle minutes; queue an
- * upload of the finished walk.
+ * Activity Recognition transitions.
+ *
+ * Walking / running / on foot:
+ * - started -> start the walking service (only with an active challenge today);
+ * - stopped -> the service winds down by itself after a few idle minutes; queue an upload.
+ * In a vehicle / on a bicycle (ENTER / EXIT): recorded in {@link VehicleState} with the event's
+ * own time, so steps counted meanwhile go to the "vehicle" evidence bucket. A vehicle ENTER is
+ * not "movement started" (no walking service for a car ride).
  *
  * (Emulators produce neither transitions nor step-counter events: debug builds add
  * DebugSyncReceiver from src/debug to simulate them over adb.)
@@ -28,8 +34,19 @@ public class MotionTransitionReceiver extends BroadcastReceiver {
         if (result == null) return;
         boolean started = false;
         boolean stopped = false;
+        long nowWall = System.currentTimeMillis();
+        long nowElapsedNs = SystemClock.elapsedRealtimeNanos();
         for (ActivityTransitionEvent event : result.getTransitionEvents()) {
-            if (event.getTransitionType() == ActivityTransition.ACTIVITY_TRANSITION_ENTER) started = true;
+            boolean enter = event.getTransitionType() == ActivityTransition.ACTIVITY_TRANSITION_ENTER;
+            if (MotionTriggers.isVehicleType(event.getActivityType())) {
+                long ageMs = Math.max(0L, (nowElapsedNs - event.getElapsedRealTimeNanos()) / 1_000_000L);
+                long at = nowWall - Math.min(ageMs, 6 * 60 * 60_000L);
+                if (enter) VehicleState.onEnter(context, at);
+                else VehicleState.onExit(context, at);
+                Log.i(TAG, "vehicle " + (enter ? "enter" : "exit") + " type=" + event.getActivityType());
+                continue;
+            }
+            if (enter) started = true;
             else stopped = true;
         }
         if (started) onMovementStarted(context);

@@ -74,8 +74,50 @@ public final class StepSyncEngine {
     static volatile int liveCadenceSpm = 0;
     static volatile int liveBurst5s = 0;
     static volatile long liveUpdatedAt = 0L;
+    /** True when the live numbers come from per-step sensor timestamps (TYPE_STEP_DETECTOR). */
+    static volatile boolean liveTimed = false;
+
+    static final String EVIDENCE_SOURCE = "android_gait_v1";
+    private static final long INTEGRITY_TIMEOUT_MS = 20_000L;
+    private static final java.util.concurrent.ExecutorService BACKGROUND =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
 
     private StepSyncEngine() {}
+
+    /** Called by MotionHub. timed = built from real per-step sensor timestamps. */
+    static void publishLive(int cadenceSpm, int burst5s, boolean timed, long now) {
+        liveCadenceSpm = cadenceSpm;
+        liveBurst5s = burst5s;
+        liveTimed = timed;
+        liveUpdatedAt = now;
+    }
+
+    /** "live_timed" only for bursts from per-step sensor timestamps, else "arrival_batched". */
+    static String burstSource() {
+        return liveTimed && System.currentTimeMillis() - liveUpdatedAt < 2 * 60_000L ? "live_timed" : "arrival_batched";
+    }
+
+    /** WalkingEvidenceHour list of a ledger day (JSON array for the API / the plugin). */
+    static JSONArray evidenceHoursJson(StepLedger.Day day) {
+        JSONArray out = new JSONArray();
+        for (LedgerCore.EvidenceHour e : day.evidenceHours()) {
+            JSONObject o = new JSONObject();
+            try {
+                o.put("hour", e.hour);
+                o.put("verified", e.verified);
+                o.put("shake", e.shake);
+                o.put("unknown", e.unknown);
+                o.put("vehicle", e.vehicle);
+                o.put("walk", e.walk);
+                o.put("active_minutes", e.activeMinutes);
+                o.put("gait_minutes", e.gaitMinutes);
+            } catch (Exception ignored) {
+                continue;
+            }
+            out.put(o);
+        }
+        return out;
+    }
 
     public static final class Options {
         boolean force;        // user asked ("Sync now") or app resume: skip nothing but Retry-After
@@ -219,6 +261,8 @@ public final class StepSyncEngine {
             result.status = "signed_out";
             return result;
         }
+
+        maybeResume(context, apiBase, options);
 
         List<StepLedger.Day> days = StepLedger.getDays(context);
         JSONObject acked = readJson(prefs, KEY_ACKED + userKey);
@@ -382,8 +426,9 @@ public final class StepSyncEngine {
     }
 
     private static String uploadHourly(Context context, String apiBase, StepLedger.Day day, boolean withRoute, Options options) {
+        // withRoute is kept for the call site: background route points no longer exist
+        // (location is only used in user-started walks, uploaded through the walks API).
         JSONObject body = new JSONObject();
-        String lastPointAt = null;
         try {
             double stride = clamp(SyncPolicy.prefs(context).getFloat(SyncPolicy.KEY_STRIDE_CM, 78f), 40, 130);
             double weight = clamp(SyncPolicy.prefs(context).getFloat(SyncPolicy.KEY_WEIGHT_KG, 70f), 30, 220);
@@ -401,42 +446,15 @@ public final class StepSyncEngine {
             }
             body.put("date", day.date);
             body.put("hourly", hourly);
-            JSONArray points = new JSONArray();
-            if (withRoute) {
-                JSONObject pending = StepCaptureForegroundService.readPendingWaypoints(context);
-                if (day.date.equals(pending.optString("date"))) {
-                    points = pending.optJSONArray("waypoints");
-                    if (points == null) points = new JSONArray();
-                    for (int i = 0; i < points.length(); i++) {
-                        JSONObject p = points.optJSONObject(i);
-                        if (p != null) lastPointAt = p.optString("recorded_at", lastPointAt);
-                    }
-                }
-            }
-            body.put("waypoints", points);
+            body.put("waypoints", new JSONArray());
         } catch (Exception ignored) {
             return "error";
         }
         for (int attempt = 0; attempt < 2; attempt++) {
             HttpResult http = post(context, apiBase + "/api/steps/sync/hourly/", body.toString(), options);
             String outcome = classify(context, http, options);
-            if ("ok".equals(outcome)) {
-                if (lastPointAt != null) {
-                    StepCaptureForegroundService.clearWaypointsUpTo(context, day.date, lastPointAt);
-                }
-                return "ok";
-            }
+            if ("ok".equals(outcome)) return "ok";
             if ("retry_auth".equals(outcome)) continue;
-            if (http.code == 413) {
-                // Too big: keep the route points on the phone, send the hours alone.
-                try {
-                    body.put("waypoints", new JSONArray());
-                } catch (Exception ignored) {
-                    return "rejected";
-                }
-                lastPointAt = null;
-                continue;
-            }
             return "session".equals(outcome) ? "rejected" : outcome;
         }
         return "error";
@@ -602,6 +620,15 @@ public final class StepSyncEngine {
                 : JSONObject.NULL);
             p.put("cadence_spm", clamp(cadence, 0, 400));
             p.put("burst_steps_5s", Math.max(0, Math.min(100, burst)));
+            p.put("burst_source", liveFresh ? burstSource() : "arrival_batched");
+
+            // Phase 1b: per-hour walking evidence of this day (cumulative, this install),
+            // install id and time zone.
+            p.put("evidence_source", EVIDENCE_SOURCE);
+            p.put("evidence_hours", evidenceHoursJson(day));
+            p.put("install_id", InstallInfo.installId(context));
+            p.put("tz_offset_minutes", InstallInfo.tzOffsetMinutes());
+            p.put("tz_name", InstallInfo.tzName());
 
             // Gait / on-device ML features only when they describe *this* walking (fresh
             // samples today). Otherwise null = "not measured", exactly like iOS, so the
@@ -685,6 +712,10 @@ public final class StepSyncEngine {
             req.put("platform", "android");
             req.put("app_version", appVersion(context));
             req.put("ml_model_version", GaitAnalyzer.SHARED.getSnapshot().mlModelVersion);
+            req.put("tz_offset_minutes", InstallInfo.tzOffsetMinutes());
+            req.put("tz_name", InstallInfo.tzName());
+            req.put("install_id", InstallInfo.installId(context));
+            req.put("device_signals", DeviceIntegrity.signals(context));
         } catch (Exception ignored) {
             lastSessionOutcome = "error";
             return null;
@@ -710,6 +741,10 @@ public final class StepSyncEngine {
                 JSONObject s = new JSONObject();
                 s.put("session_id", res.getString("session_id"));
                 s.put("session_token", res.getString("session_token"));
+                String nonce = res.optString("integrity_nonce", "");
+                if (res.optBoolean("integrity_requested", false) && !nonce.isEmpty()) {
+                    sendSessionIntegrity(context, apiBase, s.getString("session_id"), s.getString("session_token"), nonce);
+                }
                 return s;
             } catch (Exception ignored) {
                 lastSessionOutcome = "error";
@@ -718,6 +753,66 @@ public final class StepSyncEngine {
         }
         lastSessionOutcome = "error";
         return null;
+    }
+
+    /**
+     * Best effort, off the sync thread: Play Integrity token for the session's nonce, posted to
+     * /api/steps/session/integrity/. Never blocks or fails a sync; phones without Play services
+     * (or builds without a cloud project number) simply send nothing ("unchecked" on the server).
+     */
+    private static void sendSessionIntegrity(Context context, String apiBase, String sessionId, String sessionToken, String nonce) {
+        final Context app = context.getApplicationContext();
+        try {
+            BACKGROUND.execute(() -> {
+                DeviceIntegrity.TokenResult token = DeviceIntegrity.requestToken(app, nonce, INTEGRITY_TIMEOUT_MS);
+                if (token.token == null) {
+                    Log.i(TAG, "integrity token not available: " + token.error);
+                    return;
+                }
+                JSONObject body = new JSONObject();
+                try {
+                    body.put("session_id", sessionId);
+                    body.put("session_token", sessionToken);
+                    body.put("integrity_token", token.token);
+                } catch (Exception ignored) {
+                    return;
+                }
+                Options options = new Options();
+                options.foreground = SyncPolicy.appInForeground;
+                options.reason = "integrity";
+                HttpResult http = post(app, apiBase + "/api/steps/session/integrity/", body.toString(), options);
+                Log.i(TAG, "session integrity -> " + http.code);
+            });
+        } catch (RuntimeException rejected) {
+            // executor shut down: skip
+        }
+    }
+
+    // ── reinstall resume ────────────────────────────────────────────────────
+
+    /**
+     * Fresh install / cleared data: the ledger has nothing for today. Ask the server once for
+     * its last raw total of today and resume from it (reported total = max(ledger, last_raw +
+     * steps counted since the resume)), so the day's total never goes down after a reinstall.
+     */
+    private static void maybeResume(Context context, String apiBase, Options options) {
+        String today = StepLedger.today();
+        if (!StepLedger.needsResumeCheck(context, today)) return;
+        if (!SyncPolicy.online(context)) return;
+        String access = capStorage(context).getString("access_token", null);
+        if (!tokenFresh(access) && !options.foreground && refreshAccessToken(context)) {
+            access = capStorage(context).getString("access_token", null);
+        }
+        HttpResult http = rawRequest("GET", apiBase + "/api/steps/resume/?date=" + today, null, access);
+        if (http.code != 200) return; // try again on a later run
+        try {
+            JSONObject res = new JSONObject(http.body);
+            int lastRaw = Math.max(0, res.optInt("last_raw_steps", 0));
+            StepLedger.applyResume(context, today, lastRaw);
+            Log.i(TAG, "resume for " + today + ": last_raw_steps=" + lastRaw);
+        } catch (Exception ignored) {
+            // malformed: try again later
+        }
     }
 
     static void clearSession(Context context) {
@@ -836,22 +931,29 @@ public final class StepSyncEngine {
     }
 
     private static HttpResult rawPost(String url, String json, String bearer) {
+        return rawRequest("POST", url, json, bearer);
+    }
+
+    /** POST (json != null) or GET (json == null). */
+    private static HttpResult rawRequest(String method, String url, String json, String bearer) {
         HttpResult result = new HttpResult();
         HttpURLConnection conn = null;
         try {
             conn = (HttpURLConnection) new URL(url).openConnection();
             conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
             conn.setReadTimeout(READ_TIMEOUT_MS);
-            conn.setRequestMethod("POST");
-            conn.setDoOutput(true);
-            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestMethod(method);
             conn.setRequestProperty("Accept", "application/json");
             conn.setRequestProperty("X-Client", "step2win-android-sync");
             if (bearer != null) conn.setRequestProperty("Authorization", "Bearer " + bearer);
-            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-            conn.setFixedLengthStreamingMode(bytes.length);
-            try (OutputStream out = conn.getOutputStream()) {
-                out.write(bytes);
+            if (json != null) {
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json");
+                byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+                conn.setFixedLengthStreamingMode(bytes.length);
+                try (OutputStream out = conn.getOutputStream()) {
+                    out.write(bytes);
+                }
             }
             result.code = conn.getResponseCode();
             result.retryAfterMs = parseRetryAfter(conn.getHeaderField("Retry-After"));
@@ -859,11 +961,11 @@ public final class StepSyncEngine {
             result.body = readAll(in);
         } catch (Exception error) {
             result.networkError = true;
-            Log.i(TAG, "POST " + url + " failed: " + error.getClass().getSimpleName());
+            Log.i(TAG, method + " " + url.replaceAll("^https?://[^/]+", "") + " failed: " + error.getClass().getSimpleName());
         } finally {
             if (conn != null) conn.disconnect();
         }
-        Log.i(TAG, "POST " + url.replaceAll("^https?://[^/]+", "") + " -> " + result.code);
+        Log.i(TAG, method + " " + url.replaceAll("^https?://[^/]+", "").replaceAll("\\?.*$", "") + " -> " + result.code);
         return result;
     }
 

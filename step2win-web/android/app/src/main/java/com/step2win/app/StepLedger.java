@@ -8,13 +8,11 @@ import android.provider.Settings;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -26,15 +24,11 @@ import java.util.List;
  * open, WorkManager every 15-60 min, walking service). Each reading adds the steps since
  * the previous reading to the local-time hours that interval covered.
  *
- * Handles:
- * - reboots: counter restarts at 0 (detected via Settings.Global.BOOT_COUNT, a smaller raw
- *   value, or elapsedRealtime going backwards); steps since boot are then counted from 0.
- * - day boundaries in the phone's time zone: an interval spanning midnight is split by time.
- * - wall-clock changes: interval lengths use the monotonic elapsedRealtime clock; the wall
- *   clock is only used to label the local hour/day of "now".
- * - time-zone changes: buckets use the zone in effect when the reading is recorded.
- * - sanity: a reading can add at most 4 steps per elapsed second (same client-side clamp the
- *   plugin always applied), so a sensor glitch can't inject a huge jump.
+ * The logic lives in {@link LedgerCore} (pure, unit-tested): reboots (BOOT_COUNT, raw value or
+ * elapsedRealtime going backwards), local-day boundaries, wall-clock / time-zone changes, the
+ * 4 steps/s sanity clamp, per-hour walking evidence buckets ({@link EvidenceTracker}) and the
+ * reinstall resume. This class only loads / stores the state in SharedPreferences (one commit
+ * per reading, so totals and evidence always change together).
  *
  * Keeps the last {@link #KEEP_DAYS} days (the offline catch-up window).
  */
@@ -46,23 +40,33 @@ public final class StepLedger {
     private static final String KEY_BOOT_COUNT = "boot_count";
     private static final String KEY_DAYS = "days";
     private static final String KEY_LAST_STEP_WALL = "last_step_wall";
-    static final int KEEP_DAYS = 8;
-    private static final long MIN_STEP_INTERVAL_MS = 250L; // at most 4 steps per second
-    private static final int MAX_DELTA_PER_READING = 100_000;
+    private static final String KEY_RESUME_CHECKED = "resume_checked_date";
+    static final int KEEP_DAYS = LedgerCore.KEEP_DAYS;
+    private static final int MAX_DELTA_PER_READING = LedgerCore.MAX_DELTA_PER_READING;
 
     private StepLedger() {}
 
     public static final class Day {
         public final String date;
+        /** What the phone reports for the day (ledger total, or the resumed total after a reinstall). */
         public final int total;
+        /** Steps this install's ledger counted (the sum of the hours). */
+        public final int ledgerTotal;
         public final int[] hours;
         public final long updatedAt;
+        final JSONObject raw;
 
-        Day(String date, int total, int[] hours, long updatedAt) {
+        Day(String date, int total, int ledgerTotal, int[] hours, long updatedAt, JSONObject raw) {
             this.date = date;
             this.total = total;
+            this.ledgerTotal = ledgerTotal;
             this.hours = hours;
             this.updatedAt = updatedAt;
+            this.raw = raw;
+        }
+
+        public List<LedgerCore.EvidenceHour> evidenceHours() {
+            return LedgerCore.evidenceHours(raw);
         }
     }
 
@@ -82,6 +86,44 @@ public final class StepLedger {
         }
     }
 
+    private static LedgerCore.State load(SharedPreferences prefs) {
+        LedgerCore.State st = new LedgerCore.State();
+        st.lastRaw = prefs.contains(KEY_LAST_RAW) ? prefs.getLong(KEY_LAST_RAW, -1L) : -1L;
+        st.lastElapsed = prefs.getLong(KEY_LAST_ELAPSED, 0L);
+        st.lastWall = prefs.getLong(KEY_LAST_WALL, 0L);
+        st.bootCount = prefs.getInt(KEY_BOOT_COUNT, -1);
+        st.lastStepWall = prefs.getLong(KEY_LAST_STEP_WALL, 0L);
+        st.days = readDays(prefs);
+        return st;
+    }
+
+    private static void save(SharedPreferences prefs, LedgerCore.State st) {
+        SharedPreferences.Editor editor = prefs.edit()
+            .putString(KEY_DAYS, st.days.toString())
+            .putLong(KEY_LAST_STEP_WALL, st.lastStepWall);
+        if (st.lastRaw >= 0) {
+            editor.putLong(KEY_LAST_RAW, st.lastRaw)
+                .putLong(KEY_LAST_ELAPSED, st.lastElapsed)
+                .putLong(KEY_LAST_WALL, st.lastWall)
+                .putInt(KEY_BOOT_COUNT, st.bootCount);
+        }
+        editor.commit();
+    }
+
+    /** Attribution of new steps to evidence buckets (live observations + vehicle timeline). */
+    private static LedgerCore.Attributor attributor(Context context) {
+        final EvidenceTracker.VehicleCheck vehicle = EvidenceTracker.of(VehicleState.timeline(context));
+        return (steps, start, end) -> EvidenceTracker.SHARED.attribute(steps, start, end, vehicle);
+    }
+
+    /** Closed minutes -> observed active / analysed minutes of their hour. */
+    private static void applyClosedMinutes(LedgerCore.State st, long nowWall) {
+        ZoneId zone = ZoneId.systemDefault();
+        for (EvidenceTracker.MinuteFacts f : EvidenceTracker.SHARED.drainClosed(nowWall)) {
+            LedgerCore.applyMinute(st.days, f.startMs, f.active, f.analysed, zone);
+        }
+    }
+
     /**
      * Records a raw counter value. Returns the number of new steps added (0 for the first
      * reading ever, which only sets the baseline).
@@ -93,65 +135,34 @@ public final class StepLedger {
         SharedPreferences prefs = prefs(context);
         long nowElapsed = SystemClock.elapsedRealtime();
         long nowWall = System.currentTimeMillis();
-        int boots = bootCount(context);
-        long raw = (long) Math.floor(rawValue);
-
-        if (!prefs.contains(KEY_LAST_RAW)) {
-            seedFromLegacyBaseline(context, prefs, raw, nowWall);
-            prefs.edit()
-                .putLong(KEY_LAST_RAW, raw)
-                .putLong(KEY_LAST_ELAPSED, nowElapsed)
-                .putLong(KEY_LAST_WALL, nowWall)
-                .putInt(KEY_BOOT_COUNT, boots)
-                .commit();
-            return 0;
+        LedgerCore.State st = load(prefs);
+        if (st.lastRaw < 0) {
+            seedFromLegacyBaseline(context, st, (long) Math.floor(rawValue), nowWall);
         }
-
-        long lastRaw = prefs.getLong(KEY_LAST_RAW, raw);
-        long lastElapsed = prefs.getLong(KEY_LAST_ELAPSED, nowElapsed);
-        int lastBoots = prefs.getInt(KEY_BOOT_COUNT, boots);
-
-        boolean rebooted = (boots >= 0 && lastBoots >= 0 && boots != lastBoots)
-            || nowElapsed < lastElapsed
-            || raw < lastRaw;
-
-        long delta;
-        long intervalMs;
-        if (rebooted) {
-            // The counter restarted at boot: everything on it now happened since boot.
-            delta = raw;
-            intervalMs = nowElapsed;
-        } else {
-            delta = raw - lastRaw;
-            intervalMs = nowElapsed - lastElapsed;
-        }
-        intervalMs = Math.max(1L, intervalMs);
-
-        int accepted = (int) Math.max(0L, Math.min(Math.min(delta, MAX_DELTA_PER_READING),
-            (long) Math.ceil(intervalMs / (double) MIN_STEP_INTERVAL_MS)));
-
-        SharedPreferences.Editor editor = prefs.edit()
-            .putLong(KEY_LAST_RAW, raw)
-            .putLong(KEY_LAST_ELAPSED, nowElapsed)
-            .putLong(KEY_LAST_WALL, nowWall)
-            .putInt(KEY_BOOT_COUNT, boots);
-
-        if (accepted > 0) {
-            JSONObject days = readDays(prefs);
-            distribute(days, accepted, nowWall - intervalMs, nowWall);
-            pruneDays(days);
-            editor.putString(KEY_DAYS, days.toString()).putLong(KEY_LAST_STEP_WALL, nowWall);
-        }
-        editor.commit();
+        int accepted = LedgerCore.record(st, rawValue, nowElapsed, nowWall, bootCount(context), ZoneId.systemDefault(), attributor(context));
+        applyClosedMinutes(st, nowWall);
+        save(prefs, st);
         return accepted;
+    }
+
+    /**
+     * Steps counted without the hardware counter: accelerometer step detection during a user
+     * walk on phones that have no TYPE_STEP_COUNTER. They go to the "walk" bucket.
+     */
+    public static synchronized void addWalkSteps(Context context, int steps, long startWall, long endWall) {
+        if (steps <= 0) return;
+        SharedPreferences prefs = prefs(context);
+        LedgerCore.State st = load(prefs);
+        LedgerCore.addSteps(st, steps, startWall, endWall, ZoneId.systemDefault(), LedgerCore.walkBucket());
+        save(prefs, st);
     }
 
     /**
      * First run after upgrading from the old baseline-per-day plugin: carry today's steps
      * over (raw minus this morning's baseline) so today's total doesn't restart at zero
-     * (which the server would reject as a decreasing total).
+     * (which the server would reject as a decreasing total). Unobserved: "unknown".
      */
-    private static void seedFromLegacyBaseline(Context context, SharedPreferences prefs, long raw, long nowWall) {
+    private static void seedFromLegacyBaseline(Context context, LedgerCore.State st, long raw, long nowWall) {
         try {
             SharedPreferences legacy = context.getApplicationContext()
                 .getSharedPreferences(StepCaptureForegroundService.PREFS, Context.MODE_PRIVATE);
@@ -164,92 +175,9 @@ public final class StepLedger {
             if (steps <= 0) {
                 return;
             }
-            JSONObject days = readDays(prefs);
-            // When they were taken is unknown: attribute them to the current hour.
-            distribute(days, steps, nowWall, nowWall);
-            prefs.edit().putString(KEY_DAYS, days.toString()).commit();
+            LedgerCore.addSteps(st, steps, nowWall, nowWall, ZoneId.systemDefault(), LedgerCore.ALL_UNKNOWN);
         } catch (Exception ignored) {
             // Best effort only.
-        }
-    }
-
-    /** Spreads `steps` over [startWall, endWall] into local (day, hour) buckets by time. */
-    private static void distribute(JSONObject days, int steps, long startWall, long endWall) {
-        ZoneId zone = ZoneId.systemDefault();
-        if (endWall <= startWall) {
-            ZonedDateTime at = Instant.ofEpochMilli(endWall).atZone(zone);
-            addSteps(days, at.toLocalDate().toString(), at.getHour(), steps);
-            return;
-        }
-        long total = endWall - startWall;
-        List<long[]> segments = new ArrayList<>(); // [segmentStartMs, segmentEndMs]
-        ZonedDateTime cursor = Instant.ofEpochMilli(startWall).atZone(zone);
-        long cursorMs = startWall;
-        int guard = 0;
-        while (cursorMs < endWall && guard++ < 24 * 40) {
-            ZonedDateTime nextHour = cursor.truncatedTo(ChronoUnit.HOURS).plusHours(1);
-            long segEnd = Math.min(endWall, nextHour.toInstant().toEpochMilli());
-            segments.add(new long[] {cursorMs, segEnd});
-            cursorMs = segEnd;
-            cursor = Instant.ofEpochMilli(cursorMs).atZone(zone);
-        }
-        if (cursorMs < endWall) {
-            // Absurdly long gap (>40 days): put the remainder on the last segment.
-            segments.add(new long[] {cursorMs, endWall});
-        }
-        int assigned = 0;
-        for (int i = 0; i < segments.size(); i++) {
-            long[] seg = segments.get(i);
-            int share = (i == segments.size() - 1)
-                ? steps - assigned
-                : (int) Math.floor(steps * ((seg[1] - seg[0]) / (double) total));
-            if (share <= 0) {
-                continue;
-            }
-            assigned += share;
-            ZonedDateTime at = Instant.ofEpochMilli(seg[0]).atZone(zone);
-            addSteps(days, at.toLocalDate().toString(), at.getHour(), share);
-        }
-    }
-
-    private static void addSteps(JSONObject days, String date, int hour, int steps) {
-        try {
-            JSONObject day = days.optJSONObject(date);
-            if (day == null) {
-                day = new JSONObject();
-                day.put("t", 0);
-                day.put("h", new JSONArray(new int[24]));
-            }
-            JSONArray hours = day.optJSONArray("h");
-            if (hours == null || hours.length() != 24) {
-                hours = new JSONArray(new int[24]);
-            }
-            hours.put(hour, hours.optInt(hour, 0) + steps);
-            day.put("h", hours);
-            day.put("t", day.optInt("t", 0) + steps);
-            day.put("u", System.currentTimeMillis());
-            days.put(date, day);
-        } catch (Exception ignored) {
-            // Malformed entry: skip.
-        }
-    }
-
-    private static void pruneDays(JSONObject days) {
-        LocalDate oldest = LocalDate.now(ZoneId.systemDefault()).minusDays(KEEP_DAYS);
-        List<String> drop = new ArrayList<>();
-        Iterator<String> keys = days.keys();
-        while (keys.hasNext()) {
-            String key = keys.next();
-            try {
-                if (LocalDate.parse(key).isBefore(oldest)) {
-                    drop.add(key);
-                }
-            } catch (Exception ignored) {
-                drop.add(key);
-            }
-        }
-        for (String key : drop) {
-            days.remove(key);
         }
     }
 
@@ -269,7 +197,7 @@ public final class StepLedger {
     private static Day toDay(String date, JSONObject day) {
         int[] hours = new int[24];
         if (day == null) {
-            return new Day(date, 0, hours, 0L);
+            return new Day(date, 0, 0, hours, 0L, null);
         }
         JSONArray h = day.optJSONArray("h");
         if (h != null) {
@@ -277,7 +205,7 @@ public final class StepLedger {
                 hours[i] = h.optInt(i, 0);
             }
         }
-        return new Day(date, day.optInt("t", 0), hours, day.optLong("u", 0L));
+        return new Day(date, LedgerCore.reportedTotal(day), day.optInt("t", 0), hours, day.optLong("u", 0L), day);
     }
 
     /** Days in the ledger, oldest first. */
@@ -288,7 +216,7 @@ public final class StepLedger {
         while (it.hasNext()) {
             keys.add(it.next());
         }
-        java.util.Collections.sort(keys);
+        Collections.sort(keys);
         List<Day> out = new ArrayList<>();
         for (String key : keys) {
             out.add(toDay(key, days.optJSONObject(key)));
@@ -310,12 +238,31 @@ public final class StepLedger {
         return prefs(context).getLong(KEY_LAST_WALL, 0L);
     }
 
+    // ── reinstall resume ─────────────────────────────────────────────────────
+
+    /** True when a resume should be fetched for `date`: no ledger data that day, not checked yet. */
+    static synchronized boolean needsResumeCheck(Context context, String date) {
+        SharedPreferences prefs = prefs(context);
+        if (date.equals(prefs.getString(KEY_RESUME_CHECKED, ""))) return false;
+        JSONObject day = readDays(prefs).optJSONObject(date);
+        return day == null || (day.optInt("t", 0) <= 0 && day.optInt("rb", 0) <= 0);
+    }
+
+    /** Stores the server's last raw total for `date` (once) and marks the date as checked. */
+    static synchronized void applyResume(Context context, String date, int lastRawSteps) {
+        SharedPreferences prefs = prefs(context);
+        LedgerCore.State st = load(prefs);
+        LedgerCore.applyResume(st.days, date, lastRawSteps, System.currentTimeMillis());
+        save(prefs, st);
+        prefs.edit().putString(KEY_RESUME_CHECKED, date).commit();
+    }
+
     /** Debug builds only: add synthetic steps (emulators have no step counter). */
     static synchronized void addDebugSteps(Context context, int steps) {
         SharedPreferences prefs = prefs(context);
-        JSONObject days = readDays(prefs);
+        LedgerCore.State st = load(prefs);
         long now = System.currentTimeMillis();
-        distribute(days, Math.max(0, steps), now, now);
-        prefs.edit().putString(KEY_DAYS, days.toString()).putLong(KEY_LAST_STEP_WALL, now).commit();
+        LedgerCore.addSteps(st, Math.max(0, steps), now, now, ZoneId.systemDefault(), LedgerCore.ALL_UNKNOWN);
+        save(prefs, st);
     }
 }

@@ -57,9 +57,17 @@ public final class MotionTriggers {
         return SyncPolicy.prefs(context).getBoolean(KEY_REGISTERED, false);
     }
 
+    /** Walking types start the walking service; vehicle types feed {@link VehicleState}. */
+    static boolean isVehicleType(int type) {
+        return type == DetectedActivity.IN_VEHICLE || type == DetectedActivity.ON_BICYCLE;
+    }
+
     private static void register(Context context) {
         List<ActivityTransition> transitions = new ArrayList<>();
-        int[] types = {DetectedActivity.WALKING, DetectedActivity.RUNNING, DetectedActivity.ON_FOOT};
+        // IN_VEHICLE / ON_BICYCLE: steps counted while driving (bumps) or cycling go to the
+        // "vehicle" evidence bucket (not a fraud flag).
+        int[] types = {DetectedActivity.WALKING, DetectedActivity.RUNNING, DetectedActivity.ON_FOOT,
+            DetectedActivity.IN_VEHICLE, DetectedActivity.ON_BICYCLE};
         for (int type : types) {
             transitions.add(new ActivityTransition.Builder()
                 .setActivityType(type)
