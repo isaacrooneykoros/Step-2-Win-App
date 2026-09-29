@@ -22,6 +22,7 @@ class LegalDocument(models.Model):
         ("terms_and_conditions", "Terms and Conditions"),
         ("cookie_policy", "Cookie Policy"),
         ("refund_policy", "Refund Policy"),
+        ("fair_play_rules", "Fair Play and Payout Review Rules"),
         ("other", "Other"),
     ]
 
