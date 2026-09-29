@@ -31,6 +31,33 @@
 
         </activity>
 
+        <!--
+          Phase 1c, Health Connect: the privacy explanation Health Connect links to from its
+          permission screen. Android 13 and lower open it with
+          androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE; Android 14+ with
+          VIEW_PERMISSION_USAGE / HEALTH_PERMISSIONS through the alias below.
+        -->
+        <activity
+            android:name=".HealthPermissionsRationaleActivity"
+            android:exported="true"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBar">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity=".HealthPermissionsRationaleActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- Automatic walking service (challenge days): gait evidence only, never GPS. -->
         <service
             android:name=".StepCaptureForegroundService"
@@ -75,6 +102,8 @@
     <!-- Root heuristic (shadow signal): the Magisk manager's default package. No QUERY_ALL_PACKAGES. -->
     <queries>
         <package android:name="com.topjohnwu.magisk" />
+        <!-- Phase 1c: the Health Connect app (Android 9-13) for the SDK availability check. -->
+        <package android:name="com.google.android.apps.healthdata" />
     </queries>
 
     <!-- Permissions -->
@@ -94,6 +123,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!--
+      Phase 1c, Health Connect: READ ONLY, asked only after the user opts in on the
+      "Connected sources" screen. No write permissions. Declared exactly as listed in the
+      Play Console Health Connect declaration (backend/ANTICHEAT.md "Phase 1c").
+    -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE_ROUTES" />
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
 
     <uses-feature
         android:name="android.hardware.camera"

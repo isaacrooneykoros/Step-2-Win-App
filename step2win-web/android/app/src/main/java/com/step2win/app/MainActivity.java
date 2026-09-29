@@ -26,6 +26,28 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
 		if (debuggable && getBridge() != null && getBridge().getWebView() != null) {
 			getBridge().getWebView().getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 		}
+		openRequestedRoute(getIntent(), 2_500L);
+	}
+
+	@Override
+	protected void onNewIntent(Intent intent) {
+		super.onNewIntent(intent);
+		openRequestedRoute(intent, 300L);
+	}
+
+	/**
+	 * Phase 1c: Health Connect's privacy screen ("Open Step2Win") asks for an in-app page
+	 * (the privacy policy). Only fixed, known routes; best effort after the web app loaded.
+	 */
+	private void openRequestedRoute(Intent intent, long delayMs) {
+		if (intent == null) return;
+		String route = intent.getStringExtra(HealthPermissionsRationaleActivity.EXTRA_OPEN_ROUTE);
+		intent.removeExtra(HealthPermissionsRationaleActivity.EXTRA_OPEN_ROUTE);
+		if (!"/legal/privacy-policy".equals(route) || getBridge() == null || getBridge().getWebView() == null) return;
+		final android.webkit.WebView webView = getBridge().getWebView();
+		webView.postDelayed(() -> webView.evaluateJavascript(
+			"(function(){var r='/legal/privacy-policy';if(location.pathname!==r){history.pushState({},'',r);"
+				+ "dispatchEvent(new PopStateEvent('popstate'));}})()", null), delayMs);
 	}
 
 	/**

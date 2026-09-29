@@ -28,6 +28,17 @@ public class StepSyncWorker extends Worker {
         if (reason == null) reason = "periodic";
         float raw = StepCounterReader.readAndRecord(context, 4_000L);
 
+        // Phase 1c: Health Connect (opt-in) in the background only where Health Connect
+        // allows background reads; otherwise the app reads it on open / resume. Our own
+        // step capture above never depends on it.
+        if (!SyncPolicy.appInForeground) {
+            try {
+                HealthSources.refresh(context, true, false);
+            } catch (Throwable t) {
+                Log.w(TAG, "health connect background read skipped", t);
+            }
+        }
+
         String status = "skipped";
         if (SyncPolicy.appInForeground) {
             status = "app_in_foreground"; // the open app drives syncs itself

@@ -16,7 +16,10 @@ import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import androidx.activity.result.ActivityResult;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
@@ -475,6 +478,13 @@ public class DeviceStepCounterPlugin extends Plugin {
             } else {
                 StepCounterReader.readAndRecord(context, 2_500L);
             }
+            // Phase 1c: Health Connect (opt-in) on app open / resume, rate-limited; its
+            // summaries upload after our own steps. Never blocks or fails the step sync.
+            try {
+                HealthSources.refresh(context, !SyncPolicy.appInForeground, false);
+            } catch (Throwable ignored) {
+                // Health Connect missing / crashed: our own counting carries on
+            }
             StepSyncEngine.Options options = new StepSyncEngine.Options();
             options.force = force;
             options.foreground = SyncPolicy.appInForeground;
@@ -486,6 +496,120 @@ public class DeviceStepCounterPlugin extends Plugin {
                 call.reject("Sync result unavailable");
             }
         });
+    }
+
+    // ── Phase 1c: Health Connect (opt-in, read-only) ─────────────────────────
+
+    @PluginMethod
+    public void healthSourcesStatus(PluginCall call) {
+        final Context context = getContext();
+        syncExecutor.execute(() -> resolveHealthStatus(call, context, null));
+    }
+
+    /**
+     * Opt in and show Health Connect's own permission screen (read steps, exercise,
+     * routes, background). When Health Connect is missing or too old, resolves with that
+     * state instead (the app offers the Play Store install and carries on without it).
+     */
+    @PluginMethod
+    public void healthSourcesConnect(PluginCall call) {
+        Context context = getContext();
+        HealthSources.setOptedIn(context, true);
+        String availability = HealthSources.availability(context);
+        if (!"available".equals(availability)) {
+            resolveHealthStatus(call, context, null);
+            return;
+        }
+        try {
+            startActivityForResult(call, HealthConnectPermissions.requestIntent(context, HealthSources.requestedPermissions()), "healthPermissionResult");
+        } catch (Throwable t) {
+            resolveHealthStatus(call, context, "permission_screen_unavailable");
+        }
+    }
+
+    @ActivityCallback
+    private void healthPermissionResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        final Context context = getContext();
+        syncExecutor.execute(() -> {
+            try {
+                HealthSources.refresh(context, false, true);
+            } catch (Throwable ignored) {
+                // status below says what happened
+            }
+            resolveHealthStatus(call, context, null);
+        });
+    }
+
+    @PluginMethod
+    public void healthSourcesRead(PluginCall call) {
+        final Context context = getContext();
+        syncExecutor.execute(() -> {
+            try {
+                HealthSources.refresh(context, !SyncPolicy.appInForeground, true);
+            } catch (Throwable ignored) {
+                // status below
+            }
+            resolveHealthStatus(call, context, null);
+        });
+    }
+
+    /** Stop reading, forget what was read and hand the permissions back to Health Connect. */
+    @PluginMethod
+    public void healthSourcesDisconnect(PluginCall call) {
+        final Context context = getContext();
+        HealthSources.setOptedIn(context, false);
+        syncExecutor.execute(() -> {
+            try {
+                if ("available".equals(HealthSources.availability(context))) HealthConnectPermissions.revokeAll(context);
+            } catch (Throwable ignored) {
+                // already gone / Health Connect missing
+            }
+            resolveHealthStatus(call, context, null);
+        });
+    }
+
+    /** Android 9-13: Play Store page of the Health Connect app. */
+    @PluginMethod
+    public void healthSourcesInstall(PluginCall call) {
+        Context context = getContext();
+        JSObject ret = new JSObject();
+        try {
+            context.startActivity(HealthConnectPermissions.installIntent());
+            ret.put("opened", true);
+        } catch (Throwable t) {
+            try {
+                context.startActivity(HealthConnectPermissions.installWebIntent());
+                ret.put("opened", true);
+            } catch (Throwable t2) {
+                ret.put("opened", false);
+            }
+        }
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void healthSourcesOpenSettings(PluginCall call) {
+        JSObject ret = new JSObject();
+        try {
+            android.content.Intent intent = HealthConnectPermissions.settingsIntent(getContext());
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            ret.put("opened", true);
+        } catch (Throwable t) {
+            ret.put("opened", false);
+        }
+        call.resolve(ret);
+    }
+
+    private void resolveHealthStatus(PluginCall call, Context context, String note) {
+        try {
+            JSObject ret = JSObject.fromJSONObject(HealthSources.status(context));
+            if (note != null) ret.put("note", note);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            call.reject("Health Connect status unavailable");
+        }
     }
 
     @PluginMethod
