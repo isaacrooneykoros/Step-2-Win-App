@@ -74,6 +74,8 @@ JOB_OPTIONS: dict[str, dict[str, int]] = {
     "cleanup-old-suspicious-activities": {"priority": 130, "lease_seconds": 15 * 60},
     # Shadow risk model (apps.risk_ml): analytics only, never touches money, so it runs
     # last. Pure-Python batches over every active user for 3 days: a generous lease.
+    # Walk raw-point retention (privacy): small batched updates, never touches money.
+    "purge-old-walk-points": {"priority": 135, "lease_seconds": 15 * 60},
     "risk-ml-features-and-scores": {"priority": 140, "lease_seconds": 60 * 60},
 }
 

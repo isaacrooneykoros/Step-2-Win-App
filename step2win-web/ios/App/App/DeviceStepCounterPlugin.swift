@@ -12,13 +12,16 @@ import Capacitor
 ///   foreground service on iOS: every launch/resume simply reads the history since midnight.
 /// - While the app is active, live pedometer updates feed cadence and 5-second burst numbers.
 ///
-/// Android-only data (GaitAnalyzer / on-device ML features, foreground service, exact alarms,
-/// background location) does not exist here. Those fields are returned as NSNull (JS null) and
-/// flagged with `gait_available: false` / `sensor_source: "cmpedometer"` so the JS layer can
-/// send nulls to the backend instead of zeros.
+/// Android-only data (GaitAnalyzer / on-device ML features, foreground service, exact alarms)
+/// does not exist here. Those fields are returned as NSNull (JS null) and flagged with
+/// `gait_available: false` / `sensor_source: "cmpedometer"` so the JS layer can send nulls to
+/// the backend instead of zeros.
 ///
-/// Route waypoints: recorded only while the app is open and location is allowed "While Using the
-/// App" (no background location mode on iOS). Same filters and storage format as Android.
+/// Phase 1b: readings carry install_id, tz_offset_minutes / tz_name, burst_source
+/// ("arrival_batched": CoreMotion batches, no per-step timestamps) and evidence_source
+/// "ios_coremotion". Location is no longer captured automatically (only user walks may use it;
+/// walks are not implemented on iOS yet: startWalk answers "unsupported"). Play Integrity has
+/// no iOS equivalent wired yet (App Attest TODO): requestIntegrityToken answers "unsupported".
 @objc(DeviceStepCounterPlugin)
 public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDelegate {
     public let identifier = "DeviceStepCounterPlugin"
@@ -28,7 +31,6 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
         CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "checkAdvancedPermissions", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestLocationPermissions", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "requestBackgroundLocationPermission", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openExactAlarmSettings", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startStepSession", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setActiveStepSession", returnType: CAPPluginReturnPromise),
@@ -40,7 +42,14 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
         CAPPluginMethod(name: "getPendingWaypoints", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearPendingWaypoints", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "claimSequence", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "getStepHistory", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "getStepHistory", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "startWalk", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getWalkState", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "takeWalkPoints", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopWalk", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "requestIntegrityToken", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getDeviceSignals", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getSensorCapabilities", returnType: CAPPluginReturnPromise)
     ]
 
     // Same key names as the Android SharedPreferences file.
@@ -54,6 +63,7 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
     private static let keyCaptureEnabled = "capture_enabled"
     private static let keyWaypointsDate = "pending_waypoints_date"
     private static let keyWaypointsJson = "pending_waypoints_json"
+    private static let keyInstallId = "install_id"
 
     private static let mlModelVersion = "ios-cmpedometer-v1"
     private static let maxWaypointsPerDay = 500
@@ -193,8 +203,6 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
             call.resolve([
                 "activityRecognition": self.motionState(),
                 "location": self.locationState(self.currentLocationStatus()),
-                // No background route tracking on iOS (no background location mode).
-                "backgroundLocation": "unavailable",
                 // Exact alarms are an Android concept; iOS delivers scheduled notifications on time.
                 "exactAlarm": "granted",
                 "exactAlarmApplicable": false,
@@ -218,10 +226,6 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
                 call.resolve(["location": self.locationState(status)])
             }
         }
-    }
-
-    @objc func requestBackgroundLocationPermission(_ call: CAPPluginCall) {
-        call.resolve(["backgroundLocation": "unavailable", "platform": "ios"])
     }
 
     @objc func openExactAlarmSettings(_ call: CAPPluginCall) {
@@ -307,7 +311,13 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
                 "platform": "ios",
                 "app_version": appVersion(),
                 "ml_model_version": DeviceStepCounterPlugin.mlModelVersion,
-                "background_running": false
+                "background_running": false,
+                "burst_source": "arrival_batched",
+                "evidence_source": "ios_coremotion",
+                "evidence_hours": NSNull(),
+                "install_id": getOrCreateInstallId(),
+                "tz_offset_minutes": tzOffsetMinutes(),
+                "tz_name": tzName()
             ])
             return
         }
@@ -404,7 +414,17 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
             "ml_confidence_stability": NSNull(),
             "motion_entropy": NSNull(),
             // No foreground service on iOS; CoreMotion records steps while the app is closed.
-            "background_running": false
+            "background_running": false,
+            // CoreMotion delivers live updates in batches (spread evenly over the elapsed time
+            // above), not with one timestamp per step: never "live_timed".
+            "burst_source": "arrival_batched",
+            // Phase 1b: CoreMotion's own step detection is the evidence; no per-hour gait
+            // attribution on iOS yet (the server treats the steps as unanalysed).
+            "evidence_source": "ios_coremotion",
+            "evidence_hours": NSNull(),
+            "install_id": getOrCreateInstallId(),
+            "tz_offset_minutes": tzOffsetMinutes(),
+            "tz_name": tzName()
         ]
     }
 
@@ -565,20 +585,10 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
     // MARK: Route waypoints (foreground only)
 
     /// Main thread only.
+    /// Phase 1b: location is only used inside a walk the user starts (not yet on iOS), so the
+    /// automatic route capture is off: this only makes sure no old capture keeps running.
     private func updateLocationCapture() {
-        guard let manager = locationManager else { return }
-        let status = manager.authorizationStatus
-        let allowed = status == .authorizedWhenInUse || status == .authorizedAlways
-        let enabled = defaults.bool(forKey: DeviceStepCounterPlugin.keyCaptureEnabled)
-        let active = UIApplication.shared.applicationState == .active
-        if allowed && enabled && active {
-            if !locationUpdatesRunning {
-                manager.startUpdatingLocation()
-                locationUpdatesRunning = true
-            }
-        } else {
-            stopLocationCapture()
-        }
+        stopLocationCapture()
     }
 
     /// Main thread only.
@@ -722,7 +732,143 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
         defaults.set(date, forKey: DeviceStepCounterPlugin.keyWaypointsDate)
     }
 
+    // MARK: Phase 1b: walks, device integrity, capabilities
+
+    /// User walks need CoreLocation + a background location mode on iOS; not implemented yet,
+    /// so the web layer gets a clean "unsupported" and hides the feature.
+    @objc func startWalk(_ call: CAPPluginCall) {
+        call.resolve(["started": false, "reason": "unsupported", "stepSource": "cmpedometer"])
+    }
+
+    private func inactiveWalkState() -> [String: Any] {
+        return [
+            "active": false,
+            "walkId": NSNull(),
+            "startedAt": NSNull(),
+            "endedAt": NSNull(),
+            "elapsedS": 0,
+            "steps": 0,
+            "distanceM": 0,
+            "gaitVerifiedSteps": 0,
+            "gaitShakeSteps": 0,
+            "gaitUnknownSteps": 0,
+            "vehicleSeconds": 0,
+            "mockLocation": false,
+            "autoEnded": false,
+            "gpsStatus": "unavailable",
+            "stepSource": "cmpedometer",
+            "pointsPending": 0
+        ]
+    }
+
+    @objc func getWalkState(_ call: CAPPluginCall) {
+        call.resolve(inactiveWalkState())
+    }
+
+    @objc func takeWalkPoints(_ call: CAPPluginCall) {
+        call.resolve(["points": [Any]()])
+    }
+
+    @objc func stopWalk(_ call: CAPPluginCall) {
+        var state = inactiveWalkState()
+        state["points"] = [Any]()
+        call.resolve(state)
+    }
+
+    /// TODO(Phase 2): App Attest (DCAppAttestService) as the iOS counterpart of Play Integrity.
+    @objc func requestIntegrityToken(_ call: CAPPluginCall) {
+        call.resolve(["token": NSNull(), "error": "unsupported"])
+    }
+
+    private func sensorFlags() -> (counter: Bool, accel: Bool, gyro: Bool, gravity: Bool) {
+        let motion = CMMotionManager()
+        return (CMPedometer.isStepCountingAvailable(),
+                motion.isAccelerometerAvailable,
+                motion.isGyroAvailable,
+                motion.isDeviceMotionAvailable)
+    }
+
+    /// Supplementary heuristics only (shadow signals on the server).
+    @objc func getDeviceSignals(_ call: CAPPluginCall) {
+        let flags = sensorFlags()
+        #if targetEnvironment(simulator)
+        let emulator = true
+        #else
+        let emulator = false
+        #endif
+        #if DEBUG
+        let debuggable = true
+        #else
+        let debuggable = false
+        #endif
+        call.resolve([
+            "emulator": emulator,
+            "rooted": isJailbroken(),
+            "debuggable": debuggable,
+            "adb_enabled": false,
+            "has_step_counter": flags.counter,
+            "has_step_detector": flags.counter,
+            "has_accelerometer": flags.accel,
+            "has_gyroscope": flags.gyro,
+            "has_gravity": flags.gravity
+        ])
+    }
+
+    @objc func getSensorCapabilities(_ call: CAPPluginCall) {
+        let flags = sensorFlags()
+        call.resolve([
+            "hasStepCounter": flags.counter,
+            "hasStepDetector": flags.counter,
+            "hasAccelerometer": flags.accel,
+            "hasGyroscope": flags.gyro,
+            "hasGravity": flags.gravity,
+            // walks are not implemented on iOS yet (startWalk answers "unsupported")
+            "walkSupported": false
+        ])
+    }
+
+    private func isJailbroken() -> Bool {
+        #if targetEnvironment(simulator)
+        return false
+        #else
+        let paths = [
+            "/Applications/Cydia.app",
+            "/Applications/Sileo.app",
+            "/Library/MobileSubstrate/MobileSubstrate.dylib",
+            "/bin/bash",
+            "/usr/sbin/sshd",
+            "/etc/apt",
+            "/private/var/lib/apt/",
+            "/var/jb"
+        ]
+        for path in paths where FileManager.default.fileExists(atPath: path) {
+            return true
+        }
+        return false
+        #endif
+    }
+
     // MARK: Helpers
+
+    /// Random id of this install (new after a reinstall: app deletion removes UserDefaults).
+    private func getOrCreateInstallId() -> String {
+        if let stored = defaults.string(forKey: DeviceStepCounterPlugin.keyInstallId), !stored.isEmpty {
+            return stored
+        }
+        let id = UUID().uuidString.lowercased()
+        defaults.set(id, forKey: DeviceStepCounterPlugin.keyInstallId)
+        return id
+    }
+
+    /// Minutes east of UTC right now (EAT = 180).
+    private func tzOffsetMinutes() -> Int {
+        return TimeZone.current.secondsFromGMT() / 60
+    }
+
+    /// IANA name, at most 64 characters.
+    private func tzName() -> String {
+        return String(TimeZone.current.identifier.prefix(64))
+    }
 
     /// Call on stateQueue only.
     private func clearSessionPrefs() {

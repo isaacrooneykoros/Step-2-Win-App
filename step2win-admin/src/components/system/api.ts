@@ -35,6 +35,7 @@ export interface SystemSettings {
   payout_holds_enabled: boolean
   payout_hold_trust_score_max: number
   payout_hold_large_win_kes: string
+  device_integrity_policy: 'shadow' | 'enforce'
   updated_at: string | null
   updated_by: string | null
 }

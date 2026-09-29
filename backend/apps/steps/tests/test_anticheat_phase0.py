@@ -89,6 +89,17 @@ SHAKER_GAIT = {
 NULL_GAIT = {key: None for key in HONEST_GAIT}
 
 
+def evidence_hours_for(steps, bucket="verified", start_hour=6):
+    """Per-hour walking evidence covering `steps` (at most 12,000 per hour)."""
+    hours, hour, left = [], start_hour, int(steps)
+    while left > 0 and hour <= 23:
+        chunk = min(12_000, left)
+        hours.append({"hour": hour, bucket: chunk, "active_minutes": min(60, max(1, chunk // 100))})
+        left -= chunk
+        hour += 1
+    return hours
+
+
 class Phase0SyncBase(APITestCase):
     platform = "android"
 
@@ -137,6 +148,13 @@ class Phase0SyncBase(APITestCase):
             "timestamp_client": (ts or timezone.now()).isoformat(),
         }
         body.update(HONEST_GAIT if gait is None else gait)
+        # Phase 1b: walking evidence, so money-eligible steps behave as before in these
+        # Phase 0 tests (the evidence tiers are tested in test_phase1b.py).
+        if self.platform == "android":
+            body["evidence_source"] = "android_gait_v1"
+            body["evidence_hours"] = evidence_hours_for(steps)
+        elif self.platform == "ios":
+            body["evidence_source"] = "ios_coremotion"
         body.update(extra)
         self.sequence += 1
         return body
@@ -769,7 +787,8 @@ class VerificationBreakdownTests(Phase0SyncBase):
         self.assertEqual(breakdown["counted_steps"], 8_000)
         self.assertEqual(breakdown["credited_steps"], 8_000)
         self.assertEqual(breakdown["unverified_steps"], 0)
-        self.assertEqual(breakdown["reasons"], [])
+        # Only the positive "why": nothing was held back.
+        self.assertEqual([r["code"] for r in breakdown["reasons"]], ["sensor_verified"])
         self.assertEqual(self.record(day).verification, breakdown)
 
     def test_pace_and_daily_limit_reasons(self):

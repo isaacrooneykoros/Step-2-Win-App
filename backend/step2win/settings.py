@@ -500,7 +500,39 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=1, minute=30),  # 01:30 UTC (04:30 EAT)
         "kwargs": {"days": 3},
     },
+    # Walk privacy retention: raw GPS points of walks older than 30 days are deleted
+    # (the simplified route is kept). apps/steps/walks.py::purge_old_walk_points
+    "purge-old-walk-points": {
+        "task": "apps.steps.tasks.purge_old_walk_points_task",
+        "schedule": crontab(hour=3, minute=45),
+    },
 }
+
+# ── Phase 1b: walking evidence, walks, device integrity (backend/ANTICHEAT.md) ──
+# Money-eligible steps need walking evidence. False = tiers are computed and shown but
+# every credited step still counts toward challenges (emergency switch).
+STEP_MONEY_REQUIRES_EVIDENCE = (
+    os.getenv("STEP_MONEY_REQUIRES_EVIDENCE", "True").strip().lower() == "true"
+)
+# Days BEFORE this date (YYYY-MM-DD, device-local day) keep full challenge credit
+# (grandfathered). Empty = the cut-over is the deploy: each day keeps the credit it had
+# when Phase 1b first saw it.
+STEP_EVIDENCE_CUTOVER_DATE = os.getenv("STEP_EVIDENCE_CUTOVER_DATE", "").strip()
+WALK_RAW_POINTS_RETENTION_DAYS = int(os.getenv("WALK_RAW_POINTS_RETENTION_DAYS", "30"))
+# Google Play Integrity (apps/steps/integrity.py). Unset = shadow: verdicts are
+# recorded as "unavailable" and nothing is blocked. See ANTICHEAT.md for the setup.
+PLAY_INTEGRITY_PACKAGE_NAME = os.getenv("PLAY_INTEGRITY_PACKAGE_NAME", "").strip()
+# Service account key: the JSON itself (or base64 of it), or a file path.
+PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON = os.getenv("PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON", "")
+PLAY_INTEGRITY_SERVICE_ACCOUNT_FILE = os.getenv("PLAY_INTEGRITY_SERVICE_ACCOUNT_FILE", "")
+# Comma-separated SHA-256 signing-cert digests accepted for builds installed outside Play.
+PLAY_INTEGRITY_ALLOWED_CERT_SHA256 = os.getenv("PLAY_INTEGRITY_ALLOWED_CERT_SHA256", "")
+# Accept MEETS_BASIC_INTEGRITY (uncertified / custom-ROM phones) as verified.
+PLAY_INTEGRITY_ACCEPT_BASIC = (
+    os.getenv("PLAY_INTEGRITY_ACCEPT_BASIC", "False").strip().lower() == "true"
+)
+# Fallback when the admin setting can't be read ("shadow" | "enforce").
+STEP_INTEGRITY_POLICY = os.getenv("STEP_INTEGRITY_POLICY", "shadow").strip().lower()
 # Shadow risk model (apps.risk_ml). Local-day offset for "late sync" and hour-of-day features.
 RISK_ML_LOCAL_UTC_OFFSET_HOURS = int(os.getenv("RISK_ML_LOCAL_UTC_OFFSET_HOURS", "3"))
 # Score at which a (future) payout hold would trigger; used only to report precision/recall.
@@ -682,8 +714,10 @@ STEP_ANTICHEAT_V2_SHADOW_MODE = (
     os.getenv("STEP_ANTICHEAT_V2_SHADOW_MODE", "True").strip().lower() == "true"
 )
 STEP_ANTICHEAT_V2_VERSION = os.getenv("STEP_ANTICHEAT_V2_VERSION", "v2")
+# Phase 1b: the steps-per-minute rules use server-computed active minutes (not the
+# client's), so the day average can legitimately reach running cadence (180-200).
 ANTICHEAT_V2_SUSPICIOUS_STEPS_PER_MIN = float(
-    os.getenv("ANTICHEAT_V2_SUSPICIOUS_STEPS_PER_MIN", "165")
+    os.getenv("ANTICHEAT_V2_SUSPICIOUS_STEPS_PER_MIN", "205")
 )
 ANTICHEAT_V2_IMPOSSIBLE_STEPS_PER_MIN = float(
     os.getenv("ANTICHEAT_V2_IMPOSSIBLE_STEPS_PER_MIN", "240")

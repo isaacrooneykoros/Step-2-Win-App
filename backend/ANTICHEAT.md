@@ -82,8 +82,8 @@ last minute, i.e. `cadence_spm` 0/None).
 |---|---|---|---|
 | `daily_total_impossible` (> 120,000) | CRITICAL | 1.0 × 60 | always (total) |
 | `daily_total_review` (> 70,000) | MEDIUM | 0.4 × 8 | always (total) |
-| `steps_per_min_impossible` (> 240 over active minutes) | CRITICAL | 1.0 × 40 | always |
-| `steps_per_min_suspicious` (> 165) | HIGH | 0.8 × 20 | always |
+| `steps_per_min_impossible` (> 240 over server-computed active minutes) | CRITICAL | 1.0 × 40 | always |
+| `steps_per_min_suspicious` (> 205 since Phase 1b; was 165) | HIGH | 0.8 × 20 | always |
 | `cadence_impossible` (> 245 spm) | CRITICAL | 1.0 × 35 | cadence present |
 | `cadence_suspicious` (> 205 spm) | MEDIUM | 0.6 × 10 | cadence present |
 | `burst_impossible` (> 28 / 5 s) | HIGH | 0.8 × 16 | delta > 0 **and** `burst_source == "live_timed"` |
@@ -170,26 +170,281 @@ HIGH gait/ML flags) stays excluded.
 requesting user's days only). Per day:
 
 ```json
-{"version": 1, "date": "2026-09-24", "counted_steps": 64000, "credited_steps": 60000,
- "unverified_steps": 4000, "under_review": false,
- "reasons": [{"code": "faster_than_walking_pace", "steps_affected": 3200,
-              "severity": "info", "user_message": "3,200 steps arrived faster than walking pace allows and weren't counted toward challenges."}]}
+{"version": 2, "date": "2026-09-24", "counted_steps": 8600, "goal_steps": 8400,
+ "challenge_steps": 7900, "credited_steps": 7900, "unverified_steps": 700,
+ "under_review": false,
+ "tiers": {"walk_session": 3000, "sensor_verified": 4900, "wearable": 0,
+           "earlier_credit": 0, "unverified": 500},
+ "reasons": [{"code": "walk_session_verified", "steps_affected": 3000, "severity": "positive", "user_message": "3,000 steps from your walks were verified with GPS."},
+             {"code": "vehicle", "steps_affected": 500, "severity": "info", "user_message": "500 steps were counted while you seemed to be travelling in a vehicle or on a bike. ..."}]}
 ```
 
-`counted_steps` = what the phone reported; `credited_steps` = what counts toward
-challenges (0 while under review); `unverified_steps` = counted − credited.
+`counted_steps` = what the phone reported (raw); `goal_steps` = credited steps (goals,
+streaks, XP); `challenge_steps` = money-eligible steps (challenge progress, qualification,
+payouts; 0 while under review); `credited_steps` = `challenge_steps` (v1 meaning:
+"counts toward challenges"); `unverified_steps` = counted − challenge_steps; `tiers` =
+the split of `goal_steps` (Phase 1b, below; `earlier_credit` = grandfathered).
 
 ### Reason codes (stable)
 
-| Code | Severity | steps_affected | Message |
+| Code | Severity | steps_affected | Message (N = steps) |
 |---|---|---|---|
+| `walk_session_verified` | positive | walk-session tier | "N steps from your walks were verified with GPS." |
+| `sensor_verified` | positive | sensor-verified tier | "N steps were confirmed as walking by your phone's motion sensors." |
+| `earlier_credit` | positive | grandfathered tier | "N steps counted before step verification started and count in full." |
+| `unverified_no_walking_evidence` | info | steps nothing measured | "N steps were counted while your phone wasn't checking your walking (for example with the app closed for a long time). They count for your goals. Opening the app now and then, or starting a walk, helps your steps count toward challenges." |
+| `unverified_motion` | info | steps whose motion didn't look like walking | "N steps came from movement that didn't look like walking, such as the phone being jiggled or resting on something that vibrates. They still count for your goals." |
+| `vehicle` | info | steps in a vehicle / on a bike | "N steps were counted while you seemed to be travelling in a vehicle or on a bike. They still count for your goals, but not toward challenges." |
+| `device_not_verified` | info | steps from a failed-integrity session (enforce only) | "N steps came from a phone we couldn't verify right now, so they count for your goals but not toward challenges." |
+| `app_update_needed` | info | steps from an app without evidence | "N steps came from an app version that can't check walking yet. Update the app so your steps can count toward challenges. They still count for your goals." |
 | `under_review` | review | credited steps held | "This day is under review, so its steps don't count toward challenges for now. You don't need to do anything." |
 | `faster_than_walking_pace` | info | deferred steps | "N steps arrived faster than walking pace allows and weren't counted toward challenges." |
 | `daily_limit` | info | steps above the cap | "Steps above 60,000 in a day aren't counted toward challenges." |
 | `partly_verified` | info | steps not credited because of reduced confidence | "N steps couldn't be fully verified, so they count only partly toward challenges." |
 | `upload_not_verified` | review | null | "An upload for this day couldn't be verified and wasn't counted." |
 
-Messages never contain rule names, weights, thresholds or risk scores.
+Messages never contain rule names, weights, thresholds, risk scores, or words like
+"shake", "fraud", "integrity" or "mock".
+
+## Phase 1b: walking evidence, walks, device integrity
+
+Code: `apps/steps/evidence.py` (tiers, day refresh, time zone, active minutes),
+`apps/steps/walks.py` + `walk_views.py` (walks), `apps/steps/integrity.py` (Play
+Integrity), `apps/steps/views.py::sync_health` (wiring), `apps/steps/verification.py`
+("why" breakdown v2). Tests: `apps/steps/tests/test_phase1b.py`.
+
+### Evidence tiers: goals vs money
+
+Every credited step of a day (`HealthRecord.steps`, unchanged by Phase 1b: goals,
+streaks and XP keep using it) falls in exactly one tier (`HealthRecord.tier_*`):
+
+| Tier | What | Counts toward challenges |
+|---|---|---|
+| `grandfathered` | credit the day already had when Phase 1b first saw it (cut-over) | yes |
+| `wearable` | reserved for Phase 1c (attested watch / band) | yes |
+| `walk_session` | steps of a user-started walk the server verified | yes |
+| `sensor_verified` | phone-counter steps covered by on-device walking evidence (Android per-minute gait attribution; iOS CoreMotion, see below) | yes |
+| `unverified` | no evidence (app closed and nothing measuring, old app, web), motion that didn't look like walking, vehicle travel, a device failing integrity under the enforce policy | **no** |
+
+`HealthRecord.eligible_steps` = grandfathered + wearable + walk_session +
+sensor_verified (never more than `steps`). Challenge progress = the sum of
+`coalesce(eligible_steps, steps)` over the challenge window's days that are not under
+review (`evidence.challenge_total_steps`): used by the sync-time `Participant.steps`
+recompute (`views.recompute_challenge_progress`, also run when a walk or an hourly
+upload changes a day's eligibility), by joining a challenge, and therefore by
+qualification, tie resolution (`best_day_steps` uses money steps too) and payouts.
+
+`evidence.refresh_day(record)` recomputes a day's tiers, `eligible_steps`, server
+active minutes and the breakdown from what is stored; it runs after every sync, walk
+finish and hourly upload, so late evidence (a walk verified after the day's syncs)
+lands without another step upload.
+
+**The server is the judge.** Client evidence is validated (hours 0..23, non-negative
+ints, ≤ 20,000 per hour, proportionally scaled if above), only accepted from the
+platform it claims (`android_gait_v1` only from an Android session/user,
+`ios_coremotion` only from iOS), capped by the day's credited steps, and can only ever
+*lower* eligibility compared with the credited total. A modified client that claims
+everything is "verified" is what Play Integrity (enforce) is for.
+
+**iOS:** CoreMotion / CMPedometer counts steps with Apple's motion coprocessor and its
+own gait model, so iOS phone steps are `sensor_verified` for now. Phase 1c adds
+HealthKit provenance (source device / app) and can tighten this.
+
+### Cut-over and grandfathering (nothing is stripped retroactively)
+
+- A day never synced after the deploy keeps `eligible_steps = NULL`, which counts as
+  full credit everywhere (`coalesce(eligible_steps, steps)`).
+- The first Phase 1b sync of a day that already had credit stores that credit as
+  `grandfathered` (`anticheat.p1b.grandfathered`); only steps credited from then on need
+  evidence.
+- `STEP_EVIDENCE_CUTOVER_DATE=YYYY-MM-DD` (env): days before it keep full challenge
+  credit even when synced later (tiers are still computed and shown). Recommended: set
+  it to the day the Phase 1b app update is live in the Play Store / App Store, so users
+  on the old app aren't surprised before they could update.
+- `STEP_MONEY_REQUIRES_EVIDENCE=False` (env) is the emergency switch: tiers are still
+  recorded, but every credited step counts toward challenges.
+- Users still on an old app (no evidence) see `app_update_needed`.
+
+### Sync payload (new optional fields, all validated server-side)
+
+`tz_offset_minutes` (−720..840), `tz_name`, `install_id`, `burst_source`
+(`live_timed` | `arrival_batched`), `evidence_source` (`android_gait_v1` |
+`ios_coremotion`), `evidence_hours` (≤ 24 used): per local hour
+`{hour, verified, shake, unknown, vehicle, walk, active_minutes, gait_minutes}`,
+cumulative for the day and the install; every counted step of the hour is in exactly
+one bucket. `active_minutes` in the payload is ignored.
+
+Per hour the Android app attributes each minute's counter steps from its per-minute
+gait verdict (see "Android walking evidence" below): `verified` (walking/running seen and
+the counter's cadence agrees with the accelerometer's), `shake` (motion clearly not
+walking), `unknown` (nothing measured, inconclusive or a missing sensor: **never**
+"shake"), `vehicle` (Activity Recognition IN_VEHICLE / ON_BICYCLE, or vehicle speed
+during a walk), `walk` (inside a user-started walk; the walk itself is verified by the
+server).
+
+Tier arithmetic (`evidence.compute_tiers`, pure): post = credited − grandfathered;
+Android: walk_session = min(verified walks' steps, walk bucket); sensor_verified =
+verified bucket (minus hours with server-side vehicle movement) + gait-verified steps
+of walks whose route couldn't be checked (no GPS / treadmill) up to the rest of the walk
+bucket; iOS: sensor_verified = post − walk_session; no evidence: only verified walks.
+Everything is capped at post; the unverified remainder is explained by cause
+(device_not_verified → vehicle → unverified_motion → no evidence / app update).
+
+### Reinstall and second phone (install streams)
+
+Each upload belongs to a stream: `install_id` (a random id per app install; a reinstall
+gets a new one), else the session's device id. The server keeps each stream's last raw
+total (`anticheat.streams_raw`) and the day's raw total is the **max** over streams,
+never the sum (two phones in one pocket can't double a day):
+- the same stream going down → 400 + HIGH `non_monotonic_steps` (unchanged);
+- another stream reporting less than the day already has (fresh install, second phone)
+  → 200 `secondary_stream: true`, its evidence is stored, nothing new is credited, **no
+  flag**;
+- `GET /api/steps/resume/?date=` returns the day's raw total (max over streams). A fresh
+  install whose ledger has nothing for today resumes from it (reported total =
+  resumed base + steps counted since), so an honest reinstall continues seamlessly.
+- Evidence of several streams is merged per hour by taking the stream that covered most
+  of that hour (never summed).
+
+### Time zone (replaces the UTC+3 assumption when the phone reports one)
+
+The phone sends `tz_offset_minutes` / `tz_name` with each sync and at step-session /
+walk start. The day keeps its first offset; one change per day is accepted (travel,
+DST). More changes: the most conservative offset seen (least time since local midnight)
+is used and a LOW `timezone_hopping` flag is recorded (informational, no trust or
+suspicion effect). With a known offset the velocity day bound uses it with ±30 min
+tolerance (instead of EAT + 2 h), and a `date` later than the phone's own local date is
+rejected (400). Without an offset the Phase 0 behaviour is unchanged. Today / summary /
+weekly views use the user's last reported offset for "today".
+
+### Active minutes (server-computed)
+
+`HealthRecord.active_minutes` = per hour, the minutes the phone saw steps in (evidence
+`active_minutes`) bounded by what the hour's steps make plausible (≥ 1 minute per 240
+steps, ≤ 1 minute per 30 steps, ≤ 60), else steps / 100; steps not covered by any hour
+yet: / 100. The steps-per-minute rules divide the day total by these minutes; the
+"suspicious" level moved from 165 to 205 (env `ANTICHEAT_V2_SUSPICIOUS_STEPS_PER_MIN`)
+because with real minutes a runner's day can average 180-200 per active minute.
+
+### Vehicles (not a fraud flag)
+
+- Client: Activity Recognition IN_VEHICLE / ON_BICYCLE transitions put the steps of
+  those minutes in the `vehicle` bucket; during walks GPS vehicle speed does too.
+- Server: GPS segments faster than 7 m/s (≤ 70 m/s; slower or teleport glitches are
+  ignored) are kept as vehicle time per local hour, from walks (`WalkSession.vehicle_hours`)
+  and from hourly route uploads (`anticheat.vehicle_segments`, deduplicated by fix
+  time). An hour with ≥ 10 minutes of vehicle movement moves that hour's `verified`
+  evidence to `vehicle`. These steps still count for goals; message `vehicle`.
+
+### "Start a walk" sessions
+
+Opt-in, foreground only, started by the user (Home, challenge detail). Endpoints under
+`/api/steps/walks/`: `start/`, `<id>/points/` (≤ 500 per call, ≤ 5,000 per walk),
+`<id>/finish/` (idempotent), `<id>/integrity/`, `<id>/`, list, `privacy-zone/`
+(GET / PUT / DELETE). One active walk per user (a new start abandons an old one).
+
+Verdict (`walks.decide`, pure; reasons are stable codes with kind messages):
+- `walk_mock_location` — any fix from a mock provider (Location.isMock /
+  isFromMockProvider) or the app's mock flag → unverified;
+- `walk_device_not_verified` — integrity failed under the enforce policy;
+- `walk_too_short` — under 2 minutes or 100 steps;
+- `walk_cadence_unusual` — more than 4 steps/s or 230 per minute over the walk;
+- `walk_vehicle` — more than 20% of the walk at vehicle speed;
+- `walk_motion_not_walking` — Android gait called more than 25% of the steps shaking;
+- `walk_no_route` / `walk_route_short_for_steps` — fewer than 5 fixes, or a stride
+  below 0.30 m (treadmill, indoors, GPS blocked): not route-verified, but the
+  **gait-verified steps still count** as `sensor_verified`;
+- `walk_route_long_for_steps` — stride above 2.2 m (vehicle / bike);
+- otherwise `walk_session_verified`: verified steps = steps − shake-like steps, minus
+  the vehicle share, scaled down when GPS covered less than 80% of the walk's duration.
+Fast fixes are kept and counted as vehicle time, never silently dropped. A walk belongs
+to its start's local day.
+
+Privacy: GPS is on only during a walk (high accuracy). `shared_polyline` (anything
+others may see) drops the first and last ~250 m and points in the user's optional home
+privacy zone. The zone is stored as salted SHA-256 hashes of the geohash-7 cells
+(~150 m) covering the circle (radius 100-1,000 m) — never the coordinates. Retention:
+raw points are deleted after `WALK_RAW_POINTS_RETENTION_DAYS` (30) by the scheduled job
+`purge-old-walk-points` (03:45 UTC, priority 135, lease 15 min); the simplified route
+(Douglas-Peucker, 8 m tolerance, encoded polyline) is kept. Walks left active for a day
+are closed as abandoned by the same job.
+
+Background location is gone: `ACCESS_BACKGROUND_LOCATION` is removed from the manifest,
+permission flows and settings. The automatic walking service keeps gait evidence only
+(no GPS). Location permission is asked at the first walk.
+
+### Device integrity (Google Play Integrity)
+
+- Nonce: `session/start/` returns `integrity_nonce` (= `StepSession.server_nonce`,
+  base64url) and `integrity_requested` (Android and the verifier configured); walks
+  return their own `integrity_nonce`. The app requests a classic Play Integrity token for
+  that nonce and posts it to `session/integrity/` or `walks/<id>/integrity/`.
+- The server calls Google's `decodeIntegrityToken` with a service account and checks:
+  nonce, package name, token age (≤ 15 min), `appRecognitionVerdict ==
+  PLAY_RECOGNIZED` (or an allow-listed signing certificate for builds installed outside
+  Play), `MEETS_DEVICE_INTEGRITY` (or `MEETS_BASIC_INTEGRITY` with
+  `PLAY_INTEGRITY_ACCEPT_BASIC=True`). Licensing is recorded only. The verdict (no raw
+  token) is stored on the session / walk (`integrity_status`, `integrity_verdict`).
+- Not configured → every check is `unavailable` (SHADOW by construction). Google
+  unreachable → `error`, never blocks.
+- Policy: admin setting **Payout review > Device integrity** (`device_integrity_policy`,
+  default `shadow`). `enforce`: a day with a failed Android session (sticky for the
+  day), or an Android session that sent no token 10 minutes after starting (once the
+  verifier is configured), has its post-cut-over steps moved to `unverified`
+  (`device_not_verified`): goals only. Never a fraud flag, never a trust change. iOS and
+  web are never blocked (no attestation yet).
+- Emulator / root / debuggable / ADB heuristics (`device_signals` at session start)
+  are stored as shadow signals only (`integrity_verdict.heuristics`).
+- `python manage.py integrity_report --days 7` summarises statuses, failure reasons,
+  shadow heuristics and the steps enforce would move, to decide when to enforce.
+
+#### Owner setup (Google Cloud / Play Console)
+
+1. Play Console → your app (com.step2win.app) → **Test and release → App integrity →
+   Play Integrity API** → **Link a Cloud project** (create a new Google Cloud project or
+   choose an existing one). Linking enables the Play Integrity API for that project.
+2. Google Cloud console (same project) → **APIs & Services → Library** → check that
+   **Google Play Integrity API** is enabled.
+3. **IAM & Admin → Service accounts → Create service account** (for example
+   `play-integrity-verifier`). No project roles are needed for decoding tokens.
+4. Open the service account → **Keys → Add key → Create new key → JSON**. Keep the file
+   secret (never commit it).
+5. Backend environment (Render → the web service → Environment):
+   - `PLAY_INTEGRITY_PACKAGE_NAME=com.step2win.app`
+   - `PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON=` the JSON file's contents (or its base64)
+   - optional `PLAY_INTEGRITY_ALLOWED_CERT_SHA256=` the SHA-256 of your app signing
+     certificate (Play Console → App integrity → App signing), only if you also
+     distribute APKs outside Play;
+   - optional `PLAY_INTEGRITY_ACCEPT_BASIC=True` to accept uncertified phones.
+6. Android build: the Cloud **project number** (Cloud console → Dashboard → Project
+   info) goes into the app build as `PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER` (Gradle
+   property or environment variable; see the Android section below), then publish the
+   build through Play.
+7. Leave the admin policy on **shadow** for at least a week; run `integrity_report`.
+   Switch to **enforce** only when failures are rare and understood. Classic requests
+   have a default quota of 10,000 per day (the app makes about one per 12-hour step
+   session plus one per walk): request a higher quota in Play Console before you need it.
+8. Huawei / phones without Google Play services cannot produce tokens: under enforce
+   their Android sessions count as unchecked (goals only). Decide before enforcing
+   (open question).
+
+#### iOS: App Attest (designed, not implemented)
+
+Needs an Apple Developer account (DeviceCheck / App Attest capability), so it is a
+TODO. Design: at first launch the app generates an App Attest key
+(`DCAppAttestService.generateKey`), the server issues a challenge (the same
+`integrity_nonce`), the app calls `attestKey(keyId, clientDataHash: SHA256(nonce))` and
+posts the attestation; the server validates the CBOR attestation against Apple's App
+Attest root CA, the app id (`TEAMID.bundleId`), the counter and the nonce, and stores the
+public key per install. Later sessions send an assertion
+(`generateAssertion(keyId, SHA256(nonce))`) verified with the stored key and a
+monotonic counter. Until then iOS sessions stay `unchecked` and are never blocked.
+
+### Burst timing
+
+`burst_source: "live_timed"` only when `burst_steps_5s` is built from real per-event
+sensor timestamps (Android `TYPE_STEP_DETECTOR` `SensorEvent.timestamp`); batched
+counter events are `arrival_batched`. Burst rules still apply only to `live_timed`.
 
 ## Security hygiene
 
@@ -198,6 +453,35 @@ Messages never contain rule names, weights, thresholds or risk scores.
 existing rows.
 
 ## Changelog
+
+### Phase 1b (2026-09-29) — money needs real walking evidence
+
+The direct fix for "shaking the phone produced lots of counted steps": shaken, vehicle
+and unmeasured steps still count for goals / streaks / XP, but only evidence-backed
+steps count toward challenges and payouts.
+
+1. Evidence tiers per day (`tier_*`, `eligible_steps`); challenge progress, joins,
+   qualification, tie-break best day and payouts use money-eligible steps.
+2. Android per-minute walking-evidence attribution uploaded as `evidence_hours`
+   (server-validated, capped); iOS CoreMotion counts as sensor-verified.
+3. "Start a walk" GPS sessions with server consistency checks, mock-location
+   detection, vehicle-speed handling, privacy trimming, salted-geohash home zone and
+   30-day raw-point retention (scheduled job `purge-old-walk-points`).
+4. Play Integrity verifier (shadow by default; admin enforce policy), shadow device
+   heuristics, `integrity_report` command; App Attest designed (TODO).
+5. Vehicles: Activity Recognition + GPS speed on the phone, vehicle-speed hours on
+   the server → `vehicle` (not a fraud flag).
+6. Phase 0 follow-ups: client time zone for day bounds (+ LOW `timezone_hopping`);
+   `burst_source` `live_timed` only from real per-step timestamps; install streams
+   (reinstall / second phone: max per stream, `GET /api/steps/resume/`, no false
+   `non_monotonic_steps`); server-computed active minutes (steps-per-minute
+   suspicious level 165 → 205).
+7. "Why" breakdown v2 (`goal_steps` vs `challenge_steps`, tiers, new kind reasons).
+8. Background location removed entirely.
+
+Migrations: `steps.0014_phase1b_evidence_walks` (HealthRecord tiers + eligible steps,
+StepSession integrity / time zone / install id, WalkSession, WalkPrivacyZone),
+`admin_api.0010_device_integrity_policy`.
 
 ### Phase 0 (2026-09-25) — stop hurting honest users
 

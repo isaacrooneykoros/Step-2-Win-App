@@ -1,4 +1,4 @@
-import { AlarmClock, Camera, MapPin, Navigation, type LucideIcon } from 'lucide-react';
+import { AlarmClock, Camera, MapPin, type LucideIcon } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 import Button from '../ui/Button';
 import { IconTile, Pill } from '../ui/Pill';
@@ -55,8 +55,7 @@ function PermissionItem({ icon, title, description, state, actionLabel, onAction
 
 /** Camera, location and alarm permissions — what each is for, its status, and how to change it. */
 export function PermissionsSheet({ open, onClose, permissions: p }: PermissionsSheetProps) {
-  // iOS: routes are recorded only while the app is open and there are no exact-alarm settings.
-  const showBackground = p.backgroundLocation !== 'unavailable';
+  // iOS has no exact-alarm settings.
   const showAlarm = p.exactAlarm !== 'unavailable';
   return (
     <Sheet open={open} onClose={onClose} title="App permissions" description="What Step2Win can access on this phone, and why. You can change these at any time.">
@@ -73,25 +72,12 @@ export function PermissionsSheet({ open, onClose, permissions: p }: PermissionsS
         <PermissionItem
           icon={MapPin}
           title="Location while using the app"
-          description="Records the route of your walks so you can see them on a map."
+          description="Only used during a walk you start, to record its route. Step2Win never tracks your location in the background."
           state={p.location}
           actionLabel={p.location === 'granted' ? 'Check again' : 'Allow location'}
           onAction={p.requestLocation}
           loading={p.busy === 'location'}
         />
-        {showBackground && (
-        <PermissionItem
-          icon={Navigation}
-          title="Location in the background"
-          description="Keeps recording your route when Step2Win isn’t on screen."
-          state={p.backgroundLocation}
-          actionLabel={p.backgroundLocation === 'granted' ? 'Check again' : 'Allow background location'}
-          onAction={p.requestBackground}
-          loading={p.busy === 'background'}
-          disabled={p.location !== 'granted'}
-          disabledReason="Allow location while using the app first."
-        />
-        )}
         {showAlarm && (
         <PermissionItem
           icon={AlarmClock}

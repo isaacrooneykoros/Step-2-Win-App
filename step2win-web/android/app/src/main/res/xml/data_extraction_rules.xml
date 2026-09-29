@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ backup and device transfer. Same exclusions as backup_rules.xml (see there). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="step2win_install.xml" />
+        <exclude domain="sharedpref" path="step2win_step_ledger.xml" />
+        <exclude domain="sharedpref" path="device_step_counter_prefs.xml" />
+        <exclude domain="sharedpref" path="step2win_sync.xml" />
+        <exclude domain="sharedpref" path="step2win_walk.xml" />
+        <exclude domain="sharedpref" path="step2win_motion_state.xml" />
+        <exclude domain="file" path="walk_points.jsonl" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="step2win_install.xml" />
+        <exclude domain="sharedpref" path="step2win_step_ledger.xml" />
+        <exclude domain="sharedpref" path="device_step_counter_prefs.xml" />
+        <exclude domain="sharedpref" path="step2win_sync.xml" />
+        <exclude domain="sharedpref" path="step2win_walk.xml" />
+        <exclude domain="sharedpref" path="step2win_motion_state.xml" />
+        <exclude domain="file" path="walk_points.jsonl" />
+    </device-transfer>
+</data-extraction-rules>

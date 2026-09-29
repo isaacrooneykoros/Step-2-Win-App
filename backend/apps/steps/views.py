@@ -31,7 +31,12 @@ from .anti_cheat import (ANTICHEAT_DAY_VERSION, DAILY_STEP_CAP,
                          assess_velocity,
                          cap_trust_deduction, decision_to_check_result,
                          evaluate_daily_submission, resolve_source_key)
+from . import integrity as device_integrity
 from .daily_reset import update_streak
+from .evidence import (KNOWN_OFFSET_TOLERANCE_HOURS, challenge_total_steps,
+                       clean_evidence_hours, clean_tz_offset, day_evidence,
+                       refresh_day, resolve_day_offset, server_active_minutes,
+                       store_stream_evidence)
 from .verification import build_breakdown
 from .models import (DailyVerificationSummary, FraudFlag, HealthRecord,
                      HourlyStepRecord, IntervalVerificationResult,
@@ -46,6 +51,9 @@ logger = logging.getLogger(__name__)
 WAYPOINT_MAX_ACCURACY_M = 75.0
 WAYPOINT_MIN_DISTANCE_M = 2.0
 WAYPOINT_MAX_SPEED_MPS = 8.0
+# Phase 1b: GPS segments faster than this are vehicle speed (see walks.py).
+VEHICLE_SPEED_MPS = 7.0
+TELEPORT_SPEED_MPS = 70.0
 ROUTE_DISTANCE_PER_STEP_MIN_KM = 0.0002
 ROUTE_DISTANCE_PER_STEP_MAX_KM = 0.0030
 HOURLY_MAX_ENTRIES = 24
@@ -341,6 +349,8 @@ def _filter_waypoints_for_storage(day, waypoints: list) -> tuple[list[dict], dic
     dropped_speed = 0
     dropped_jitter = 0
     dropped_malformed = 0
+    vehicle_segments: dict[str, list[int]] = {}
+    last_fix = None
 
     for wp in waypoints:
         try:
@@ -367,6 +377,18 @@ def _filter_waypoints_for_storage(day, waypoints: list) -> tuple[list[dict], dic
         if accuracy > WAYPOINT_MAX_ACCURACY_M:
             dropped_accuracy += 1
             continue
+
+        if last_fix is not None:
+            # Phase 1b: vehicle-speed movement between consecutive fixes is evidence
+            # (steps in that hour were likely vibration in a matatu / on a boda), not
+            # something to discard silently. Measured fix to fix, kept or not.
+            dt_fix = (recorded_at - last_fix[2]).total_seconds()
+            if 0 < dt_fix <= 300:
+                fix_speed = _haversine_meters(last_fix[0], last_fix[1], lat, lng) / dt_fix
+                if VEHICLE_SPEED_MPS < fix_speed <= TELEPORT_SPEED_MPS:
+                    # Keyed by the fix time so a re-sent upload isn't counted twice.
+                    vehicle_segments[recorded_at.isoformat()] = [hour, int(dt_fix)]
+        last_fix = (lat, lng, recorded_at)
 
         if accepted:
             prev = accepted[-1]
@@ -397,6 +419,7 @@ def _filter_waypoints_for_storage(day, waypoints: list) -> tuple[list[dict], dic
         "dropped_speed": dropped_speed,
         "dropped_jitter": dropped_jitter,
         "dropped_malformed": dropped_malformed,
+        "vehicle_segments": vehicle_segments,
     }
 
 
@@ -498,6 +521,175 @@ def _encode_polyline(points: list[tuple[float, float]]) -> str:
         last_lat = lat_i
         last_lng = lng_i
     return "".join(encoded)
+
+
+def user_local_today(user):
+    """The user's current local date from the time zone their phone last reported
+    (Phase 1b); the server (UTC) date when it never did."""
+    offset = (
+        StepSession.objects.filter(user=user, tz_offset_minutes__isnull=False)
+        .order_by("-started_at")
+        .values_list("tz_offset_minutes", flat=True)
+        .first()
+    )
+    now = timezone.now()
+    if offset is None:
+        return now.date()
+    return (now + timedelta(minutes=int(offset))).date()
+
+
+def recompute_challenge_progress(user, day, record=None) -> None:
+    """Recompute the user's active challenge entries that include `day`.
+
+    Challenge progress counts money-eligible steps only (evidence tiers, see
+    apps/steps/evidence.py) of days not under review; goals / streaks / XP keep using
+    every credited step. Qualification follows from the total; payouts read it.
+    """
+    from apps.challenges.models import Participant
+
+    from .evidence import money_steps
+
+    best_day = money_steps(record) if record is not None and not record.is_suspicious else 0
+    # One query for the user's active entries (challenge joined in), then one aggregate +
+    # one save per entry.
+    active_entries = Participant.objects.filter(
+        user=user,
+        challenge__status="active",
+        challenge__start_date__lte=day,
+        challenge__end_date__gte=day,
+    ).select_related("challenge")
+    for participant in active_entries:
+        challenge = participant.challenge
+        total = challenge_total_steps(user, challenge.start_date, challenge.end_date)
+        try:
+            participant.steps = total
+            participant.qualified = total >= challenge.milestone
+
+            milestone_just_reached = False
+            if (
+                participant.milestone_reached_at is None
+                and participant.steps >= challenge.milestone
+            ):
+                participant.milestone_reached_at = timezone.now()
+                milestone_just_reached = True
+
+            if best_day > participant.best_day_steps:
+                participant.best_day_steps = best_day
+
+            participant.save(
+                update_fields=["steps", "qualified", "milestone_reached_at", "best_day_steps"]
+            )
+
+            if milestone_just_reached and challenge.is_private:
+                try:
+                    from apps.challenges.consumers import push_system_message
+
+                    milestone_k = challenge.milestone // 1000
+                    async_to_sync(push_system_message)(
+                        challenge.id,
+                        f"{user.username} just hit {milestone_k}K steps and qualified!",
+                    )
+                except Exception as e:
+                    logger.warning(f"System message push failed: {e}")
+        except Exception as e:
+            logger.warning(f"Tiebreaker update failed for user {user.id}: {e}")
+
+
+def _day_integrity(current, session, platform: str, now) -> dict:
+    """Integrity state of a day from the sessions that uploaded to it (Phase 1b).
+
+    `blocked` (steps count for goals only) only under the admin "enforce" policy:
+    a failed Android session is sticky for the day; an Android session that never sent
+    a token (once the verifier is configured) blocks until a verified session syncs.
+    """
+    state = dict(current or {})
+    sessions = dict(state.get("sessions") or {})
+    blocked_now = False
+    if session is not None:
+        status = session.integrity_status or "unchecked"
+        sessions[str(session.id)] = status
+        if len(sessions) > 10:
+            sessions = dict(list(sessions.items())[-10:])
+        if status == "failed" and platform == "android":
+            state["failed_android"] = True
+        blocked_now = device_integrity.blocks_money(
+            status, platform=platform, started_at=session.started_at, now=now
+        )
+    state["sessions"] = sessions
+    enforce = device_integrity.current_policy() == "enforce"
+    state["policy"] = "enforce" if enforce else "shadow"
+    state["blocked"] = bool(enforce and (blocked_now or state.get("failed_android")))
+    return state
+
+
+def _record_secondary_stream(*, user, record, stream_key, submitted_steps, data, platform, tz_meta):
+    """A second install / phone reported less than the day already has: store its
+    raw total and evidence (merged per hour, never summed), credit nothing new."""
+    with transaction.atomic():
+        record = HealthRecord.objects.select_for_update().get(pk=record.pk)
+        meta = dict(record.anticheat or {})
+        streams = dict(meta.get("streams_raw") or {})
+        streams[stream_key] = max(int(streams.get(stream_key) or 0), submitted_steps)
+        meta["streams_raw"] = streams
+        if tz_meta.get("tz"):
+            meta["tz"] = tz_meta["tz"]
+        source = data.get("evidence_source")
+        if source == "android_gait_v1" and platform == "android":
+            hours = clean_evidence_hours(data.get("evidence_hours"))
+            if hours:
+                store_stream_evidence(meta, stream_key, hours)
+                meta.setdefault("evidence_source", source)
+        record.anticheat = meta
+        if "p1b" in meta:
+            refresh_day(record)
+        else:
+            HealthRecord.objects.filter(pk=record.pk).update(anticheat=meta)
+    return _current_state_response(user, record.date, submitted_steps, secondary_stream=True)
+
+
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name="StepResumeResponse",
+            fields={
+                "date": serializers.DateField(),
+                "last_raw_steps": serializers.IntegerField(),
+                "synced_at": serializers.DateTimeField(allow_null=True),
+            },
+        )
+    }
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+@throttle_classes([DashboardReadRateThrottle])
+def resume_day(request):
+    """
+    Reinstall / cleared-data resume (Phase 1b).
+
+    GET /api/steps/resume/?date=YYYY-MM-DD -> {date, last_raw_steps, synced_at}
+    The server's last raw total for that day (max over the account's installs). A fresh
+    install whose ledger has nothing for today resumes from it, so an honest reinstall
+    never reports a lower total (no non-monotonic rejection).
+    """
+    import datetime
+
+    date_param = request.query_params.get("date")
+    try:
+        day = datetime.date.fromisoformat(date_param) if date_param else timezone.now().date()
+    except ValueError:
+        return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+    record = HealthRecord.objects.filter(user=request.user, date=day).first()
+    if record is None:
+        return Response({"date": str(day), "last_raw_steps": 0, "synced_at": None})
+    streams = (record.anticheat or {}).get("streams_raw") or {}
+    raw = max([int(record.last_raw_steps or 0), int(record.steps or 0)] + [int(v or 0) for v in streams.values()])
+    return Response(
+        {
+            "date": str(day),
+            "last_raw_steps": raw,
+            "synced_at": record.synced_at.isoformat() if record.synced_at else None,
+        }
+    )
 
 
 @extend_schema(
@@ -777,6 +969,39 @@ def sync_health(request):
     prev_raw = 0
     if existing_record is not None:
         prev_raw = max(existing_record.last_raw_steps or 0, 0) or existing_record.steps
+
+    # Phase 1b: where this reading comes from. One "stream" per app install (a reinstall
+    # or a second phone is a new stream). A stream's own counter never goes down; a
+    # different stream reporting less than the day's total is not tampering (fresh
+    # install, second phone): the day keeps the MAX over streams, never the sum.
+    platform = (
+        (session.device.platform if session is not None and session.device else "")
+        or (user.device_platform or "")
+    ).lower()
+    install_id = (data.get("install_id") or "").strip()[:64] or (
+        session.install_id if session is not None else ""
+    )
+    if install_id:
+        stream_key = f"i:{install_id}"
+    elif session is not None and session.device is not None:
+        stream_key = f"d:{session.device.device_id}"[:80]
+    else:
+        stream_key = "legacy"
+    streams_raw = dict(existing_meta.get("streams_raw") or {})
+    stream_prev = streams_raw.get(stream_key)
+
+    # Phone time zone (minutes east of UTC) for this day's boundaries.
+    tz_offset = clean_tz_offset(data.get("tz_offset_minutes"))
+    tz_name = (data.get("tz_name") or "").strip()[:64] or None
+    if tz_offset is None and session is not None:
+        tz_offset = session.tz_offset_minutes
+    if tz_offset is not None:
+        local_today = (now + timedelta(minutes=tz_offset)).date()
+        if date > local_today:
+            return Response({"date": ["Date is in the future."]}, status=400)
+    tz_meta = {"tz": existing_meta.get("tz")} if existing_meta.get("tz") else {}
+    day_offset, tz_hopping = resolve_day_offset(tz_meta, tz_offset, tz_name)
+
     if existing_record:
         last_ts = existing_record.last_client_timestamp
         if (
@@ -790,23 +1015,37 @@ def sync_health(request):
             # lower the stored total. Not tampering either, so no flag.
             return _current_state_response(user, date, submitted_steps, stale=True)
         if submitted_steps < prev_raw:
-            # Raw vs raw: the phone's day counter never goes down for the same day.
-            _record_flag(
-                user,
-                date,
-                "non_monotonic_steps",
-                "high",
-                {
-                    "submitted_steps": submitted_steps,
-                    "previous_steps": prev_raw,
-                    "note": "Submitted steps decreased compared to existing total for the same day.",
-                },
-            )
-            return Response(
-                {
-                    "error": "Submitted steps cannot be lower than previously synced steps."
-                },
-                status=400,
+            if stream_prev is not None and submitted_steps < int(stream_prev):
+                # Raw vs raw: the same install's day counter never goes down.
+                _record_flag(
+                    user,
+                    date,
+                    "non_monotonic_steps",
+                    "high",
+                    {
+                        "submitted_steps": submitted_steps,
+                        "previous_steps": int(stream_prev),
+                        "stream": stream_key[:24],
+                        "note": "Submitted steps decreased compared to this install's "
+                        "previous total for the same day.",
+                    },
+                )
+                return Response(
+                    {
+                        "error": "Submitted steps cannot be lower than previously synced steps."
+                    },
+                    status=400,
+                )
+            # Another install / phone that counted less than the day already has: keep
+            # its evidence, credit nothing new, no flag (max per stream, never a sum).
+            return _record_secondary_stream(
+                user=user,
+                record=existing_record,
+                stream_key=stream_key,
+                submitted_steps=submitted_steps,
+                data=data,
+                platform=platform,
+                tz_meta=tz_meta,
             )
 
     fresh_day = existing_record is None or legacy_day
@@ -819,8 +1058,14 @@ def sync_health(request):
         last_synced_at=None if fresh_day else existing_record.synced_at,
         last_client_ts=None if fresh_day else existing_record.last_client_timestamp,
         client_ts=timestamp_client,
-        default_offset_hours=getattr(
-            settings, "STEP_DEVICE_DEFAULT_UTC_OFFSET_HOURS", None
+        # The phone's own UTC offset when it sent one (Phase 1b); else the default.
+        default_offset_hours=(
+            day_offset / 60.0
+            if day_offset is not None
+            else getattr(settings, "STEP_DEVICE_DEFAULT_UTC_OFFSET_HOURS", None)
+        ),
+        offset_tolerance_hours=(
+            KNOWN_OFFSET_TOLERANCE_HOURS if day_offset is not None else None
         ),
     )
     if velocity.impossible:
@@ -840,6 +1085,43 @@ def sync_health(request):
             {"error": "Step delta too high for the elapsed time window."},
             status=400,
         )
+    if tz_hopping:
+        # More than one time-zone change in a day: informational (travel exists), the
+        # day bound already uses the most conservative offset seen.
+        _record_flag(
+            user,
+            date,
+            "timezone_hopping",
+            "low",
+            {
+                "offsets_seen": (tz_meta.get("tz") or {}).get("seen"),
+                "note": "The phone's time zone changed more than once on this day.",
+            },
+        )
+
+    # Walking evidence (Phase 1b). The server only accepts evidence that matches what it
+    # knows about the uploader's platform; it caps it by the credited steps later.
+    evidence_source = data.get("evidence_source")
+    if evidence_source == "android_gait_v1" and platform != "android":
+        evidence_source = None
+    if evidence_source == "ios_coremotion" and platform != "ios":
+        evidence_source = None
+    incoming_hours = (
+        clean_evidence_hours(data.get("evidence_hours"))
+        if evidence_source == "android_gait_v1"
+        else None
+    )
+    evidence_meta = {"evidence_streams": dict(existing_meta.get("evidence_streams") or {})}
+    if incoming_hours:
+        store_stream_evidence(evidence_meta, stream_key, incoming_hours)
+    hourly_now = dict(
+        HourlyStepRecord.objects.filter(user=user, date=date).values_list("hour", "steps")
+    )
+    # Active minutes are computed by the server (hourly buckets + evidence), never
+    # taken from the client; the steps-per-minute rules divide by these.
+    server_minutes = max(
+        1, server_active_minutes(hourly_now, day_evidence(evidence_meta), submitted_steps)
+    )
 
     anti_v2_enabled = bool(getattr(settings, "STEP_ANTICHEAT_V2_ENABLED", False))
     anti_v2_shadow = bool(getattr(settings, "STEP_ANTICHEAT_V2_SHADOW_MODE", True))
@@ -861,7 +1143,7 @@ def sync_health(request):
         "burst_source": data.get("burst_source"),
         "distance_km": data.get("distance_km"),
         "calories_active": data.get("calories_active"),
-        "active_minutes": data.get("active_minutes"),
+        "active_minutes": int(server_minutes),
         "cadence_spm": data.get("cadence_spm"),
         "burst_steps_5s": data.get("burst_steps_5s"),
         "gait_state": data.get("gait_state"),
@@ -1131,7 +1413,34 @@ def sync_health(request):
                 "notes": result.notes,
             }
 
+            # ── Phase 1b bookkeeping (see apps/steps/evidence.py) ──────────────
+            if "p1b" not in meta:
+                # Cut-over: whatever the day was already credited before Phase 1b saw
+                # it keeps full challenge credit (grandfathered); nothing is stripped.
+                grandfathered = (
+                    int(existing_record.steps or 0)
+                    if existing_record is not None and "p1b" not in existing_meta
+                    else 0
+                )
+                meta["p1b"] = {"since": now.isoformat(), "grandfathered": grandfathered}
+            if tz_meta.get("tz"):
+                meta["tz"] = tz_meta["tz"]
+            streams_raw[stream_key] = max(int(stream_prev or 0), submitted_steps)
+            if len(streams_raw) > 6:
+                streams_raw = dict(
+                    sorted(streams_raw.items(), key=lambda kv: kv[1], reverse=True)[:6]
+                )
+            meta["streams_raw"] = streams_raw
+            meta["evidence_streams"] = evidence_meta["evidence_streams"]
+            if evidence_source:
+                meta["evidence_source"] = evidence_source
+            meta["platform"] = "web" if source_key == "web" else platform
+            meta["integrity"] = _day_integrity(meta.get("integrity"), session, platform, now)
+
             previous_steps = existing_record.steps if existing_record else None
+            previous_eligible = (
+                existing_record.eligible_steps if existing_record else None
+            )
 
             newest_client_ts = timestamp_client
             if newest_client_ts is not None:
@@ -1157,15 +1466,14 @@ def sync_health(request):
                     "anticheat": meta,
                     "distance_km": data.get("distance_km"),
                     "calories_active": data.get("calories_active"),
-                    "active_minutes": data.get("active_minutes"),
                     "is_suspicious": is_suspicious,
                 },
             )
             suspicion_changed = previous_suspicious != is_suspicious
-            record.verification = build_breakdown(record)
-            HealthRecord.objects.filter(pk=record.pk).update(
-                verification=record.verification
-            )
+            # Evidence tiers, money-eligible steps, server active minutes and the
+            # user-facing breakdown.
+            refresh_day(record)
+            eligible_changed = previous_eligible != record.eligible_steps
 
             if record.steps > request.user.best_day_steps:
                 request.user.__class__.objects.filter(id=request.user.id).update(
@@ -1283,7 +1591,6 @@ def sync_health(request):
         except Exception:
             logger.exception("Step XP award failed for user=%s date=%s", user.id, date)
 
-    from apps.challenges.models import Participant
     from apps.challenges.services import finalize_expired_challenges
 
     if _acquire_periodic_lock("step2win:finalize_expired_challenges", 60):
@@ -1293,78 +1600,17 @@ def sync_health(request):
         # for their final end-day uploads to land.
         finalize_expired_challenges(today=min(date, timezone.now().date()))
 
-    # A change of the day's suspicion must reach challenge totals right away (the
-    # 15-second coalescing lock only applies to ordinary step increases).
-    should_recompute_challenges = suspicion_changed or (
+    # A change of the day's suspicion or of its money-eligible steps must reach challenge
+    # totals right away (the 15-second coalescing lock only applies to ordinary step
+    # increases).
+    should_recompute_challenges = suspicion_changed or eligible_changed or (
         (previous_steps is None or approved_steps != previous_steps)
         and _acquire_periodic_lock(f"step2win:participant_recompute:{user.id}", 15)
     )
 
     if should_recompute_challenges:
-        # One query for the user's active entries (challenge joined in), then one
-        # aggregate + one save per entry (was 4 queries per challenge).
-        active_entries = Participant.objects.filter(
-            user=user,
-            challenge__status="active",
-            challenge__start_date__lte=date,
-            challenge__end_date__gte=date,
-        ).select_related("challenge")
-        for participant in active_entries:
-            challenge = participant.challenge
-            total = (
-                HealthRecord.objects.filter(
-                    user=user,
-                    date__gte=challenge.start_date,
-                    date__lte=challenge.end_date,
-                    is_suspicious=False,
-                ).aggregate(total=Sum("steps"))["total"]
-                or 0
-            )
+        recompute_challenge_progress(user, date, record)
 
-            # ── Totals + tiebreaker tracking fields ───────────────────────────
-            try:
-                participant.steps = total
-                participant.qualified = total >= challenge.milestone
-
-                milestone_just_reached = False
-                if (
-                    participant.milestone_reached_at is None
-                    and participant.steps >= challenge.milestone
-                ):
-                    participant.milestone_reached_at = timezone.now()
-                    milestone_just_reached = True
-
-                if record.steps > participant.best_day_steps:
-                    participant.best_day_steps = record.steps
-
-                participant.save(
-                    update_fields=[
-                        "steps",
-                        "qualified",
-                        "milestone_reached_at",
-                        "best_day_steps",
-                    ]
-                )
-
-                if milestone_just_reached and challenge.is_private:
-                    try:
-                        from asgiref.sync import async_to_sync
-
-                        from apps.challenges.consumers import \
-                            push_system_message
-
-                        milestone_k = challenge.milestone // 1000
-                        async_to_sync(push_system_message)(
-                            challenge.id,
-                            f"🎉 {user.username} just hit {milestone_k}K steps and qualified!",
-                        )
-                    except Exception as e:
-                        logger.warning(f"System message push failed: {e}")
-
-            except Participant.DoesNotExist:
-                pass
-            except Exception as e:
-                logger.warning(f"Tiebreaker update failed for user {user.id}: {e}")
 
     payload = HealthRecordSerializer(record).data
     payload.update(
@@ -1432,7 +1678,7 @@ def sync_health(request):
 @throttle_classes([DashboardReadRateThrottle])
 def today_health(request):
     """Today's steps + distance + calories + active minutes."""
-    today = timezone.now().date()
+    today = user_local_today(request.user)
     record = HealthRecord.objects.filter(user=request.user, date=today).first()
 
     if record:
@@ -1478,7 +1724,7 @@ def health_summary(request):
     """
     Aggregated stats for the Steps Detail screen and Home dashboard.
     """
-    today = timezone.now().date()
+    today = user_local_today(request.user)
     week_start = today - timedelta(days=6)
 
     week_qs = HealthRecord.objects.filter(user=request.user, date__gte=week_start)
@@ -1567,7 +1813,7 @@ def health_history(request):
 @throttle_classes([DashboardReadRateThrottle])
 def weekly_steps(request):
     """7-day step array for the home screen bar chart."""
-    today = timezone.now().date()
+    today = user_local_today(request.user)
     week = [today - timedelta(days=i) for i in range(6, -1, -1)]
     records = {
         r.date: r.steps
@@ -1655,6 +1901,9 @@ def day_detail(request, date_str):
     daily_record = HealthRecord.objects.filter(user=user, date=day).first()
     if daily_record and daily_record.steps > total_steps:
         total_steps = daily_record.steps
+    if daily_record and daily_record.active_minutes is not None:
+        # Server-computed (Phase 1b): hourly buckets + on-device evidence.
+        active_minutes = daily_record.active_minutes
 
     waypoint_payload = LocationWaypointSerializer(waypoints_qs, many=True).data
     route_points = [
@@ -1855,6 +2104,32 @@ def sync_hourly_steps(request):
         # Route plausibility: compare the uploaded route with the steps of the SAME
         # hours (the phone's hourly buckets), not with the whole day.
         _check_route_against_hours(user, day, filtered)
+
+    # Phase 1b: vehicle-speed movement per hour and the new hourly buckets change the
+    # day's evidence tiers and server-computed active minutes.
+    segments = waypoint_quality.pop("vehicle_segments", None) or {}
+    if incoming or segments:
+        with transaction.atomic():
+            record = (
+                HealthRecord.objects.select_for_update().filter(user=user, date=day).first()
+            )
+            if record is not None and "p1b" in (record.anticheat or {}):
+                meta = dict(record.anticheat or {})
+                if segments:
+                    stored = dict(meta.get("vehicle_segments") or {})
+                    stored.update(segments)
+                    if len(stored) > 600:
+                        stored = dict(sorted(stored.items())[-600:])
+                    meta["vehicle_segments"] = stored
+                    by_hour: dict[str, int] = {}
+                    for hour_value, secs in stored.values():
+                        by_hour[str(hour_value)] = by_hour.get(str(hour_value), 0) + int(secs)
+                    meta["vehicle_seconds_by_hour"] = by_hour
+                record.anticheat = meta
+                previous_eligible = record.eligible_steps
+                refresh_day(record)
+                if previous_eligible != record.eligible_steps:
+                    recompute_challenge_progress(user, day, record)
 
     return Response(
         {
