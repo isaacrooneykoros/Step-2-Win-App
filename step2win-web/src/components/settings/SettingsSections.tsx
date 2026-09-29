@@ -5,6 +5,7 @@ import {
   FileText,
   Footprints,
   Gauge,
+  Home,
   KeyRound,
   LifeBuoy,
   Mail,
@@ -247,10 +248,33 @@ export function ActivitySection({
 
 /* ───────────── Privacy ───────────── */
 
-export function PrivacySection({ onOpenPermissions, summary }: { onOpenPermissions: () => void; summary: string }) {
+export function PrivacySection({
+  onOpenPermissions,
+  summary,
+  onOpenPrivacyZone,
+  privacyZone,
+}: {
+  onOpenPermissions: () => void;
+  summary: string;
+  onOpenPrivacyZone: () => void;
+  /** null while loading or unknown. */
+  privacyZone: { enabled: boolean; radius_m: number | null } | null;
+}) {
   return (
     <ListGroup title="Privacy">
       <ListRow leading={<IconTile icon={ShieldCheck} tone="neutral" size="sm" />} title="App permissions" subtitle={summary} onClick={onOpenPermissions} chevron />
+      <ListRow
+        leading={<IconTile icon={Home} tone={privacyZone?.enabled ? 'brand' : 'neutral'} size="sm" />}
+        title="Home privacy zone"
+        subtitle="Hide the ends of your walk routes near home"
+        trailing={
+          privacyZone ? (
+            <Pill tone={privacyZone.enabled ? 'success' : 'neutral'}>{privacyZone.enabled ? 'On' : 'Off'}</Pill>
+          ) : null
+        }
+        onClick={onOpenPrivacyZone}
+        chevron
+      />
       <ListRow leading={<IconTile icon={FileText} tone="neutral" size="sm" />} title="Privacy policy" subtitle="How we handle your data" to="/legal/privacy-policy" />
     </ListGroup>
   );

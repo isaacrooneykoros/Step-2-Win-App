@@ -13,7 +13,6 @@ import { checkCameraPermission, requestCameraPermission, type CameraPermissionSt
 import {
   checkAdvancedPermissionSnapshot,
   openExactAlarmPermissionSettings,
-  requestBackgroundLocationPermission,
   requestForegroundLocationPermission,
   type LocationPermissionState,
 } from '../../services/locationPermissions';
@@ -27,9 +26,8 @@ export function useDevicePermissions() {
   const [notification, setNotification] = useState<NotificationPermissionState>('prompt');
   const [camera, setCamera] = useState<CameraPermissionState>('prompt');
   const [location, setLocation] = useState<LocationPermissionState>('prompt');
-  const [backgroundLocation, setBackgroundLocation] = useState<LocationPermissionState>('prompt');
   const [exactAlarm, setExactAlarm] = useState<ExactAlarmState>('unavailable');
-  const [busy, setBusy] = useState<null | 'notification' | 'camera' | 'location' | 'background' | 'alarm'>(null);
+  const [busy, setBusy] = useState<null | 'notification' | 'camera' | 'location' | 'alarm'>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,7 +41,6 @@ export function useDevicePermissions() {
       setNotification(notificationStatus);
       setCamera(cameraStatus);
       setLocation(advanced.location);
-      setBackgroundLocation(advanced.backgroundLocation);
       setExactAlarm(advanced.exactAlarm);
     };
     void load();
@@ -73,7 +70,6 @@ export function useDevicePermissions() {
   const refreshAdvanced = useCallback(async () => {
     const updated = await checkAdvancedPermissionSnapshot();
     setLocation(updated.location);
-    setBackgroundLocation(updated.backgroundLocation);
     setExactAlarm(updated.exactAlarm);
   }, []);
 
@@ -136,25 +132,6 @@ export function useDevicePermissions() {
     }
   };
 
-  const requestBackground = async () => {
-    setBusy('background');
-    try {
-      if (backgroundLocation === 'denied') {
-        await openSettingsFor('Location “Allow all the time”');
-        return;
-      }
-      const granted = await requestBackgroundLocationPermission();
-      await refreshAdvanced();
-      showToast(
-        granted
-          ? { message: 'Background location is on.', type: 'success' }
-          : { message: 'Background location was not allowed.', type: 'error' },
-      );
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const openExactAlarm = async () => {
     setBusy('alarm');
     try {
@@ -177,13 +154,11 @@ export function useDevicePermissions() {
     notification,
     camera,
     location,
-    backgroundLocation,
     exactAlarm,
     busy,
     requestNotifications,
     requestCamera,
     requestLocation,
-    requestBackground,
     openExactAlarm,
   };
 }
