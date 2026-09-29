@@ -10,6 +10,7 @@ import { SocialSignIn } from '../components/auth/SocialSignIn';
 import { LegalSheet, type LegalSlug } from '../components/auth/LegalSheet';
 import { useToast } from '../components/ui/Toast';
 import { ServerWakeNote } from '../components/auth/ServerWakeNote';
+import { ConsentCheckbox, ConsentLink } from '../components/privacy/ConsentCheckbox';
 
 export default function RegisterScreen() {
   const navigate = useNavigate();
@@ -27,6 +28,10 @@ export default function RegisterScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [socialBusy, setSocialBusy] = useState(false);
   const [legalDoc, setLegalDoc] = useState<LegalSlug | null>(null);
+  // Explicit consent: never pre-ticked (Kenya Data Protection Act; backend apps/privacy/consent.py).
+  const [consents, setConsents] = useState({ terms: false, health_data: false });
+  const [consentTouched, setConsentTouched] = useState(false);
+  const consentsGiven = consents.terms && consents.health_data;
 
   const getFieldError = (value: unknown): string => {
     if (Array.isArray(value)) {
@@ -43,10 +48,19 @@ export default function RegisterScreen() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
+    setConsentTouched(true);
+    if (!consentsGiven) {
+      setErrors({ form: 'Please tick both boxes to create your account.' });
+      return;
+    }
     setIsLoading(true);
 
     try {
-      const response = await authService.register(formData);
+      const response = await authService.register({
+        ...formData,
+        consents,
+        app_version: import.meta.env.VITE_APP_VERSION || '1.0.0',
+      });
       await setAuth(response.user, response.access, response.refresh);
       navigate('/');
     } catch (err: any) {
@@ -170,17 +184,28 @@ export default function RegisterScreen() {
           enterKeyHint="done"
         />
 
-        <p className="mb-5 text-caption text-text-muted">
-          By creating an account you agree to our{' '}
-          <button type="button" onClick={() => setLegalDoc('terms-and-conditions')} className="font-semibold text-text-secondary underline underline-offset-2 hover:text-text-primary">
-            Terms
-          </button>{' '}
-          and{' '}
-          <button type="button" onClick={() => setLegalDoc('privacy-policy')} className="font-semibold text-text-secondary underline underline-offset-2 hover:text-text-primary">
-            Privacy Policy
-          </button>
-          . Challenge entries are contributions to a shared pool; payouts depend on qualifying.
-        </p>
+        <div className="mb-5 mt-1 space-y-1">
+          <ConsentCheckbox
+            checked={consents.terms}
+            onChange={(v) => setConsents((c) => ({ ...c, terms: v }))}
+            error={consentTouched && !consents.terms ? 'Please tick this box to continue.' : undefined}
+          >
+            I am 18 or older and I agree to the{' '}
+            <ConsentLink onClick={() => setLegalDoc('terms-and-conditions')}>Terms</ConsentLink> and the{' '}
+            <ConsentLink onClick={() => setLegalDoc('privacy-policy')}>Privacy Policy</ConsentLink>.
+          </ConsentCheckbox>
+          <ConsentCheckbox
+            checked={consents.health_data}
+            onChange={(v) => setConsents((c) => ({ ...c, health_data: v }))}
+            description="Your steps and your phone’s motion data are used to count your steps, run challenges and keep them fair."
+            error={consentTouched && !consents.health_data ? 'Please tick this box to continue.' : undefined}
+          >
+            I allow Step2Win to process my activity and health data (steps and motion).
+          </ConsentCheckbox>
+          <p className="pt-1 text-caption text-text-muted">
+            Challenge entries are contributions to a shared pool; payouts depend on qualifying.
+          </p>
+        </div>
 
         <Button type="submit" size="lg" fullWidth isLoading={isLoading} disabled={socialBusy} loadingText="Creating account">
           Create account

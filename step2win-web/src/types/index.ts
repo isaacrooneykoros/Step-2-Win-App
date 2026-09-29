@@ -425,6 +425,9 @@ export interface RegisterData {
   phone_number?: string;
   password: string;
   confirm_password: string;
+  /** Explicit consents ticked on the form (backend apps/privacy/consent.py). */
+  consents?: { terms: boolean; health_data: boolean; location_walks?: boolean };
+  app_version?: string;
 }
 
 export interface AuthResponse {
