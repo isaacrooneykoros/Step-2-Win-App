@@ -503,6 +503,9 @@ class SystemSettingsSerializer(serializers.Serializer):
         max_digits=10, decimal_places=2, min_value=Decimal("1")
     )
 
+    # Device integrity (Play Integrity) policy for step sessions and walks
+    device_integrity_policy = serializers.ChoiceField(choices=["shadow", "enforce"])
+
     # Metadata
     updated_at = serializers.DateTimeField(read_only=True)
     updated_by = serializers.SerializerMethodField()

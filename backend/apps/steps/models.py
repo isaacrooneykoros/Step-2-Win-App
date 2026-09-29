@@ -51,6 +51,13 @@ class HealthRecord(models.Model):
     # written before Phase 1b: grandfathered, its credited `steps` count in full.
     # Goals, streaks and XP keep using `steps` (all credited steps).
     eligible_steps = models.IntegerField(null=True, blank=True)
+    # Per-tier split of the credited `steps` (sum == steps once Phase 1b saw the day).
+    # grandfathered = credit the day already had at the Phase 1b cut-over.
+    tier_grandfathered = models.IntegerField(default=0)
+    tier_wearable = models.IntegerField(default=0)
+    tier_walk_session = models.IntegerField(default=0)
+    tier_sensor_verified = models.IntegerField(default=0)
+    tier_unverified = models.IntegerField(default=0)
 
     class Meta:
         unique_together = ["user", "date"]
@@ -508,6 +515,8 @@ class StepSession(models.Model):
     # Phone clock context at session start (minutes east of UTC, IANA name).
     tz_offset_minutes = models.IntegerField(null=True, blank=True)
     tz_name = models.CharField(max_length=64, blank=True, default="")
+    # Random id of the app install that opened the session (new after a reinstall).
+    install_id = models.CharField(max_length=64, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -724,6 +733,8 @@ class WalkSession(models.Model):
         DeviceRegistration, on_delete=models.SET_NULL, null=True, blank=True
     )
     client_walk_id = models.CharField(max_length=64, blank=True, default="")
+    platform = models.CharField(max_length=12, blank=True, default="")
+    install_id = models.CharField(max_length=64, blank=True, default="")
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="active")
     verdict = models.CharField(max_length=12, choices=VERDICT_CHOICES, default="pending")
     # Stable reason codes (see apps/steps/walks.py); never thresholds.
@@ -738,6 +749,7 @@ class WalkSession(models.Model):
     # On-device gait evidence during the walk (steps that looked like walking / shaking).
     gait_verified_steps = models.IntegerField(default=0)
     gait_shake_steps = models.IntegerField(default=0)
+    gait_unknown_steps = models.IntegerField(default=0)
     step_source = models.CharField(max_length=24, blank=True, default="")
     distance_m = models.FloatField(default=0.0)
     duration_s = models.IntegerField(default=0)
