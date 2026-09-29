@@ -11,6 +11,8 @@ User = get_user_model()
 
 class LegalPublishFlowTests(TestCase):
     def setUp(self):
+        # Migration 0004 stages seeded drafts; these tests start from an empty CMS.
+        LegalDocument.objects.all().delete()
         self.client = APIClient()
         self.admin = User.objects.create_user(
             username="legal_admin", email="legal@example.com", phone_number="254700000041",

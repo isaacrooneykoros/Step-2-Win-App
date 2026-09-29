@@ -69,6 +69,7 @@ def test_api_endpoints():
                 "password": test_password,
                 "confirm_password": test_password,
                 "full_name": "Smoke Test User",
+                "consents": {"terms": True, "health_data": True},
             },
         )
         print(f"✅ User Registration: {resp.status_code}")

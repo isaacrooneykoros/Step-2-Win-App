@@ -11,6 +11,7 @@ import { Toaster, toast } from './components/ui/Toast';
 import { runBackHandlers } from './lib/backButton';
 import { hideNativeSplash } from './lib/nativeShell';
 import { BiometricLockGate } from './components/security/BiometricLockGate';
+import { ConsentHost } from './components/privacy/ConsentHost';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
@@ -113,6 +114,7 @@ const WalkSummaryScreen = lazy(() => import('./screens/WalkSummaryScreen'));
 const SupportScreen = lazy(() => import('./screens/SupportScreen'));
 const ActiveSessionsScreen = lazy(() => import('./screens/ActiveSessionsScreen'));
 const LegalDocumentScreen = lazy(() => import('./screens/LegalDocumentScreen'));
+const PrivacyScreen = lazy(() => import('./screens/PrivacyScreen'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -362,6 +364,7 @@ export default function App() {
               <Route path="/profile/analytics" element={withSuspense(<ProfileAnalyticsScreen />)} />
               <Route path="/settings" element={withSuspense(<SettingsScreen />)} />
               <Route path="/settings/sync-outbox" element={withSuspense(<SyncOutboxScreen />)} />
+              <Route path="/settings/privacy" element={withSuspense(<PrivacyScreen />)} />
               <Route path="/profile/sessions" element={withSuspense(<ActiveSessionsScreen />)} />
               <Route path="/support" element={withSuspense(<SupportScreen />)} />
               <Route path="/legal/:slug" element={withSuspense(<LegalDocumentScreen />)} />
@@ -373,6 +376,7 @@ export default function App() {
           {onboardingVisible && (
             <OnboardingGate onMounted={handleOnboardingMounted} onClose={closeOnboarding} />
           )}
+          <ConsentHost />
           <BiometricLockGate />
           <Toaster />
         </BrowserRouter>

@@ -85,6 +85,15 @@ JOB_OPTIONS: dict[str, dict[str, int]] = {
     "linkage-recompute": {"priority": 135, "lease_seconds": 60 * 60},
 }
 
+# Privacy (apps/privacy). Exports are user-facing but light (a few per run); retention
+# works in small batches inside a 40 s budget. Neither touches money.
+JOB_OPTIONS.update(
+    {
+        "privacy-process-exports": {"priority": 115, "lease_seconds": 15 * 60},
+        "privacy-retention": {"priority": 138, "lease_seconds": 15 * 60},
+    }
+)
+
 
 def job_runner() -> str:
     value = str(getattr(settings, "JOB_RUNNER", RUNNER_BUILTIN) or RUNNER_BUILTIN).strip().lower()

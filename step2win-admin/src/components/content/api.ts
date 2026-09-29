@@ -1,6 +1,6 @@
 import { http } from '../system/http'
 
-export type LegalDocType = 'privacy_policy' | 'terms_and_conditions' | 'cookie_policy' | 'refund_policy' | 'other'
+export type LegalDocType = 'privacy_policy' | 'terms_and_conditions' | 'cookie_policy' | 'refund_policy' | 'fair_play_rules' | 'other'
 
 export interface LegalDoc {
   id: number
@@ -43,6 +43,7 @@ export const DOC_TYPE_LABEL: Record<LegalDocType, string> = {
   terms_and_conditions: 'Terms and Conditions',
   cookie_policy: 'Cookie Policy',
   refund_policy: 'Refund Policy',
+  fair_play_rules: 'Fair Play and Payout Review Rules',
   other: 'Other',
 }
 

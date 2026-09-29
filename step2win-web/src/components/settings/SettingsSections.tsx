@@ -28,7 +28,7 @@ import Button from '../ui/Button';
 import { Skeleton } from '../ui/Skeleton';
 import { ToggleRow } from './Switch';
 import { Segmented } from '../ui/Segmented';
-import { Monitor, Moon, Sun } from 'lucide-react';
+import { Database, Monitor, Moon, Sun } from 'lucide-react';
 import { qualityMeta } from './calibration';
 import type { PreferencesState } from './preferences';
 import { permissionLabel } from './useDevicePermissions';
@@ -276,6 +276,12 @@ export function PrivacySection({
         chevron
       />
       <ListRow leading={<IconTile icon={FileText} tone="neutral" size="sm" />} title="Privacy policy" subtitle="How we handle your data" to="/legal/privacy-policy" />
+      <ListRow
+        leading={<IconTile icon={Database} tone="neutral" size="sm" />}
+        title="Privacy & your data"
+        subtitle="Your consents, download or delete your data"
+        to="/settings/privacy"
+      />
     </ListGroup>
   );
 }

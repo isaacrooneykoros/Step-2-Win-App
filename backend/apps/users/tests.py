@@ -33,6 +33,7 @@ class AuthAndHealthTests(APITestCase):
                 "phone_number": "254712345678",
                 "password": password,
                 "confirm_password": password,
+                "consents": {"terms": True, "health_data": True},
             },
             format="json",
         )
