@@ -22,6 +22,7 @@ import { ApiError, financeApi } from '../components/finance/api'
 import { useDebounced } from '../components/finance/hooks'
 import { AgeIndicator, Money, Section, When, toNum } from '../components/finance/ui'
 import type { PayoutReviewDetail, PayoutReviewRow, PayoutReviewStatus } from '../components/finance/payoutReviewTypes'
+import { LinkagePolicyCard } from '../components/finance/LinkagePolicyCard'
 
 const REFRESH_MS = 30_000
 const NOTE_MIN = 5
@@ -36,6 +37,7 @@ const REASON_SHORT: Record<string, string> = {
   open_high_flags: 'High flags',
   suspicious_days: 'Suspicious days',
   large_win_with_flags: 'Large win + flags',
+  linked_accounts: 'Linked accounts',
 }
 
 function reasonTone(code: string): BadgeTone {
@@ -67,6 +69,16 @@ function reasonDetail(detail: Record<string, unknown>): string {
   if (Array.isArray(detail.dates) && detail.dates.length) parts.push((detail.dates as string[]).join(', '))
   if (detail.threshold !== undefined && detail.amount !== undefined) parts.push(`KSh ${String(detail.amount)} ≥ ${String(detail.threshold)}`)
   if (typeof detail.open_flags === 'number') parts.push(`${detail.open_flags} open flag(s)`)
+  // Linked accounts (Phase 2a): who else is in the group; full evidence in the user's Evidence tab.
+  if (Array.isArray(detail.linked_in_challenge)) {
+    const people = detail.linked_in_challenge as Array<{ username?: string; first_registered?: boolean }>
+    parts.push(`same paid challenge as ${people.map((p) => `${p.username ?? '?'}${p.first_registered ? ' (first registered, paid)' : ''}`).join(', ')}`)
+  }
+  if (Array.isArray(detail.strong_links_paid)) {
+    const people = detail.strong_links_paid as Array<{ username?: string; edge_types?: string[] }>
+    parts.push(`same phone or payout number as already-paid ${people.map((p) => p.username ?? '?').join(', ')}`)
+  }
+  if (Array.isArray(detail.rules)) parts.push("see the user's Evidence tab for the linked accounts")
   return parts.join(' · ')
 }
 
@@ -452,6 +464,8 @@ export function PayoutReviewsPage() {
           hint={noteOk ? `${note.trim().length}/1000` : `At least ${NOTE_MIN} characters.`}
         />
       </ConfirmModal>
+
+      <LinkagePolicyCard />
     </div>
   )
 }

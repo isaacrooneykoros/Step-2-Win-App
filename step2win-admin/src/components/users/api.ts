@@ -9,6 +9,7 @@ import type {
   AuditLogPage, BadgeDef, BadgeInput, ChallengeResults, ChallengeRow, ChallengeStats, ConsoleUser, Paged,
   StepHourly, StepLogPage, UserOverview, UserRiskScores, UserStats,
 } from './types'
+import type { LinkageSettings, LinkedAccountsResponse, TimelineResponse } from './linkageTypes'
 
 /** Error with the server message plus per-field messages when the API returned them. */
 export class ApiError extends Error {
@@ -118,6 +119,17 @@ export const consoleApi = {
   // Risk model (shadow, read-only)
   userRiskScores: (id: number, days = 30) =>
     request<UserRiskScores>(`/api/admin/risk-ml/users/${id}/scores/${qs({ days })}`),
+  // Account linkage + evidence timeline (anti-cheat Phase 2a)
+  linkedAccounts: (id: number) => request<LinkedAccountsResponse>(`/api/admin/linkage/users/${id}/linked/`),
+  userTimeline: (id: number, p: { days?: number; types?: string }) =>
+    request<TimelineResponse>(`/api/admin/linkage/users/${id}/timeline/${qs(p)}`),
+  markHousehold: (userIds: number[], note: string) =>
+    post<{ marks: number[] }>('/api/admin/linkage/households/', { user_ids: userIds, note }),
+  revokeHousehold: (markId: number, note: string) =>
+    post<{ id: number }>(`/api/admin/linkage/households/${markId}/revoke/`, { note }),
+  linkageSettings: () => request<LinkageSettings>('/api/admin/linkage/settings/'),
+  updateLinkageSettings: (data: Partial<Omit<LinkageSettings, 'bounds'>>) =>
+    request<LinkageSettings>('/api/admin/linkage/settings/', { method: 'PATCH', body: JSON.stringify(data) }),
 
   // Steps
   stepLogs: (p: Params) => request<StepLogPage>(`/api/admin/steps/logs/${qs(p)}`),
