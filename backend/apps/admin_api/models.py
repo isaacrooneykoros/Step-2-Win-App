@@ -1,5 +1,7 @@
 from django.db import models
 
+from apps.steps.health_sources import \
+    DEFAULT_TRUSTED_ORIGINS_TEXT as HEALTH_TRUSTED_ORIGINS_DEFAULT
 
 DEFAULT_CHALLENGE_MILESTONES = [
     10000,
@@ -163,6 +165,14 @@ class SystemSettings(models.Model):
         max_length=10,
         default="shadow",
         help_text="shadow = record only; enforce = failed devices' steps don't count toward challenges",
+    )
+    # Phase 1c (apps/steps/health_sources.py): apps whose Health Connect / Apple Health
+    # data can count. One per line: "<package or bundle id>[*] [wearable]  # label".
+    # Blank = the built-in list. Manual entries never count, whatever the app.
+    health_trusted_origins = models.TextField(
+        blank=True,
+        default=HEALTH_TRUSTED_ORIGINS_DEFAULT,
+        help_text="Trusted Health Connect / Apple Health apps, one per line",
     )
 
     # Metadata

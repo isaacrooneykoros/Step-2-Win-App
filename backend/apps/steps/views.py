@@ -99,7 +99,8 @@ def _allow_sync_tick(user_id: int, min_seconds: int = 1) -> bool:
         return cache.add(redis_key, "1", timeout=max(1, min_seconds))
 
 
-_PAYLOAD_SECRET_KEYS = ("session_token",)
+# health_sources (Phase 1c) is stored once, in HealthSourceDay, not in every event.
+_PAYLOAD_SECRET_KEYS = ("session_token", "health_sources")
 
 
 def _redact_payload(data) -> dict | None:
@@ -682,7 +683,10 @@ def resume_day(request):
     if record is None:
         return Response({"date": str(day), "last_raw_steps": 0, "synced_at": None})
     streams = (record.anticheat or {}).get("streams_raw") or {}
-    raw = max([int(record.last_raw_steps or 0), int(record.steps or 0)] + [int(v or 0) for v in streams.values()])
+    # Steps credited from Health Connect / Apple Health are not our counter's steps.
+    health_extra = int(((record.anticheat or {}).get("health") or {}).get("applied_extra", 0) or 0)
+    sensor_credit = max(0, int(record.steps or 0) - health_extra)
+    raw = max([int(record.last_raw_steps or 0), sensor_credit] + [int(v or 0) for v in streams.values()])
     return Response(
         {
             "date": str(day),
@@ -966,9 +970,14 @@ def sync_health(request):
         existing_record is not None
         and existing_meta.get("v") != ANTICHEAT_DAY_VERSION
     )
+    # Phase 1c: steps credited from Health Connect / Apple Health beyond our sensor are
+    # re-derived by refresh_day on every change; the sensor path works on its own credit.
+    health_extra = int((existing_meta.get("health") or {}).get("applied_extra", 0) or 0)
     prev_raw = 0
     if existing_record is not None:
-        prev_raw = max(existing_record.last_raw_steps or 0, 0) or existing_record.steps
+        prev_raw = max(existing_record.last_raw_steps or 0, 0) or max(
+            0, existing_record.steps - health_extra
+        )
 
     # Phase 1b: where this reading comes from. One "stream" per app install (a reinstall
     # or a second phone is a new stream). A stream's own counter never goes down; a
@@ -1048,7 +1057,16 @@ def sync_health(request):
                 tz_meta=tz_meta,
             )
 
-    fresh_day = existing_record is None or legacy_day
+    fresh_day = (
+        existing_record is None
+        or legacy_day
+        # Phase 1c: a day first created by a Health Connect / Apple Health upload has no
+        # sensor reading yet; its first sync is bounded by the time since local midnight.
+        or (
+            existing_meta.get("created_by") == "health_sources"
+            and not existing_meta.get("streams_raw")
+        )
+    )
     velocity = assess_velocity(
         day=date,
         now=now,
@@ -1315,7 +1333,9 @@ def sync_health(request):
             # reaching the wallet until staff review them. Halving on top was a double
             # penalty for users who are only under review.
             credited_delta = int(v2_decision.verified_steps_total)
-            prev_credit = 0 if fresh_day else int(existing_record.steps)
+            prev_credit = (
+                0 if fresh_day else max(0, int(existing_record.steps) - health_extra)
+            )
             uncapped = prev_credit + credited_delta
             # Plausible daily maximum: credit stops at DAILY_STEP_CAP; the rest is kept
             # as unverified volume. High volume alone is no penalty (workers, runners).
@@ -1436,6 +1456,10 @@ def sync_health(request):
                 meta["evidence_source"] = evidence_source
             meta["platform"] = "web" if source_key == "web" else platform
             meta["integrity"] = _day_integrity(meta.get("integrity"), session, platform, now)
+            if meta.get("health"):
+                # `steps` below is our sensor's credit only; refresh_day re-adds what
+                # trusted health sources saw beyond it.
+                meta["health"] = {**meta["health"], "applied_extra": 0}
 
             previous_steps = existing_record.steps if existing_record else None
             previous_eligible = (
@@ -1470,9 +1494,28 @@ def sync_health(request):
                 },
             )
             suspicion_changed = previous_suspicious != is_suspicious
+            # Phase 1c: an optional Health Connect / Apple Health summary riding along
+            # (the app normally uses POST /api/steps/health-sources/). A bad summary
+            # never fails the step sync.
+            if data.get("health_sources"):
+                from .health_source_views import store_upload
+
+                store_upload(
+                    user,
+                    date,
+                    data.get("health_sources"),
+                    platform=platform,
+                    tz_offset_minutes=day_offset,
+                    now=now,
+                    raise_errors=False,
+                )
             # Evidence tiers, money-eligible steps, server active minutes and the
             # user-facing breakdown.
             refresh_day(record)
+            if (record.anticheat or {}).get("health"):
+                from .health_source_views import flag_disagreement
+
+                flag_disagreement(user, record)
             eligible_changed = previous_eligible != record.eligible_steps
 
             if record.steps > request.user.best_day_steps:

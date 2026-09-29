@@ -460,6 +460,9 @@ class HealthSyncSerializerV2(serializers.Serializer):
     evidence_hours = serializers.ListField(
         child=serializers.DictField(), required=False, allow_null=True, max_length=48
     )
+    # Phase 1c: optional Health Connect / Apple Health summary for this day (validated
+    # strictly by apps/steps/health_sources.clean_payload).
+    health_sources = serializers.JSONField(required=False, allow_null=True)
 
     def validate_date(self, value):
         # A phone in UTC+14 can be one calendar day ahead of the (UTC) server; anything
