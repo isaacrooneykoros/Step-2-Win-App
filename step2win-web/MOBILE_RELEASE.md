@@ -92,6 +92,10 @@ How the app handles it now:
 
 ### Data safety form (Play)
 
+> **Superseded:** use `backend/legal/PLAY_DATA_SAFETY.md` (matches the code including walks,
+> account linkage and social; the list below predates them and still mentions background
+> location). Location, Health Connect and App Store answers are in the same folder.
+
 Declare the following:
 - **Collected:**
   - Personal info: name, email, phone number, user IDs, profile photo.
