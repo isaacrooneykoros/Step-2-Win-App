@@ -19,6 +19,8 @@ import { BootSplash, shouldShowBootSplash } from './components/splash/BootSplash
 import { OnboardingPlaceholder } from './components/onboarding/OnboardingPlaceholder';
 import { setOnboardingOpen, useOnboardingOpen } from './lib/launchState';
 import type { ReactNode } from 'react';
+// Phase 4 social (friends, teams, weekly rankings): routes live with the screens.
+import { socialRoutes } from './screens/social/routes';
 
 const ONBOARDING_KEY = 'onboarding_completed_v1';
 /** A cold start here may open with the onboarding. Deep links (e.g. /forgot-password) go straight through. */
@@ -361,6 +363,7 @@ export default function App() {
               <Route path="/profile/sessions" element={withSuspense(<ActiveSessionsScreen />)} />
               <Route path="/support" element={withSuspense(<SupportScreen />)} />
               <Route path="/legal/:slug" element={withSuspense(<LegalDocumentScreen />)} />
+              {socialRoutes}
             </Route>
 
             {/* Fallback */}
