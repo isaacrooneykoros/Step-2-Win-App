@@ -14,7 +14,7 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { apiErrorMessage } from '../../components/settings/apiError';
 import { socialService, type TeamSummary, type TeamVisibility } from '../../services/api/social';
-import { formatSteps } from '../../lib/format';
+import { formatCompact } from '../../lib/format';
 import { socialKeys } from '../../components/social/socialUtils';
 
 const ROLE_LABEL = { owner: 'Owner', admin: 'Admin', member: 'Member' } as const;
@@ -24,7 +24,7 @@ function TeamRow({ team, onClick }: { team: TeamSummary; onClick: () => void }) 
     <ListRow
       leading={<IconTile icon={Users} tone={team.my_role ? 'brand' : 'neutral'} />}
       title={team.name}
-      subtitle={`${team.member_count} ${team.member_count === 1 ? 'member' : 'members'} · ${formatSteps(team.week_steps)} steps this week`}
+      subtitle={`${team.member_count} ${team.member_count === 1 ? 'member' : 'members'} · ${formatCompact(team.week_steps)} this week`}
       trailing={team.my_role ? <Pill tone={team.my_role === 'owner' ? 'brand' : 'neutral'}>{ROLE_LABEL[team.my_role]}</Pill> : team.visibility === 'invite_only' ? <Lock size={14} className="text-text-muted" aria-label="Invite only" /> : undefined}
       onClick={onClick}
       chevron
@@ -92,7 +92,7 @@ export function TeamsTab({ maxTeams }: { maxTeams: number }) {
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-2">
         <Button
-          leftIcon={<Plus size={18} aria-hidden />}
+          leftIcon={<Plus size={16} className="shrink-0" aria-hidden />}
           disabled={atLimit}
           onClick={() => {
             setName('');
@@ -106,7 +106,7 @@ export function TeamsTab({ maxTeams }: { maxTeams: number }) {
         </Button>
         <Button
           variant="outline"
-          leftIcon={<KeyRound size={18} aria-hidden />}
+          leftIcon={<KeyRound size={16} className="shrink-0" aria-hidden />}
           disabled={atLimit}
           onClick={() => {
             setCode('');
@@ -114,7 +114,7 @@ export function TeamsTab({ maxTeams }: { maxTeams: number }) {
             setJoinOpen(true);
           }}
         >
-          Join with code
+          Join by code
         </Button>
       </div>
       {atLimit && <p className="-mt-3 px-1 text-caption text-text-muted">You can be in up to {maxTeams} teams. Leave one to join another.</p>}

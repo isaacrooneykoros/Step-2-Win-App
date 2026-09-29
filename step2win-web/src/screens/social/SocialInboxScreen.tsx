@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Bell, PartyPopper, Shield, Trophy, UserCheck, UserPlus, Users, type LucideIcon } from 'lucide-react';
+import { Bell, ChevronRight, PartyPopper, Shield, Trophy, UserCheck, UserPlus, Users, type LucideIcon } from 'lucide-react';
 import { ScreenHeader } from '../../components/ui/ScreenHeader';
-import { ListGroup, ListRow } from '../../components/ui/ListRow';
+import { ListGroup } from '../../components/ui/ListRow';
 import { IconTile } from '../../components/ui/Pill';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { LoadError } from '../../components/ui/ErrorState';
@@ -75,19 +75,23 @@ export default function SocialInboxScreen() {
             {(query.data ?? []).map((n) => {
               const p = present(n);
               return (
-                <ListRow
+                <button
                   key={n.id}
-                  leading={
-                    <span className="relative">
-                      <IconTile icon={p.icon} tone={n.read ? 'neutral' : 'brand'} size="sm" />
-                      {!n.read && <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-bg-card bg-brand" aria-label="Unread" />}
-                    </span>
-                  }
-                  title={p.title}
-                  subtitle={p.subtitle ? `${p.subtitle} · ${formatRelativeTime(n.created_at)}` : formatRelativeTime(n.created_at)}
+                  type="button"
                   onClick={() => navigate(p.to)}
-                  chevron
-                />
+                  className="flex min-h-[60px] w-full items-start gap-3 px-4 py-3 text-left hover:bg-bg-input/60 active:!scale-100 active:bg-bg-input"
+                >
+                  <span className="relative mt-0.5">
+                    <IconTile icon={p.icon} tone={n.read ? 'neutral' : 'brand'} size="sm" />
+                    {!n.read && <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-bg-card bg-brand" aria-label="Unread" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={`block text-body ${n.read ? 'font-medium' : 'font-semibold'} text-text-primary`}>{p.title}</span>
+                    {p.subtitle && <span className="mt-0.5 block text-caption text-text-secondary">{p.subtitle}</span>}
+                    <span className="mt-0.5 block text-caption text-text-muted">{formatRelativeTime(n.created_at)}</span>
+                  </span>
+                  <ChevronRight size={18} className="mt-1 shrink-0 text-text-muted" aria-hidden />
+                </button>
               );
             })}
           </ListGroup>
