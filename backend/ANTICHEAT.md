@@ -630,11 +630,11 @@ day's first (velocity bounded by the time since local midnight), so it isn't pen
 | Health Connect too old | `needs_update`, same Play Store link |
 | Android 8, or Android 14+ where Health Connect is unavailable (e.g. work profile) | `unavailable`; the app says our sensor carries on |
 | Permission denied / revoked in Health Connect | `permission_denied`; cached days and the changes token are dropped; "Allow access" re-opens Health Connect's prompt |
-| Provider crash, slow provider | every SDK call has a 15 s timeout (Android) / 25 s per read (iOS); reads never run on the sync path's critical section; a failed read keeps the last good days; failures only set a status |
+| Provider crash, slow provider | Android: every SDK call has a 15 s timeout and a whole read a 45 s budget (today first); the read runs **after** our own step upload (health summaries go up in a second, health-only pass); a failed workout read keeps the cached workouts. iOS: 25 s per read. A failed read keeps the last good days; failures only set a status |
 | Budget phones (Tecno / Infinix / itel) with no Health Connect data | nothing to read: our sensor, gait evidence and walks work exactly as before |
 | Samsung / Google Fit batch syncs arriving late, near a deadline | our sensor keeps counting and uploading; late health data only adds confirmation / wearable steps when it arrives |
 | Background | Android: read in the WorkManager job only when `READ_HEALTH_DATA_IN_BACKGROUND` is granted and the feature is available (≤ every 30 min), else on app open / resume (≤ every 2 min). Other apps' routes can't be read in the background ("consent required"): a known route from an earlier foreground read is kept. iOS: HKObserverQuery + hourly background delivery caches the days; the app uploads on the next open |
-| Battery / data | last 3 days only; Health Connect changes token: only changed days (plus today) are re-read; a day's summary is uploaded only when its content hash changed |
+| Battery / data | last 3 days only; Health Connect changes token: only changed days (plus today) are re-read; a day's summary is uploaded only when its content hash changed, today's at most every 10 minutes |
 | Old app versions | send nothing: no change |
 
 ### Store submission (owner)
