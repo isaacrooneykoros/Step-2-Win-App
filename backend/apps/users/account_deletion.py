@@ -15,6 +15,8 @@ What happens (one DB transaction):
     (unique + NOT NULL), names cleared, device binding cleared, profile photo removed
     from storage (after commit).
   - Google / Apple links (SocialAccount) are deleted.
+  - Friends, requests, blocks, team memberships (ownership passes on), feed items,
+    reactions and weekly totals are removed (apps.social.deletion).
   - Raw activity data is deleted: health records, hourly steps, GPS waypoints, sync
     events (raw payloads), interval / daily verification rows, device registrations and
     step sessions that are not under an anti-cheat review.
@@ -291,6 +293,10 @@ def delete_account(user, *, channel: str = "app") -> None:
         social = list(SocialAccount.objects.filter(user=locked_user).values_list("id", "provider", "subject"))
         revoked = _revoke_all_tokens(locked_user)
         data_counts = _delete_activity_data(locked_user)
+        # Friends, teams, feed, rankings (apps/social/deletion.py).
+        from apps.social.deletion import delete_social_data
+
+        data_counts["social"] = delete_social_data(locked_user)
 
         if locked_user.profile_picture:
             photo_name = locked_user.profile_picture.name

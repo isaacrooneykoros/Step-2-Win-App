@@ -75,6 +75,13 @@ JOB_OPTIONS: dict[str, dict[str, int]] = {
     # Shadow risk model (apps.risk_ml): analytics only, never touches money, so it runs
     # last. Pure-Python batches over every active user for 3 days: a generous lease.
     "risk-ml-features-and-scores": {"priority": 140, "lease_seconds": 60 * 60},
+    # Social rankings (apps.social): bragging rights only, never money; before the
+    # heavy shadow risk model (kept last). The 10-minute
+    # refresh touches only changed users; the nightly reconcile and the Monday archive
+    # walk every user with steps that week.
+    "social-refresh-weekly-totals": {"priority": 134, "lease_seconds": 9 * 60},
+    "social-reconcile-weekly-totals": {"priority": 135, "lease_seconds": 30 * 60},
+    "social-finalize-week": {"priority": 136, "lease_seconds": 45 * 60},
 }
 
 

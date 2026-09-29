@@ -66,6 +66,9 @@ All times UTC. Priority = order within one tick (lower first).
 | check-wallet-balance-consistency | 02:30 | 110 | 30 min | Releases orphaned locked balances under a row lock (second run is a no-op). |
 | cleanup-inactive-sessions | 03:00 | 120 | 15 min | Deletes old inactive sessions / blacklisted tokens. |
 | cleanup-old-suspicious-activities | 03:30 | 130 | 15 min | Deletes *reviewed* suspicious-activity rows older than 90 days. |
+| social-refresh-weekly-totals | every 10 min | 134 | 9 min | Social weekly rankings (`apps.social`, no money): recomputes weekly totals only for users whose health records changed since the watermark, then team totals and friends' feed milestones. Recomputes values; feed items are unique per (user, kind, key). |
+| social-reconcile-weekly-totals | 01:45 | 135 | 30 min | Same task with `{"full": true}`: every user with records in the open weeks (catches `queryset.update()` changes). |
+| social-finalize-week | Mon 09:00 | 136 | 45 min | Archives the Mon-Sun (EAT) week that ended (12 h grace): friends-rank snapshots, team ranks, non-monetary weekly badges, "weekly results" notices. Once per week via `WeeklyArchive`. |
 | risk-ml-features-and-scores | 01:30 | 140 | 60 min | Shadow risk model (`apps.risk_ml`), kwargs `{"days": 3}`: harvests labels, recomputes features and stores scores for the last 3 days. Upserts on unique keys (safe late or twice); never touches steps, trust or money. |
 
 To add a job: add an entry to `CELERY_BEAT_SCHEDULE` (task dotted path + `crontab`), and
