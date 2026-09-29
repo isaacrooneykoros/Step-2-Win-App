@@ -1,7 +1,7 @@
 import type { ElementType } from 'react'
 import {
   Activity, ArrowLeftRight, Award, Banknote, BarChart3, FileBarChart, FileText, Footprints,
-  Gauge, HeadphonesIcon, LayoutDashboard, Scale, Settings, ShieldAlert, ShieldCheck, Trophy, Users,
+  Gauge, HeadphonesIcon, LayoutDashboard, Scale, Settings, ShieldAlert, ShieldCheck, Trophy, Users, UsersRound,
 } from 'lucide-react'
 
 /** Keys the layout fills with live counts (queues that need an operator). */
@@ -59,6 +59,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/fraud', label: 'Anti-cheat', icon: ShieldAlert, badgeKey: 'openFraudFlags', keywords: 'fraud flags trust score' },
       { to: '/moderation', label: 'Moderation', icon: ShieldCheck, keywords: 'review suspicious' },
+      { to: '/social', label: 'Social', icon: UsersRound, keywords: 'friends teams reports rankings community block' },
     ],
   },
   {

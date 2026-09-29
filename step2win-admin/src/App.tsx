@@ -23,6 +23,7 @@ import RegisterPage from './pages/auth/RegisterPage';
 import { useAuthStore } from './store/authStore';
 
 import { AdminFraudPage } from './pages/AdminFraudPage';
+import SocialModerationPage from './pages/SocialModerationPage';
 
 function App() {
   const loadSession = useAuthStore((state) => state.loadSession);
@@ -50,6 +51,7 @@ function App() {
           <Route path="payout-reviews" element={<PayoutReviewsPage />} />
           <Route path="badges" element={<BadgesPage />} />
           <Route path="moderation" element={<ModerationPage />} />
+          <Route path="social" element={<SocialModerationPage />} />
           <Route path="fraud" element={<AdminFraudPage />} />
           <Route path="anti-cheat" element={<AdminFraudPage />} />
           <Route path="reports" element={<ReportsPage />} />
