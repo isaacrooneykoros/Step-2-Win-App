@@ -1732,6 +1732,7 @@ def assess_velocity(
     client_ts: datetime | None,
     check_pair_velocity: bool = True,
     default_offset_hours: float | None = None,
+    offset_tolerance_hours: float | None = None,
 ) -> VelocityAssessment:
     """Raw-vs-raw velocity check with a first-sync-of-the-day bound.
 
@@ -1748,9 +1749,14 @@ def assess_velocity(
         if default_offset_hours is None
         else float(default_offset_hours)
     )
-    since_midnight = seconds_since_local_midnight(
-        day, now, offset + DEVICE_OFFSET_TOLERANCE_HOURS
+    # Phase 1b: when the phone reports its UTC offset, the caller passes it with a
+    # small tolerance; otherwise the market default (EAT) + 2 h is assumed.
+    tolerance = (
+        DEVICE_OFFSET_TOLERANCE_HOURS
+        if offset_tolerance_hours is None
+        else float(offset_tolerance_hours)
     )
+    since_midnight = seconds_since_local_midnight(day, now, offset + tolerance)
     since_midnight_generous = seconds_since_local_midnight(
         day, now, MAX_DEVICE_UTC_OFFSET_HOURS
     )

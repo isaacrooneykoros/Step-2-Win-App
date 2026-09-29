@@ -126,6 +126,13 @@ class StepHourlySyncRateThrottle(_DefaultRateMixin, _JitteredWaitMixin, UserRate
     default_rate = "10/minute"
 
 
+class StepWalkRateThrottle(_DefaultRateMixin, _JitteredWaitMixin, UserRateThrottle):
+    """Walk sessions (start / point uploads / finish): a walk uploads every 15-30 s."""
+
+    scope = "step_walk"
+    default_rate = "30/minute"
+
+
 class StepSyncGlobalThrottle(BaseThrottle):
     """
     Whole-server load shedding for step syncs: a fixed-window counter shared by every user.

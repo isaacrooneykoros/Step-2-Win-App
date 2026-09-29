@@ -375,19 +375,12 @@ def join_challenge(request):
                 metadata={"challenge_id": challenge.id},
             )
 
-            # Sync user's steps for this challenge
-            from django.db.models import Sum
+            # Sync user's steps for this challenge: money-eligible (verified) steps
+            # of days not under review (apps/steps/evidence.py).
+            from apps.steps.evidence import challenge_total_steps
 
-            from apps.steps.models import HealthRecord
-
-            total_steps = (
-                HealthRecord.objects.filter(
-                    user=user,
-                    date__gte=challenge.start_date,
-                    date__lte=challenge.end_date,
-                    is_suspicious=False,
-                ).aggregate(total=Sum("steps"))["total"]
-                or 0
+            total_steps = challenge_total_steps(
+                user, challenge.start_date, challenge.end_date
             )
 
             participant.steps = total_steps

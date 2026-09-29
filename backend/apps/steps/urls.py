@@ -1,10 +1,24 @@
 from django.urls import path
 
-from . import security_endpoints, views
+from . import security_endpoints, views, walk_views
 
 app_name = "steps"
 
 urlpatterns = [
+    # Phase 1b: reinstall resume, walks, privacy zone, step-session integrity
+    path("resume/", views.resume_day, name="resume_day"),
+    path("walks/", walk_views.list_walks, name="walk_list"),
+    path("walks/start/", walk_views.start_walk, name="walk_start"),
+    path("walks/privacy-zone/", walk_views.privacy_zone, name="walk_privacy_zone"),
+    path("walks/<str:walk_id>/", walk_views.walk_detail, name="walk_detail"),
+    path("walks/<str:walk_id>/points/", walk_views.walk_points, name="walk_points"),
+    path("walks/<str:walk_id>/finish/", walk_views.finish_walk, name="walk_finish"),
+    path("walks/<str:walk_id>/integrity/", walk_views.walk_integrity, name="walk_integrity"),
+    path(
+        "session/integrity/",
+        security_endpoints.step_session_integrity,
+        name="session_integrity",
+    ),
     path("sync/", views.sync_health, name="sync_health"),
     path("today/", views.today_health, name="today_health"),
     path("summary/", views.health_summary, name="health_summary"),

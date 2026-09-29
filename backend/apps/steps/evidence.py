@@ -187,22 +187,27 @@ def server_active_minutes(hourly_steps: dict[int, int], evidence: dict[int, dict
 
     Per hour: the minutes the phone saw steps in (evidence), bounded by what the hour's
     steps make plausible (>= 1 minute per 240 steps, <= 1 minute per 30 steps, <= 60).
-    Without evidence for an hour: steps / 100 (a moderate walking pace). Without any
-    hourly data: the day total / 100.
+    Without evidence for an hour: steps / 100 (a moderate walking pace). Steps of the
+    day not covered by any hour yet (hourly upload lagging): / 100 as well. The lower
+    bound (240 steps per minute) is never capped, so these minutes alone can't make a
+    day look faster than humanly possible; the velocity check guards totals.
     """
+    day_steps = max(0, int(day_steps or 0))
     hours = set(hourly_steps) | set(evidence)
-    if not hours:
-        return min(1440, math.ceil(max(0, day_steps) / 100)) if day_steps > 0 else 0
     total = 0
+    covered = 0
     for hour in hours:
         steps_h = max(int(hourly_steps.get(hour, 0) or 0), evidence_hour_total(evidence.get(hour) or {}))
         if steps_h <= 0:
             continue
+        covered += steps_h
         lo = math.ceil(steps_h / 240)
         hi = min(60, max(1, math.ceil(steps_h / 30)))
         measured = int((evidence.get(hour) or {}).get("active_minutes", 0) or 0)
         estimate = measured if measured > 0 else math.ceil(steps_h / 100)
         total += max(lo, min(hi, estimate, 60))
+    if day_steps > covered:
+        total += math.ceil((day_steps - covered) / 100)
     return min(1440, total)
 
 
@@ -219,6 +224,7 @@ def compute_tiers(
     walk_gait_fallback: int,
     server_vehicle_hours: set[int] | None = None,
     integrity_blocked: bool = False,
+    no_evidence_reason: str = "app_update_needed",
 ) -> dict[str, Any]:
     """Split a day's credited steps into tiers. Pure function (tested directly).
 
@@ -267,9 +273,7 @@ def compute_tiers(
     reasons_steps = {
         "vehicle": vehicle,
         "unverified_motion": shake,
-        "unverified_no_walking_evidence": 0,
         "device_not_verified": 0,
-        "app_update_needed": 0,
     }
     if integrity_blocked:
         reasons_steps["device_not_verified"] = min(post, walk_tier + sensor)
@@ -290,7 +294,7 @@ def compute_tiers(
             explained[code] = take
             remaining -= take
     if remaining > 0:
-        code = "app_update_needed" if evidence_source is None else "unverified_no_walking_evidence"
+        code = no_evidence_reason if evidence_source is None else "unverified_no_walking_evidence"
         explained[code] = remaining
 
     return {
@@ -327,3 +331,145 @@ def money_steps(record) -> int:
     if record.eligible_steps is None:
         return int(record.steps or 0)
     return int(record.eligible_steps)
+
+
+def challenge_total_steps(user, start, end) -> int:
+    """A user's challenge progress over [start, end]: money-eligible steps of the days
+    not under review. Goals / streaks / XP use HealthRecord.steps instead."""
+    from django.db.models import Sum
+
+    from .models import HealthRecord
+
+    return int(
+        HealthRecord.objects.filter(
+            user=user, date__gte=start, date__lte=end, is_suspicious=False
+        ).aggregate(total=Sum(challenge_steps_expression()))["total"]
+        or 0
+    )
+
+
+# ── Day refresh (tiers + eligible steps + server active minutes) ──────────────
+
+# Walks the route couldn't verify for reasons that say nothing bad about the steps
+# (no GPS, indoors / treadmill): their gait-verified steps still count as sensor steps.
+WALK_FALLBACK_OK_REASONS = frozenset({"walk_no_route", "walk_route_short_for_steps"})
+# Server-side vehicle hours: at least this much vehicle-speed movement in the hour.
+VEHICLE_HOUR_MIN_SECONDS = 10 * 60
+
+
+def cutover_date():
+    from datetime import date as date_type
+
+    raw = str(getattr(settings, "STEP_EVIDENCE_CUTOVER_DATE", "") or "").strip()
+    if not raw:
+        return None
+    try:
+        return date_type.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _vehicle_seconds_by_hour(meta: dict, walks) -> dict[int, int]:
+    seconds: dict[int, int] = {}
+    for hour_key, secs in (meta.get("vehicle_seconds_by_hour") or {}).items():
+        try:
+            seconds[int(hour_key)] = seconds.get(int(hour_key), 0) + int(secs)
+        except (TypeError, ValueError):
+            continue
+    for walk in walks:
+        for item in walk.vehicle_hours or []:
+            try:
+                hour, secs = int(item["hour"]), int(item["seconds"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            seconds[hour] = seconds.get(hour, 0) + secs
+    return seconds
+
+
+def refresh_day(record, *, save: bool = True) -> dict[str, Any]:
+    """Recompute a day's tiers, eligible steps and server active minutes from what is
+    stored (client evidence streams, verified walks, vehicle hours, integrity state).
+    Called after every sync, walk finish and hourly upload. Idempotent."""
+    from .models import HourlyStepRecord, WalkSession
+    from .verification import build_breakdown
+
+    meta = dict(record.anticheat or {})
+    p1b = dict(meta.get("p1b") or {})
+    credited = max(0, int(record.steps or 0))
+    walks = list(
+        WalkSession.objects.filter(
+            user_id=record.user_id, local_date=record.date, status="finished"
+        )
+    )
+    walk_verified = sum(int(w.verified_steps or 0) for w in walks if w.verdict == "verified")
+    walk_fallback = sum(
+        int(w.gait_verified_steps or 0)
+        for w in walks
+        if w.verdict == "unverified"
+        and w.verdict_reasons
+        and set(w.verdict_reasons) <= WALK_FALLBACK_OK_REASONS
+    )
+    vehicle_seconds = _vehicle_seconds_by_hour(meta, walks)
+    vehicle_hours = {h for h, s in vehicle_seconds.items() if s >= VEHICLE_HOUR_MIN_SECONDS}
+    evidence = day_evidence(meta)
+    source = meta.get("evidence_source")
+    integrity = meta.get("integrity") or {}
+    result = compute_tiers(
+        credited=credited,
+        grandfathered=int(p1b.get("grandfathered", 0) or 0),
+        evidence_source=source,
+        evidence=evidence,
+        walk_verified=walk_verified,
+        walk_gait_fallback=walk_fallback,
+        server_vehicle_hours=vehicle_hours,
+        integrity_blocked=bool(integrity.get("blocked")),
+        no_evidence_reason=(
+            "unverified_no_walking_evidence"
+            if meta.get("platform") == "web"
+            else "app_update_needed"
+        ),
+    )
+    tiers = result["tiers"]
+    eligible = result["eligible"]
+    cutover = cutover_date()
+    full_credit = (not money_requires_evidence()) or (cutover is not None and record.date < cutover)
+    if full_credit:
+        eligible = credited
+
+    hourly = dict(
+        HourlyStepRecord.objects.filter(user_id=record.user_id, date=record.date).values_list(
+            "hour", "steps"
+        )
+    )
+    active = server_active_minutes(hourly, evidence, max(credited, int(record.last_raw_steps or 0)))
+
+    meta["tiers"] = {
+        "unverified_reasons": result["unverified_reasons"],
+        "evidence_totals": result["evidence_totals"],
+        "walk_verified": walk_verified,
+        "walk_fallback": walk_fallback,
+        "vehicle_hours": sorted(vehicle_hours),
+        "full_credit": full_credit,
+    }
+    record.anticheat = meta
+    record.tier_grandfathered = tiers["grandfathered"]
+    record.tier_wearable = tiers["wearable"]
+    record.tier_walk_session = tiers["walk_session"]
+    record.tier_sensor_verified = tiers["sensor_verified"]
+    record.tier_unverified = tiers["unverified"]
+    record.eligible_steps = eligible
+    record.active_minutes = active
+    record.verification = build_breakdown(record)
+    if save and record.pk:
+        type(record).objects.filter(pk=record.pk).update(
+            anticheat=record.anticheat,
+            tier_grandfathered=record.tier_grandfathered,
+            tier_wearable=record.tier_wearable,
+            tier_walk_session=record.tier_walk_session,
+            tier_sensor_verified=record.tier_sensor_verified,
+            tier_unverified=record.tier_unverified,
+            eligible_steps=record.eligible_steps,
+            active_minutes=record.active_minutes,
+            verification=record.verification,
+        )
+    return result

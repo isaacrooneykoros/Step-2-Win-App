@@ -307,3 +307,14 @@ def monitor_anticheat_shadow_drift_task():
         ),
     )
     return run_anticheat_shadow_drift_monitor(thresholds=thresholds, send_alerts=True)
+
+
+@shared_task
+def purge_old_walk_points_task():
+    """Walk privacy retention (daily): raw GPS points of walks older than
+    WALK_RAW_POINTS_RETENTION_DAYS are deleted; simplified routes are kept."""
+    from apps.steps.walks import purge_old_walk_points
+
+    purged = purge_old_walk_points()
+    logger.info("Purged raw GPS points of %s walks", purged)
+    return f"Purged raw points of {purged} walks"
