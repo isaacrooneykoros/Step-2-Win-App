@@ -7,7 +7,14 @@ import { useToast } from '../components/ui/Toast';
 import { useAuthStore } from '../store/authStore';
 import { v4 as uuidv4 } from 'uuid';
 import CryptoJS from 'crypto-js';
-import { DeviceStepCounter, type NativeSyncResult, type StepHistoryDay } from '../plugins/deviceStepCounter';
+import {
+  DeviceStepCounter,
+  type DeviceSignals,
+  type NativeSyncResult,
+  type StepHistoryDay,
+  type WalkingEvidenceHour,
+} from '../plugins/deviceStepCounter';
+import { adoptNativeInstallId, getInstallId, getInstallIdSync, timeZoneFields } from '../services/deviceIdentity';
 import { openAppSettings } from '../plugins/appSystem';
 import { hasNativeStepCounter, isAndroidApp, isIOSApp, permissionCopy } from '../utils/platform';
 import type { ChallengeDetail, HourlyStep, LocationWaypoint, StepSyncForm, User } from '../types';
@@ -295,11 +302,18 @@ export function useHealthSync() {
       return existing;
     }
 
+    const platform = nativeSession.platform ?? 'android';
+    const deviceSignals: DeviceSignals | null = await DeviceStepCounter.getDeviceSignals().catch(() => null);
+    const tz = timeZoneFields();
     const started = await stepsService.startSession({
       device_id: nativeSession.device_id,
-      platform: nativeSession.platform ?? 'android',
+      platform,
       app_version: nativeSession.app_version,
       ml_model_version: nativeSession.ml_model_version,
+      tz_offset_minutes: tz.tz_offset_minutes,
+      tz_name: tz.tz_name || null,
+      install_id: await getInstallId(),
+      device_signals: deviceSignals,
     });
 
     const created: ActiveStepSession = {
@@ -321,6 +335,11 @@ export function useHealthSync() {
     }).catch(() => ({ saved: false }));
 
     activeStepSession = created;
+    // Android sessions started by the native uploader send their own Play Integrity token.
+    // This (web-started) one does it here, best effort, without delaying the upload.
+    if (platform === 'android' && started.integrity_requested && started.integrity_nonce) {
+      void sendSessionIntegrity(created, started.integrity_nonce);
+    }
     return created;
   }, []);
 
@@ -922,11 +941,16 @@ function buildHealthPayload(
   // Dynamic MET estimate based on cadence + user weight for tighter calorie estimate.
   const cadenceForMet = cadenceSpm > 0 ? cadenceSpm : (steps > 0 ? Math.min(160, Math.max(60, steps / 60)) : 0);
   const met = cadenceForMet >= 130 ? 6.5 : cadenceForMet >= 110 ? 4.8 : cadenceForMet >= 90 ? 3.5 : 2.5;
-  // At least one active minute once there are steps (the server rejects steps without time).
+  // Rough estimate for the calorie figure only. Still sent for older servers; the server now
+  // computes active minutes itself and ignores this value.
   const active_minutes = steps > 0 ? Math.max(1, Math.round(steps / 120)) : null;
   const calories_active = active_minutes && active_minutes > 0
     ? Math.round((met * 3.5 * weightKg / 200) * active_minutes)
     : null;
+
+  const evidence = evidenceFields(reading, date);
+  const tz = timeZoneFields();
+  const installId = adoptNativeInstallId(reading?.install_id) ?? getInstallIdSync();
 
   const payload: StepSyncForm = {
     date,
@@ -961,9 +985,46 @@ function buildHealthPayload(
     timestamp_client: new Date().toISOString(),
     steps_total: steps,
     steps_delta: steps,
+    tz_offset_minutes: tz.tz_offset_minutes,
+    tz_name: tz.tz_name || null,
+    install_id: installId,
+    // "live_timed" only when the native layer measured per-step timestamps.
+    burst_source: reading?.burst_source === 'live_timed' ? 'live_timed' : 'arrival_batched',
+    ...evidence,
   };
 
   return payload;
+}
+
+/**
+ * Walking evidence for the uploaded day. Only a reading of that same day carries it (history
+ * catch-up days have none). iOS readings are CoreMotion-based: evidence_source "ios_coremotion".
+ */
+function evidenceFields(
+  reading: Awaited<ReturnType<typeof DeviceStepCounter.getTodaySteps>> | null,
+  date: string,
+): Pick<StepSyncForm, 'evidence_source' | 'evidence_hours'> {
+  const sameDay = !!reading && reading.date === date;
+  const hours: WalkingEvidenceHour[] | null =
+    sameDay && Array.isArray(reading?.evidence_hours) ? reading.evidence_hours.slice(0, 24) : null;
+  const source = isIOSApp() ? 'ios_coremotion' : sameDay && reading?.evidence_source ? reading.evidence_source : null;
+  if (!source && !hours) return {};
+  return { evidence_source: source, evidence_hours: hours };
+}
+
+async function sendSessionIntegrity(session: ActiveStepSession, nonce: string) {
+  try {
+    const { token } = await DeviceStepCounter.requestIntegrityToken({ nonce });
+    // No token (no Play services, not configured): send nothing; the server records "unchecked".
+    if (!token) return;
+    await stepsService.sendSessionIntegrity({
+      session_id: session.sessionId,
+      session_token: session.sessionToken,
+      integrity_token: token,
+    });
+  } catch {
+    // Best effort only.
+  }
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
