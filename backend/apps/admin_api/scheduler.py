@@ -75,6 +75,10 @@ JOB_OPTIONS: dict[str, dict[str, int]] = {
     # Shadow risk model (apps.risk_ml): analytics only, never touches money, so it runs
     # last. Pure-Python batches over every active user for 3 days: a generous lease.
     "risk-ml-features-and-scores": {"priority": 140, "lease_seconds": 60 * 60},
+    # Account linkage graph (apps.linkage): feeds payout holds at the next settlement
+    # (00:05 UTC) but moves no money itself. Batched; 5,000 users take well under a
+    # minute, the lease covers large growth.
+    "linkage-recompute": {"priority": 135, "lease_seconds": 60 * 60},
 }
 
 

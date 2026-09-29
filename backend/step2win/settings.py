@@ -101,6 +101,7 @@ INSTALLED_APPS = [
     "apps.payments",
     "apps.legal",
     "apps.risk_ml",
+    "apps.linkage",
     "axes",
     "auditlog",
 ]
@@ -499,6 +500,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.risk_ml.tasks.compute_features_and_scores_task",
         "schedule": crontab(hour=1, minute=30),  # 01:30 UTC (04:30 EAT)
         "kwargs": {"days": 3},
+    },
+    # Account linkage (anti-cheat Phase 2a): identity graph + clusters, before settlement.
+    "linkage-recompute": {
+        "task": "apps.linkage.tasks.recompute_linkage_task",
+        "schedule": crontab(hour=23, minute=15),  # 23:15 UTC (02:15 EAT)
     },
 }
 # Shadow risk model (apps.risk_ml). Local-day offset for "late sync" and hour-of-day features.

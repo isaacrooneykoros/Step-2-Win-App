@@ -408,6 +408,12 @@ def twin_counts(curves: dict) -> dict:
     and near-exact copies land in the same bucket. Curves that differ by noise straddling
     a bucket edge can be missed (documented limitation).
     """
+    return {u: len(s) for u, s in twin_pairs(curves).items()}
+
+
+def twin_pairs(curves: dict) -> dict:
+    """Same detection as ``twin_counts`` but returns {user_id: set of twin user ids}
+    (used by apps.linkage to build account-to-account edges)."""
     buckets: dict = {}
     eligible = {u: v for u, v in curves.items() if sum(v) >= TWIN_MIN_STEPS}
     for uid, vec in eligible.items():
@@ -425,4 +431,4 @@ def twin_counts(curves: dict) -> dict:
                 if dist is not None and dist <= TWIN_MAX_L1:
                     twins[a].add(b)
                     twins[b].add(a)
-    return {u: len(s) for u, s in twins.items()}
+    return twins

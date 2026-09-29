@@ -19,6 +19,11 @@ Hold rules (thresholds are admin settings, see SystemSettings.payout_hold_*):
   suspicious_days      a HealthRecord in the window is marked suspicious
   large_win_with_flags payout >= payout_hold_large_win_kes and unreviewed
                        MEDIUM+ flags dated in the window
+  linked_accounts      (Phase 2a, apps/linkage/policy.py) several linked accounts in
+                       the same paid challenge (all but the first-registered are
+                       held), or a strong link (same phone / payout number) to an
+                       account that was already paid. Linkage settings are in
+                       apps.linkage.LinkageSettings; known households are exempt.
 
 Staff decide in the admin console (Finance > Payout reviews):
 
@@ -67,6 +72,8 @@ REASON_LABELS = {
     "open_high_flags": "Open high / critical anti-cheat flags in the challenge window",
     "suspicious_days": "Step days in the challenge window marked suspicious",
     "large_win_with_flags": "Large payout with open anti-cheat flags in the window",
+    # Phase 2a (apps/linkage): multi-account / shared device / shared payout number.
+    "linked_accounts": "Linked to other accounts (same phone, payout number or activity)",
 }
 
 
@@ -160,7 +167,29 @@ def hold_reasons(challenge, participant, amount, user=None) -> list[dict]:
                 threshold=str(large),
                 open_flags=medium_plus,
             )
+
+    # ── Phase 2a: account linkage (apps/linkage/policy.py) ──────────────────
+    # Fails open (logged): the rules above still apply if the linkage check breaks.
+    try:
+        from apps.linkage.policy import linked_account_reasons
+
+        for detail in linked_account_reasons(challenge, participant, user, amount):
+            add("linked_accounts", **detail)
+    except Exception:
+        logger.exception("Linked-account check failed for user %s challenge %s", user.id, challenge.id)
     return reasons
+
+
+def _linked_to_hold(hold) -> set:
+    """Phase 2a: accounts linked to the held account never receive a share of its
+    forfeited payout (otherwise a farm's main account collects its alts' prizes)."""
+    try:
+        from apps.linkage.policy import forfeit_excluded_user_ids
+
+        return forfeit_excluded_user_ids(hold.user_id)
+    except Exception:
+        logger.exception("Linked-account lookup failed for hold %s", hold.pk)
+        return set()
 
 
 def hold_if_needed(challenge, resolved, user) -> bool:
@@ -441,9 +470,10 @@ def _clear_recipients(hold):
             user_id__in=[r.user_id for r in rows], score__lte=0
         ).values_list("user_id", flat=True)
     )
+    linked = _linked_to_hold(hold)  # Phase 2a
     out = []
     for r in rows:
-        if r.participant_id in blocked or r.user_id in banned:
+        if r.participant_id in blocked or r.user_id in banned or r.user_id in linked:
             continue
         if not r.user.is_active or getattr(r.user, "deleted_at", None):
             continue
@@ -488,9 +518,10 @@ def _refund_recipients(hold):
         ).values_list("user_id", flat=True)
     )
     fee = _D(challenge.entry_fee)
+    linked = _linked_to_hold(hold)  # Phase 2a
     out = []
     for p in rows:
-        if p.pk in not_clear or p.user_id in banned:
+        if p.pk in not_clear or p.user_id in banned or p.user_id in linked:
             continue
         if not p.user.is_active or getattr(p.user, "deleted_at", None):
             continue
