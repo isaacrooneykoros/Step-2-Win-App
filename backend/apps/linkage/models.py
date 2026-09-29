@@ -31,6 +31,7 @@ class LinkEdge(models.Model):
     TYPE_SHARED_DEVICE = "shared_device"
     TYPE_SHARED_PAYOUT_ACCOUNT = "shared_payout_account"
     TYPE_SHARED_DEPOSIT_NUMBER = "shared_deposit_number"
+    TYPE_SHARED_BUSINESS_NUMBER = "shared_business_number"
     TYPE_PHONE_SEQUENCE = "phone_sequence"
     TYPE_SHARED_NETWORK = "shared_network"
     TYPE_CO_LOCATION = "co_location"
@@ -41,6 +42,7 @@ class LinkEdge(models.Model):
         (TYPE_SHARED_DEVICE, "Same phone"),
         (TYPE_SHARED_PAYOUT_ACCOUNT, "Same payout number or account"),
         (TYPE_SHARED_DEPOSIT_NUMBER, "Same deposit number"),
+        (TYPE_SHARED_BUSINESS_NUMBER, "Shared business number"),
         (TYPE_PHONE_SEQUENCE, "Near-sequential phone numbers"),
         (TYPE_SHARED_NETWORK, "Same home network"),
         (TYPE_CO_LOCATION, "Walked at the same place and time"),
@@ -143,6 +145,10 @@ class LinkageSettings(models.Model):
     # A strong link (same phone / same payout number) to an account that already
     # received a payout: hold the new payout.
     strong_link_paid_hold = models.BooleanField(default=True)
+    # Owner decision (2026-09): the "already paid" rule uses the same PHONE only. A
+    # shared payout number alone holds only inside the same paid challenge (rule 1),
+    # unless this is switched on.
+    strong_link_paid_includes_payout_number = models.BooleanField(default=False)
     paid_lookback_days = models.IntegerField(default=180)
     # Behavioural detectors (co-location, twin curves, handover) look back this far.
     behaviour_lookback_days = models.IntegerField(default=14)
@@ -153,19 +159,24 @@ class LinkageSettings(models.Model):
     # place (mobile carrier NAT, campus Wi-Fi, a group walk): ignored.
     network_max_accounts = models.IntegerField(default=6)
     colocation_max_accounts = models.IntegerField(default=8)
+    # More accounts than this on one payout/deposit number = a shared business or agent
+    # number: context only (never a strong link).
+    business_number_min_accounts = models.IntegerField(default=10)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
                                    null=True, blank=True, related_name="+")
 
     EDITABLE = ("holds_enabled", "same_challenge_hold", "strong_link_paid_hold",
+                "strong_link_paid_includes_payout_number",
                 "paid_lookback_days", "behaviour_lookback_days", "medium_link_threshold",
-                "network_max_accounts", "colocation_max_accounts")
+                "network_max_accounts", "colocation_max_accounts", "business_number_min_accounts")
     BOUNDS = {
         "paid_lookback_days": (7, 730),
         "behaviour_lookback_days": (3, 60),
         "medium_link_threshold": (0.5, 3.0),
         "network_max_accounts": (2, 50),
         "colocation_max_accounts": (2, 50),
+        "business_number_min_accounts": (3, 100),
     }
 
     @classmethod

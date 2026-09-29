@@ -212,7 +212,7 @@ def _revoke_all_tokens(user) -> int:
     for token in outstanding.distinct():
         _, created = BlacklistedToken.objects.get_or_create(token=token)
         revoked += int(created)
-    DeviceSession.objects.filter(user=user, is_active=True).update(is_active=False)
+    DeviceSession.end_sessions(DeviceSession.objects.filter(user=user, is_active=True))
     return revoked
 
 

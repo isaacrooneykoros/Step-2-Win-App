@@ -414,11 +414,15 @@ class PolicyTests(LinkFixture, TestCase):
         self.finalize()
         self.assertEqual(self.held(), set())
 
-    def test_strong_link_to_an_account_already_paid(self):
-        self.withdraw_to(self.alt1, self.main.phone_number)
-        WalletTransaction.objects.create(user=self.main, type="payout", amount=Decimal("300"),
+    def paid_before(self, user):
+        WalletTransaction.objects.create(user=user, type="payout", amount=Decimal("300"),
                                          balance_before=0, balance_after=Decimal("300"), description="p",
                                          metadata={"challenge_id": 999999})
+
+    def test_same_phone_as_an_account_already_paid_is_held(self):
+        self.device(self.main)
+        self.device(self.alt1)
+        self.paid_before(self.main)
         self.join(self.alt1)
         self.join(self.honest)
         self.finalize()
@@ -426,7 +430,75 @@ class PolicyTests(LinkFixture, TestCase):
         self.assertEqual(hold.user, self.alt1)
         reason = next(r for r in hold.reasons if r["code"] == "linked_accounts")
         self.assertEqual(reason["detail"]["rules"], ["strong_link_paid"])
-        self.assertEqual(reason["detail"]["strong_links_paid"][0]["edge_types"], ["shared_payout_account"])
+        self.assertEqual(reason["detail"]["strong_links_paid"][0]["edge_types"], ["shared_device"])
+
+    def test_shared_payout_number_alone_does_not_trigger_the_paid_rule(self):
+        # Owner decision: families share M-Pesa numbers. Different challenge -> paid.
+        self.withdraw_to(self.alt1, self.main.phone_number)
+        self.paid_before(self.main)
+        self.join(self.alt1)
+        self.join(self.honest)
+        self.finalize()
+        self.assertEqual(self.held(), set())
+
+    def test_shared_payout_number_still_holds_in_the_same_paid_challenge(self):
+        self.withdraw_to(self.alt1, self.main.phone_number)
+        self.join(self.main)
+        self.join(self.alt1)
+        self.join(self.honest)
+        self.finalize()
+        self.assertEqual(self.held(), {"alt1"})
+
+    def test_paid_rule_can_include_payout_numbers(self):
+        cfg = LinkageSettings.load()
+        cfg.strong_link_paid_includes_payout_number = True
+        cfg.save()
+        self.withdraw_to(self.alt1, self.main.phone_number)
+        self.paid_before(self.main)
+        self.join(self.alt1)
+        self.join(self.honest)
+        self.finalize()
+        self.assertEqual(self.held(), {"alt1"})
+
+    def test_shared_business_number_never_holds(self):
+        till = "254700999000"
+        crowd = [self.mk(f"shop{i}") for i in range(11)]  # 11 accounts > 10
+        for u in crowd:
+            self.withdraw_to(u, till)
+        for u in crowd[:2]:
+            self.join(u)
+        self.join(self.honest)
+        recompute_linkage()
+        self.assertFalse(LinkEdge.objects.filter(strength="strong").exists())
+        e = LinkEdge.objects.filter(edge_type="shared_business_number").first()
+        self.assertEqual((e.strength, e.evidence["accounts_sharing"]), ("weak", 11))
+        from apps.linkage.views import explain
+        self.assertIn("Shared business number (11 accounts)", explain(e.edge_type, e.evidence))
+        self.assertFalse(LinkCluster.objects.exists())
+        self.finalize()
+        self.assertEqual(self.held(), set())
+
+    def test_business_threshold_is_adjustable(self):
+        cfg = LinkageSettings.load()
+        cfg.business_number_min_accounts = 3
+        cfg.save()
+        for u in (self.main, self.alt1, self.alt2, self.honest):
+            self.withdraw_to(u, "254700888000")
+        recompute_linkage()
+        self.assertFalse(LinkEdge.objects.filter(strength="strong").exists())
+        self.assertEqual(LinkEdge.objects.filter(edge_type="shared_business_number").count(), 6)
+
+    def test_linkage_crash_pays_and_alerts(self):
+        from unittest import mock
+        self.farm()
+        with mock.patch("apps.linkage.policy.linked_account_reasons", side_effect=RuntimeError("boom")), \
+                mock.patch("apps.linkage.alerts.ops_alert") as alert, \
+                self.assertLogs("apps.challenges.payout_holds", level="ERROR") as logs:
+            self.finalize()
+        self.assertEqual(self.held(), set())
+        self.assertTrue(alert.called)
+        self.assertEqual(alert.call_args[0][0]["event"], "linked_account_check_failed")
+        self.assertIn("LINKED-ACCOUNT CHECK FAILED", "\n".join(logs.output))
 
     def test_policy_switches(self):
         self.farm()

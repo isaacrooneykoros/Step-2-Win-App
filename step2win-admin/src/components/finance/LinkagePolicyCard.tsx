@@ -8,7 +8,9 @@ import { Skeleton } from '../ui/Skeleton'
 import { consoleApi } from '../users/api'
 import type { LinkageSettings } from '../users/linkageTypes'
 
-const TOGGLES: Array<{ key: 'holds_enabled' | 'same_challenge_hold' | 'strong_link_paid_hold'; label: string; hint: string }> = [
+type ToggleKey = 'holds_enabled' | 'same_challenge_hold' | 'strong_link_paid_hold' | 'strong_link_paid_includes_payout_number'
+
+const TOGGLES: Array<{ key: ToggleKey; label: string; hint: string }> = [
   { key: 'holds_enabled', label: 'Hold payouts of linked accounts', hint: 'Master switch for the two rules below.' },
   {
     key: 'same_challenge_hold',
@@ -17,17 +19,25 @@ const TOGGLES: Array<{ key: 'holds_enabled' | 'same_challenge_hold' | 'strong_li
   },
   {
     key: 'strong_link_paid_hold',
-    label: 'Same phone or payout number as an account already paid',
+    label: 'Same phone as an account already paid',
     hint: 'Hold the new payout for review.',
+  },
+  {
+    key: 'strong_link_paid_includes_payout_number',
+    label: 'Also apply the already-paid rule to a shared payout number',
+    hint: 'Off by default: families often share an M-Pesa number. A shared number still counts inside the same paid challenge.',
   },
 ]
 
-const NUMBERS: Array<{ key: 'paid_lookback_days' | 'behaviour_lookback_days' | 'medium_link_threshold' | 'network_max_accounts' | 'colocation_max_accounts'; label: string; step: number }> = [
+type NumberKey = 'paid_lookback_days' | 'behaviour_lookback_days' | 'medium_link_threshold' | 'network_max_accounts' | 'colocation_max_accounts' | 'business_number_min_accounts'
+
+const NUMBERS: Array<{ key: NumberKey; label: string; step: number }> = [
   { key: 'paid_lookback_days', label: 'Already-paid look-back (days)', step: 1 },
   { key: 'behaviour_lookback_days', label: 'Walks and step patterns look-back (days)', step: 1 },
   { key: 'medium_link_threshold', label: 'Combined evidence needed to link', step: 0.1 },
   { key: 'network_max_accounts', label: 'Largest network treated as a home', step: 1 },
   { key: 'colocation_max_accounts', label: 'Largest group treated as walking together', step: 1 },
+  { key: 'business_number_min_accounts', label: 'Accounts on one number before it counts as a business number', step: 1 },
 ]
 
 /** Linked-account payout policy (apps/linkage settings). Changes are audited. */
@@ -76,7 +86,7 @@ export function LinkagePolicyCard() {
                   type="checkbox"
                   className="mt-1"
                   checked={draft[t.key]}
-                  disabled={t.key !== 'holds_enabled' && !draft.holds_enabled}
+                  disabled={(t.key !== 'holds_enabled' && !draft.holds_enabled) || (t.key === 'strong_link_paid_includes_payout_number' && !draft.strong_link_paid_hold)}
                   onChange={(e) => setDraft({ ...draft, [t.key]: e.target.checked })}
                 />
                 <span>

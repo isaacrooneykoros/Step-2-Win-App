@@ -24,6 +24,7 @@ from apps.linkage.store import local_today, recompute_linkage
 from apps.payments.models import PaymentTransaction, WithdrawalRequest
 from apps.steps.models import DeviceRegistration, HealthRecord, HourlyStepRecord, LocationWaypoint
 from apps.users.models import DeviceSession
+from apps.users.network_privacy import network_hash
 
 User = get_user_model()
 N_USERS = 5000
@@ -78,7 +79,8 @@ class SyntheticPerformanceTest(TestCase):
                 ip = f"105.{160 + n % 20}.{n % 20}.{n % 250 + 1}"          # carrier NAT hubs
             else:
                 ip = f"41.{90 + n % 50}.{(n // 10) % 250}.{n % 250 + 1}"  # home-sized networks
-            sessions.append(DeviceSession(user_id=u, refresh_jti=f"j{n}", ip_address=ip, last_active_at=now))
+            sessions.append(DeviceSession(user_id=u, refresh_jti=f"j{n}", ip_address=ip,
+                                          network_hash=network_hash(ip), last_active_at=now))
         DeviceSession.objects.bulk_create(sessions, batch_size=2000)
 
         hourly, health = [], []

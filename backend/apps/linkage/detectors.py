@@ -13,6 +13,9 @@ Edge types, strength and weight (see ANTICHEAT.md "Account linkage"):
   strong  shared_payout_account   1.00  same M-Pesa number / bank / paybill account where at
                                         least one account withdraws or is paid out to it
   medium  shared_deposit_number   0.50  same M-Pesa number used only for deposits
+  weak    shared_business_number  0.05  a number/account shared by MORE than
+                                        ``business_number_min_accounts`` (default 10) accounts:
+                                        a business, agent or till number, context only
   medium  co_location             0.30 / 0.45 / 0.60  walked within ~100 m and 5 min of each
                                         other for 15+ min on 1 / 2 / 3+ days
   medium  twin_curves             0.30 / 0.45 / 0.60  near-identical hourly step curves on
@@ -23,14 +26,12 @@ Edge types, strength and weight (see ANTICHEAT.md "Account linkage"):
                                         (0.40 when they also joined within 30 min each time)
   weak    phone_sequence          0.10 / 0.25  profile numbers within 99 / 10 of each other,
                                         registered within 14 days
-  weak    shared_network          0.15  logged in from the same home-sized network (/24)
+  weak    shared_network          0.15  logged in from the same home-sized network (/24, /48),
+                                        compared by keyed hash (DeviceSession.network_hash)
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import ipaddress
 import logging
 import math
 import time
@@ -38,7 +39,6 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from datetime import timezone as dt_timezone
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db.models import Count
 from django.utils import timezone
@@ -52,7 +52,7 @@ MAX_ACCOUNTS_PER_IDENTIFIER = 200     # pairs are formed among at most this many
 PHONE_SEQUENCE_GAP = 99
 PHONE_SEQUENCE_TIGHT_GAP = 10
 PHONE_SEQUENCE_WINDOW = timedelta(days=14)
-NETWORK_LOOKBACK_DAYS = 90
+NETWORK_LOOKBACK_DAYS = 90            # = network hash retention
 COLOC_CELL_DEG = 0.0005               # ~55 m; neighbours included -> "within ~100 m"
 COLOC_SLOT_S = 300                    # 5-minute time slots (+ the next slot)
 COLOC_MIN_SLOTS = 3                   # 15 minutes together in total
@@ -72,11 +72,6 @@ PAYOUT_ROLES = {"withdrawal", "payout"}
 
 
 # ── small helpers ───────────────────────────────────────────────────────────
-
-
-def keyed_hash(value: str, n: int = 10) -> str:
-    key = (getattr(settings, "SECRET_KEY", "") or "linkage").encode()
-    return hmac.new(key, value.encode(), hashlib.sha256).hexdigest()[:n]
 
 
 def normalize_phone(raw) -> str | None:
@@ -268,7 +263,12 @@ def _money_key_rows(user_ids=None):
         yield from withdrawal_rows(WithdrawalRequest.objects.filter(account_number__in=chunk))
 
 
-def detect_shared_money(edges: Edges, *, live: set, user_ids=None) -> int:
+BUSINESS_PAIR_CAP = 50  # context-only edges: don't spell out every pair of a big group
+
+
+def detect_shared_money(edges: Edges, *, live: set, user_ids=None, business_min: int = 10) -> int:
+    """Same payment identifier. More than ``business_min`` accounts on one identifier is
+    a shared business/agent number: a weak, context-only edge (never strong)."""
     per_key: dict = defaultdict(dict)  # key -> uid -> [roles set, first, last]
     for key, uid, role, at in _money_key_rows(user_ids):
         if live is not None and uid not in live:
@@ -287,6 +287,12 @@ def detect_shared_money(edges: Edges, *, live: set, user_ids=None) -> int:
         if len(users) < 2:
             continue
         kind = {"m": "mpesa", "b": "bank", "p": "paybill"}[key[0]]
+        if len(users) > business_min:
+            for a, b in _pairs(users, cap=BUSINESS_PAIR_CAP):
+                edges.add(a, b, LinkEdge.TYPE_SHARED_BUSINESS_NUMBER, STRENGTH_WEAK, 0.05,
+                          {"kind": kind, "account": mask_account(key), "accounts_sharing": len(users)})
+                n += 1
+            continue
         for a, b in _pairs(users):
             ra, rb = users[a][0], users[b][0]
             payout = bool((ra | rb) & PAYOUT_ROLES)
@@ -333,38 +339,24 @@ def detect_phone_sequence(edges: Edges, *, live: set) -> int:
     return n
 
 
-def network_prefix(ip) -> str | None:
-    """IPv4 /24 or IPv6 /48 of a public address; None for private/reserved ones (a
-    proxy or load balancer address would otherwise link everybody)."""
-    try:
-        addr = ipaddress.ip_address(str(ip).strip())
-    except ValueError:
-        return None
-    if not addr.is_global:
-        return None
-    bits = 24 if addr.version == 4 else 48
-    return str(ipaddress.ip_network(f"{addr}/{bits}", strict=False))
-
-
 def detect_shared_network(edges: Edges, *, live: set, max_accounts: int, now=None) -> int:
-    """Login IPs are already stored by DeviceSession (full address, kept while the
-    session is active and 30 days after it ends). Only the /24 is used here and only a
-    keyed hash of it is stored. Networks with more than ``max_accounts`` accounts are
-    public (Safaricom/Airtel carrier NAT, campus Wi-Fi, a proxy) and ignored."""
+    """Uses only ``DeviceSession.network_hash`` (keyed HMAC of the login /24 or /48,
+    kept 90 days; full IPs are not used, see apps/users/network_privacy.py; private
+    addresses have no hash). Networks with more than ``max_accounts`` accounts are
+    public (Safaricom/Airtel carrier NAT, campus Wi-Fi) and ignored."""
     from apps.users.models import DeviceSession
 
     now = now or timezone.now()
     cutoff = now - timedelta(days=NETWORK_LOOKBACK_DAYS)
     nets: dict = defaultdict(dict)
     hubs: set = set()
-    for uid, ip, created, last in (DeviceSession.objects.filter(last_active_at__gte=cutoff)
-                                   .exclude(ip_address__isnull=True)
-                                   .values_list("user_id", "ip_address", "created_at", "last_active_at")
-                                   .iterator(chunk_size=5000)):
+    for uid, prefix, created, last in (DeviceSession.objects.filter(last_active_at__gte=cutoff)
+                                       .exclude(network_hash="")
+                                       .values_list("user_id", "network_hash", "created_at", "last_active_at")
+                                       .iterator(chunk_size=5000)):
         if uid not in live:
             continue
-        prefix = network_prefix(ip)
-        if not prefix or prefix in hubs:
+        if prefix in hubs:
             continue
         slot = nets[prefix].get(uid)
         if slot is None:
@@ -379,7 +371,7 @@ def detect_shared_network(edges: Edges, *, live: set, max_accounts: int, now=Non
     for prefix, users in nets.items():
         if len(users) < 2:
             continue
-        tag = "net-" + keyed_hash(prefix, 8)
+        tag = "net-" + prefix[:8]
         for a, b in _pairs(users):
             first = max(users[a][0], users[b][0])
             last = max(users[a][1], users[b][1])
@@ -619,7 +611,8 @@ def detect_all(cfg, *, today: date, now=None) -> tuple[Edges, set, dict]:
     lookback = int(cfg.behaviour_lookback_days)
     plan = [
         ("shared_device", lambda: detect_shared_devices(edges, live=live)),
-        ("shared_money", lambda: detect_shared_money(edges, live=live)),
+        ("shared_money", lambda: detect_shared_money(edges, live=live,
+                                                     business_min=int(cfg.business_number_min_accounts))),
         ("phone_sequence", lambda: detect_phone_sequence(edges, live=live)),
         ("shared_network", lambda: detect_shared_network(edges, live=live,
                                                          max_accounts=int(cfg.network_max_accounts), now=now)),
@@ -651,7 +644,10 @@ def live_strong_edges(user_ids) -> Edges:
     if not ids:
         return edges
     detect_shared_devices(edges, live=None, user_ids=ids)
-    detect_shared_money(edges, live=None, user_ids=ids)
+    from .models import LinkageSettings
+
+    detect_shared_money(edges, live=None, user_ids=ids,
+                        business_min=int(LinkageSettings.load().business_number_min_accounts))
     rows = {k: v for k, v in edges.touching(ids).items() if v["strength"] == STRENGTH_STRONG}
     live = live_user_ids({u for k in rows for u in k[:2]})
     edges.rows = {k: v for k, v in rows.items() if k[0] in live and k[1] in live}

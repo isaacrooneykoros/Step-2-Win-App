@@ -175,8 +175,18 @@ def hold_reasons(challenge, participant, amount, user=None) -> list[dict]:
 
         for detail in linked_account_reasons(challenge, participant, user, amount):
             add("linked_accounts", **detail)
-    except Exception:
-        logger.exception("Linked-account check failed for user %s challenge %s", user.id, challenge.id)
+    except Exception as exc:
+        logger.exception(
+            "LINKED-ACCOUNT CHECK FAILED for user %s challenge %s: paid as if not linked "
+            "(other hold rules still applied)", user.id, challenge.id,
+        )
+        try:
+            from apps.linkage.alerts import ops_alert
+
+            ops_alert({"event": "linked_account_check_failed", "user_id": user.id,
+                       "challenge_id": challenge.id, "error": type(exc).__name__})
+        except Exception:
+            pass
     return reasons
 
 

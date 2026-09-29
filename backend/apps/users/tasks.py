@@ -285,3 +285,12 @@ def cleanup_inactive_sessions():
         "sessions_removed": deleted_sessions,
         "tokens_removed": deleted_tokens,
     }
+
+
+@shared_task
+def purge_login_ip_data():
+    """Nightly (03:10 UTC): clear full login IPs of ended/expired sessions and drop
+    network hashes older than 90 days (apps/users/network_privacy.py)."""
+    from apps.users.network_privacy import purge_ip_data
+
+    return purge_ip_data()

@@ -253,7 +253,8 @@ def user_overview(user):
                 "device_name": s.device_name,
                 "os_version": s.os_version,
                 "app_version": s.app_version,
-                "ip_address": s.ip_address,
+                # Masked ("41.90.x.x"); full IPs are not shown (data minimisation).
+                "ip_address": s.masked_ip,
                 "country": s.country,
                 "is_active": s.is_active,
                 "last_active_at": s.last_active_at,

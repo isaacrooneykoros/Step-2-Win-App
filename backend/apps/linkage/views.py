@@ -56,6 +56,9 @@ def explain(edge_type: str, ev: dict) -> str:
         n = ev.get("accounts_sharing", 2)
         return (f"Same {kind} {ev.get('account', '')}: used as {a} by one account and {b} by the other."
                 + (f" {n} accounts share it." if n > 2 else ""))
+    if edge_type == LinkEdge.TYPE_SHARED_BUSINESS_NUMBER:
+        return (f"Shared business number ({ev.get('accounts_sharing')} accounts): "
+                f"{ev.get('account', '')} is used by many accounts, like an agent or till number. Context only.")
     if edge_type == LinkEdge.TYPE_PHONE_SEQUENCE:
         return (f"Phone numbers {ev.get('number_gap')} apart, registered "
                 f"{ev.get('joined_days_apart')} days apart.")

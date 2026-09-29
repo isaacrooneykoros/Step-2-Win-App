@@ -299,8 +299,12 @@ class DeviceSession(models.Model):
     os_version = models.CharField(max_length=100, blank=True)
     app_version = models.CharField(max_length=20, blank=True)
 
-    # Network info
+    # Network info. The full IP is kept only while the session is active (cleared
+    # when it ends/expires, and after 90 days at the latest); ``network_hash`` is a
+    # keyed hash of the /24 (/48) used for account linkage, deleted after 90 days.
+    # See apps/users/network_privacy.py.
     ip_address = models.GenericIPAddressField(null=True, blank=True)
+    network_hash = models.CharField(max_length=32, blank=True, default="", db_index=True)
     country = models.CharField(max_length=2, blank=True)  # e.g. "KE"
 
     # State
@@ -317,6 +321,31 @@ class DeviceSession(models.Model):
 
     def __str__(self):
         return f"{self.user.username} | {self.device_name or self.device_type} | {'Active' if self.is_active else 'Revoked'}"
+
+    def save(self, *args, **kwargs):
+        # Keep only a keyed network hash; the full IP never outlives the session.
+        if self.ip_address and not self.network_hash:
+            from apps.users.network_privacy import network_hash
+
+            self.network_hash = network_hash(self.ip_address)
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"network_hash"}
+        if not self.is_active and self.ip_address:
+            self.ip_address = None
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"ip_address"}
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def end_sessions(cls, queryset) -> int:
+        """Deactivate sessions and drop their full IPs (bulk path, no save())."""
+        return queryset.update(is_active=False, ip_address=None)
+
+    @property
+    def masked_ip(self):
+        from apps.users.network_privacy import masked_ip
+
+        return masked_ip(self.ip_address)
 
     @property
     def display_name(self):

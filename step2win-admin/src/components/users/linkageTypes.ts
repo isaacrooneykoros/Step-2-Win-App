@@ -126,10 +126,12 @@ export interface LinkageSettings {
   holds_enabled: boolean
   same_challenge_hold: boolean
   strong_link_paid_hold: boolean
+  strong_link_paid_includes_payout_number: boolean
   paid_lookback_days: number
   behaviour_lookback_days: number
   medium_link_threshold: number
   network_max_accounts: number
   colocation_max_accounts: number
+  business_number_min_accounts: number
   bounds: Record<string, [number, number]>
 }

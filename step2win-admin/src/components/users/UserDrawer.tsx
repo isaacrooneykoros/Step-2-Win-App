@@ -205,7 +205,7 @@ function AccountTab({ d, isSuperuser, isSelf, onAction }: { d: UserOverview; isS
                   {[s.os_version, s.app_version && `app ${s.app_version}`, s.country].filter(Boolean).join(' · ') || 'No device details'}
                 </span>
               </span>
-              <span className="mono text-xs text-ink-secondary">{s.ip_address ?? '—'}</span>
+              <span className="mono text-xs text-ink-secondary" title="Masked network; full IPs are not kept after sign-out">{s.ip_address ?? 'hidden'}</span>
               <span className="text-xs text-ink-muted"><Timestamp value={s.last_active_at} /></span>
               <StatusBadge size="sm" tone={s.is_active ? 'success' : 'neutral'} label={s.is_active ? 'Active' : 'Signed out'} />
             </li>

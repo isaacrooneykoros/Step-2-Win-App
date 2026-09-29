@@ -7,9 +7,11 @@ any other hold.
 
 1. same_challenge: several accounts of one cluster are in the same PAID challenge ->
    every winner of that group except the first-registered account is held.
-2. strong_link_paid: the winner has a STRONG link (same phone, same payout number or
-   account) to another account that already received a payout (last
-   ``paid_lookback_days``, other challenges) -> held.
+2. strong_link_paid: the winner shares a PHONE (shared_device) with another account
+   that already received a payout (last ``paid_lookback_days``, other challenges) ->
+   held. A shared payout number alone does not trigger this rule (families share
+   M-Pesa numbers) unless ``strong_link_paid_includes_payout_number`` is on; it still
+   counts for rule 1 (same paid challenge).
 Weak links never hold. Pairs marked as a known household are ignored by both rules.
 
 The group is built from the nightly clusters PLUS strong links computed live for this
@@ -115,7 +117,10 @@ def linked_account_reasons(challenge, participant, user, amount) -> list[dict]:
                                                  for p in people]
 
     if cfg.strong_link_paid_hold:
-        neighbours = _strong_neighbours(user.id, live=live)
+        kinds = {LinkEdge.TYPE_SHARED_DEVICE}
+        if cfg.strong_link_paid_includes_payout_number:
+            kinds.add(LinkEdge.TYPE_SHARED_PAYOUT_ACCOUNT)
+        neighbours = {u: t & kinds for u, t in _strong_neighbours(user.id, live=live).items() if t & kinds}
         households = active_households([user.id])
         neighbours = {u: t for u, t in neighbours.items()
                       if (min(u, user.id), max(u, user.id)) not in households}
