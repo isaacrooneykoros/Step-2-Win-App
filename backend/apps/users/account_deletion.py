@@ -220,11 +220,15 @@ def _delete_activity_data(user) -> dict:
     from apps.steps.models import (DailyVerificationSummary, DeviceRegistration,
                                    HealthRecord, HourlyStepRecord,
                                    IntervalVerificationResult, LocationWaypoint,
-                                   StepSession, StepSyncEvent)
+                                   StepSession, StepSyncEvent, WalkPrivacyZone,
+                                   WalkSession)
 
     counts = {}
     for label, qs in (
         ("location_waypoints", LocationWaypoint.objects.filter(user=user)),
+        # Phase 1b walks (GPS routes) and the home privacy zone.
+        ("walks", WalkSession.objects.filter(user=user)),
+        ("walk_privacy_zone", WalkPrivacyZone.objects.filter(user=user)),
         ("hourly_steps", HourlyStepRecord.objects.filter(user=user)),
         ("health_records", HealthRecord.objects.filter(user=user)),
         ("sync_events", StepSyncEvent.objects.filter(user=user)),

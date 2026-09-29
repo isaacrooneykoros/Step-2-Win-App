@@ -54,10 +54,24 @@ def start_walk(request):
     # The phone clock may be off: never earlier than 10 min ago or later than now.
     started_at = min(max(started_at, now - timedelta(minutes=10)), now)
     offset = clean_tz_offset(data.get("tz_offset_minutes"))
-    platform = str(data.get("platform") or "").lower()
-    platform = platform if platform in PLATFORMS else (request.user.device_platform or "").lower()
+    # Platform from what the server knows (the bound device), not the client's claim:
+    # it decides which checks apply (gait, integrity).
+    device = None
+    if request.user.device_id:
+        device = DeviceRegistration.objects.filter(
+            user=request.user, device_id=request.user.device_id
+        ).first()
+    platform = ((device.platform if device else "") or request.user.device_platform or "").lower()
+    if platform not in PLATFORMS:
+        claimed = str(data.get("platform") or "").lower()
+        platform = claimed if claimed in PLATFORMS else ""
     step_source = str(data.get("step_source") or "")
-    step_source = step_source if step_source in STEP_SOURCES else ""
+    if platform == "android":
+        step_source = step_source if step_source in ("step_counter", "accelerometer") else "step_counter"
+    elif platform == "ios":
+        step_source = "cmpedometer"
+    else:
+        step_source = step_source if step_source in STEP_SOURCES else ""
     client_walk_id = str(data.get("client_walk_id") or "")[:64]
 
     with transaction.atomic():
@@ -80,11 +94,6 @@ def start_walk(request):
         WalkSession.objects.filter(user=request.user, status="active").update(
             status="abandoned", updated_at=now
         )
-        device = None
-        if request.user.device_id:
-            device = DeviceRegistration.objects.filter(
-                user=request.user, device_id=request.user.device_id
-            ).first()
         walk = WalkSession.objects.create(
             user=request.user,
             device=device,

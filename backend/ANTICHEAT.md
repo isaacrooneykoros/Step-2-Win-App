@@ -82,8 +82,8 @@ last minute, i.e. `cadence_spm` 0/None).
 |---|---|---|---|
 | `daily_total_impossible` (> 120,000) | CRITICAL | 1.0 × 60 | always (total) |
 | `daily_total_review` (> 70,000) | MEDIUM | 0.4 × 8 | always (total) |
-| `steps_per_min_impossible` (> 240 over active minutes) | CRITICAL | 1.0 × 40 | always |
-| `steps_per_min_suspicious` (> 165) | HIGH | 0.8 × 20 | always |
+| `steps_per_min_impossible` (> 240 over server-computed active minutes) | CRITICAL | 1.0 × 40 | always |
+| `steps_per_min_suspicious` (> 205 since Phase 1b; was 165) | HIGH | 0.8 × 20 | always |
 | `cadence_impossible` (> 245 spm) | CRITICAL | 1.0 × 35 | cadence present |
 | `cadence_suspicious` (> 205 spm) | MEDIUM | 0.6 × 10 | cadence present |
 | `burst_impossible` (> 28 / 5 s) | HIGH | 0.8 × 16 | delta > 0 **and** `burst_source == "live_timed"` |
@@ -453,6 +453,35 @@ counter events are `arrival_batched`. Burst rules still apply only to `live_time
 existing rows.
 
 ## Changelog
+
+### Phase 1b (2026-09-29) — money needs real walking evidence
+
+The direct fix for "shaking the phone produced lots of counted steps": shaken, vehicle
+and unmeasured steps still count for goals / streaks / XP, but only evidence-backed
+steps count toward challenges and payouts.
+
+1. Evidence tiers per day (`tier_*`, `eligible_steps`); challenge progress, joins,
+   qualification, tie-break best day and payouts use money-eligible steps.
+2. Android per-minute walking-evidence attribution uploaded as `evidence_hours`
+   (server-validated, capped); iOS CoreMotion counts as sensor-verified.
+3. "Start a walk" GPS sessions with server consistency checks, mock-location
+   detection, vehicle-speed handling, privacy trimming, salted-geohash home zone and
+   30-day raw-point retention (scheduled job `purge-old-walk-points`).
+4. Play Integrity verifier (shadow by default; admin enforce policy), shadow device
+   heuristics, `integrity_report` command; App Attest designed (TODO).
+5. Vehicles: Activity Recognition + GPS speed on the phone, vehicle-speed hours on
+   the server → `vehicle` (not a fraud flag).
+6. Phase 0 follow-ups: client time zone for day bounds (+ LOW `timezone_hopping`);
+   `burst_source` `live_timed` only from real per-step timestamps; install streams
+   (reinstall / second phone: max per stream, `GET /api/steps/resume/`, no false
+   `non_monotonic_steps`); server-computed active minutes (steps-per-minute
+   suspicious level 165 → 205).
+7. "Why" breakdown v2 (`goal_steps` vs `challenge_steps`, tiers, new kind reasons).
+8. Background location removed entirely.
+
+Migrations: `steps.0014_phase1b_evidence_walks` (HealthRecord tiers + eligible steps,
+StepSession integrity / time zone / install id, WalkSession, WalkPrivacyZone),
+`admin_api.0010_device_integrity_policy`.
 
 ### Phase 0 (2026-09-25) — stop hurting honest users
 
