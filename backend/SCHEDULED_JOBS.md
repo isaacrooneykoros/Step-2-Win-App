@@ -66,6 +66,7 @@ All times UTC. Priority = order within one tick (lower first).
 | check-wallet-balance-consistency | 02:30 | 110 | 30 min | Releases orphaned locked balances under a row lock (second run is a no-op). |
 | cleanup-inactive-sessions | 03:00 | 120 | 15 min | Deletes old inactive sessions / blacklisted tokens. |
 | cleanup-old-suspicious-activities | 03:30 | 130 | 15 min | Deletes *reviewed* suspicious-activity rows older than 90 days. |
+| linkage-recompute | 23:15 | 135 | 60 min | Account linkage graph (`apps.linkage`): edges + clusters used by the `linked_accounts` payout hold at the next settlement. Upserts on unique keys (safe late or twice); moves no money. Settlement also checks strong links live, so a missed run only delays behavioural links. |
 | risk-ml-features-and-scores | 01:30 | 140 | 60 min | Shadow risk model (`apps.risk_ml`), kwargs `{"days": 3}`: harvests labels, recomputes features and stores scores for the last 3 days. Upserts on unique keys (safe late or twice); never touches steps, trust or money. |
 
 To add a job: add an entry to `CELERY_BEAT_SCHEDULE` (task dotted path + `crontab`), and

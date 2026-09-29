@@ -197,6 +197,49 @@ Messages never contain rule names, weights, thresholds or risk scores.
 `"[redacted]"` for accepted and rejected events). Migration `steps.0012` redacts
 existing rows.
 
+## Account linkage (Phase 2a, `apps/linkage`)
+
+Multi-account farms, one person carrying several phones, shared devices and collusion.
+Code: `detectors.py` (edges), `graph.py` (pair rule, clusters), `store.py` (nightly
+recompute), `policy.py` (payout holds), `timeline.py` + `views.py` (staff).
+Tests: `apps/linkage/tests/`.
+
+Identity graph: nodes are accounts; an edge is one kind of evidence between two accounts.
+
+| Edge | Strength | Weight | Evidence |
+|---|---|---|---|
+| `shared_device` | strong | 1.00 | same device id in `DeviceRegistration` (full history of every bound device) |
+| `shared_payout_account` | strong | 1.00 | same M-Pesa number / bank / paybill account (user phone, deposits, payouts, withdrawals) where at least one account withdraws or is paid to it |
+| `shared_deposit_number` | medium | 0.50 | same M-Pesa number used only for deposits (a parent topping up a child) |
+| `co_location` | medium | 0.30 / 0.45 / 0.60 | GPS fixes within ~100 m and 5 min for 15+ min on 1 / 2 / 3+ days (`LocationWaypoint`; places with more than 8 accounts ignored) |
+| `twin_curves` | medium | 0.30 / 0.45 / 0.60 | near-identical hourly step curves on 1 / 2 / 3+ days (risk_ml `twin_pairs`) |
+| `handover` | medium | 0.40 | steps alternate A, B, A in disjoint hours on 2+ days, or daily totals anti-correlated (r ≤ −0.7 over 10+ days); only for pairs with other evidence |
+| `joint_challenges` | medium | 0.30 / 0.40 | both qualified in the same 3+ small challenges (≤ 50 participants, last 90 days); 0.40 when they also joined within 30 min each time |
+| `phone_sequence` | weak | 0.10 / 0.25 | profile numbers within 99 / 10, registered within 14 days |
+| `shared_network` | weak | 0.15 | login from the same public /24 (IPv6 /48) via `DeviceSession.ip_address`; networks with more than 6 accounts (carrier NAT, campus) and private addresses ignored |
+
+A pair is **linked** when it has a strong edge, or medium evidence adding up to ≥ 1.0
+from at least two different kinds. Weak edges never link (review context only).
+Clusters = connected components of linked pairs, pairs marked as a known household
+left out. Nightly job `linkage-recompute` (23:15 UTC, before the 00:05 UTC settlement)
+upserts edges, deactivates edges whose evidence is gone and rebuilds clusters;
+idempotent. 5,000 synthetic accounts: ~3 s, ~11 MB peak.
+
+Payout policy (hold reason `linked_accounts`, `payout_holds.hold_reasons`):
+1. several accounts of one group in the same paid challenge → every winner but the
+   first-registered account is held;
+2. a strong link to an account that received a payout in the last 180 days (other
+   challenges) → held.
+The group also uses strong links computed live at settlement (new or re-bound accounts).
+A forfeited prize is never shared with the held account's linked accounts. Links never
+ban, suspend or change steps; the customer sees the standard "being reviewed" message.
+Staff can mark accounts as a **known household** (audited) to suppress holds for those
+pairs; switches and thresholds are in `LinkageSettings` (Finance > Payout reviews).
+
+Privacy: evidence stores masked identifiers ("ending 123", "…a1b2"), a keyed hash of the
+network prefix, counts and dates; never raw numbers, IPs or coordinates. An account's
+edges, cluster membership and household marks are deleted when the account is deleted.
+
 ## Changelog
 
 ### Phase 0 (2026-09-25) — stop hurting honest users
