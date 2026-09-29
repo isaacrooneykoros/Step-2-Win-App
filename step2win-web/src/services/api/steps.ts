@@ -23,7 +23,9 @@ import type {
   PrivacyZoneStatus,
   DayBreakdown,
   VerificationResponse,
+  HealthSourceDay,
 } from '../../types';
+import type { HealthSourcesPayload } from '../../plugins/deviceStepCounter';
 
 const walkPath = (id: number | string) => `/api/steps/walks/${encodeURIComponent(String(id))}/`;
 
@@ -195,5 +197,29 @@ export const stepsService = {
 
   deletePrivacyZone: async (): Promise<void> => {
     await api.delete('/api/steps/walks/privacy-zone/');
+  },
+
+  // ── Phase 1c: Health Connect / Apple Health ──
+  /** One day's summary (the step session proves the platform). Android's native uploader does this itself. */
+  uploadHealthSources: async (data: {
+    session_id: string;
+    session_token: string;
+    date: string;
+    tz_offset_minutes: number;
+    health_sources: HealthSourcesPayload;
+  }): Promise<{ day: HealthSourceDay }> => {
+    const response = await api.post<{ day: HealthSourceDay }>('/api/steps/health-sources/', data);
+    return response.data;
+  },
+
+  getHealthSources: async (days = 7): Promise<HealthSourceDay[]> => {
+    const response = await api.get<{ days: HealthSourceDay[] }>(`/api/steps/health-sources/?days=${Math.max(1, Math.min(14, days))}`);
+    return response.data.days || [];
+  },
+
+  /** "Remove imported data": deletes every stored summary; those days fall back to the phone's own count. */
+  deleteHealthSources: async (): Promise<{ deleted_days: number }> => {
+    const response = await api.delete<{ deleted_days: number }>('/api/steps/health-sources/');
+    return response.data;
   },
 };

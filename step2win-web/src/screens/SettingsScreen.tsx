@@ -36,6 +36,7 @@ import { StepTrackingSheet } from '../components/settings/StepTrackingSheet';
 import { PermissionsSheet } from '../components/settings/PermissionsSheet';
 import { PRIVACY_ZONE_QUERY_KEY, PrivacyZoneSheet } from '../components/settings/PrivacyZoneSheet';
 import { stepsService } from '../services/api/steps';
+import { getHealthSourcesStatus, healthSourcesSupported } from '../services/healthSources';
 import { LogoutSheet } from '../components/settings/LogoutSheet';
 import { DeleteAccountSheet } from '../components/settings/DeleteAccountSheet';
 import { clearLocalUserData } from '../lib/accountCleanup';
@@ -99,6 +100,14 @@ export default function SettingsScreen() {
     navigate('/login', { replace: true });
   }, [deletedUserId, logout, navigate, queryClient]);
 
+  // Phase 1c: Health Connect / Apple Health row (native apps only).
+  const healthSources = useQuery({
+    queryKey: ['health-sources', 'status'],
+    queryFn: getHealthSourcesStatus,
+    enabled: healthSourcesSupported(),
+    staleTime: 15_000,
+  });
+
   const privacyZone = useQuery({
     queryKey: PRIVACY_ZONE_QUERY_KEY,
     queryFn: stepsService.getPrivacyZone,
@@ -142,6 +151,7 @@ export default function SettingsScreen() {
           onOpenStepTracking={() => setSheet('steps')}
           onOpenCalibration={() => setSheet('body')}
           onCellular={onCellular}
+          healthSources={healthSources.data ?? null}
         />
         <PrivacySection
           onOpenPermissions={() => setSheet('permissions')}

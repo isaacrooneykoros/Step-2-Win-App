@@ -151,8 +151,8 @@ export function SettingField({ def, value, saved, changed, error, enforcedBy, st
           label={def.label}
           value={String(value)}
           onChange={(e) => onChange(e.target.value)}
-          rows={2}
-          maxLength={1000}
+          rows={def.max && def.max > 1000 ? 8 : 2}
+          maxLength={def.max ?? 1000}
           hint={def.hint}
           error={error}
           className={changed ? 'border-warning' : undefined}
