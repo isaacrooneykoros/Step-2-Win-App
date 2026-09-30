@@ -11,6 +11,7 @@ import {
   Scale,
   Settings,
   Smartphone,
+  Users,
 } from 'lucide-react';
 import { authService, stepsService } from '../services/api';
 import { useAuthStore } from '../store/authStore';
@@ -174,6 +175,10 @@ export default function ProfileScreen() {
         )}
 
         {/* Menu */}
+        <ListGroup title="Community">
+          <ListRow to="/social" leading={<IconTile icon={Users} tone="brand" size="sm" />} title="Friends & teams" subtitle="Weekly rankings with friends, just for fun" />
+        </ListGroup>
+
         <ListGroup title="Account">
           <ListRow to="/settings" leading={<IconTile icon={Settings} tone="neutral" size="sm" />} title="Settings" subtitle="Profile, goals, notifications, security" />
           <ListRow to="/profile/sessions" leading={<IconTile icon={Smartphone} tone="neutral" size="sm" />} title="Active sessions" subtitle="Devices signed in to your account" />

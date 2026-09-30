@@ -103,6 +103,7 @@ INSTALLED_APPS = [
     "apps.legal",
     "apps.risk_ml",
     "apps.linkage",
+    "apps.social",
     "axes",
     "auditlog",
 ]
@@ -338,6 +339,11 @@ REST_FRAMEWORK = {
         "dashboard_read": "180/minute",
         "profile_picture_upload": "10/hour",
         "device_bind": "10/hour",
+        # Social (apps/social/throttles.py)
+        "social_search": "30/minute",
+        "social_friend_request": "20/hour",
+        "social_write": "60/minute",
+        "social_report": "10/hour",
         # Legacy
         "wallet": "10/minute",
         # Internal cron trigger (one global bucket, not per user)
@@ -518,6 +524,22 @@ CELERY_BEAT_SCHEDULE = {
     "privacy-ip-retention": {
         "task": "apps.users.tasks.purge_login_ip_data",
         "schedule": crontab(hour=3, minute=10),  # 03:10 UTC
+    },
+    # Social weekly rankings (apps/social/tasks.py). Bragging rights only, no money.
+    "social-refresh-weekly-totals": {
+        "task": "apps.social.tasks.refresh_weekly_totals",
+        "schedule": crontab(minute="*/10"),  # incremental: changed users only
+    },
+    "social-reconcile-weekly-totals": {
+        "task": "apps.social.tasks.refresh_weekly_totals",
+        "schedule": crontab(hour=1, minute=45),  # 01:45 UTC: full recompute of open weeks
+        "kwargs": {"full": True},
+    },
+    "social-finalize-week": {
+        "task": "apps.social.tasks.finalize_week",
+        # Mondays 09:00 UTC = 12:00 EAT: archives the Mon-Sun week that just ended,
+        # after 12 hours of grace for late / offline syncs.
+        "schedule": crontab(hour=9, minute=0, day_of_week=1),
     },
 }
 

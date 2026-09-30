@@ -68,6 +68,9 @@ All times UTC. Priority = order within one tick (lower first).
 | cleanup-old-suspicious-activities | 03:30 | 130 | 15 min | Deletes *reviewed* suspicious-activity rows older than 90 days. |
 | privacy-ip-retention | 03:10 | 125 | 15 min | Login IP minimisation (`apps/users/network_privacy.py`): hashes then clears full IPs of ended/expired sessions, drops IPs and network hashes older than 90 days. Idempotent. |
 | linkage-recompute | 23:15 | 135 | 60 min | Account linkage graph (`apps.linkage`): edges + clusters used by the `linked_accounts` payout hold at the next settlement. Upserts on unique keys (safe late or twice); moves no money. Settlement also checks strong links live, so a missed run only delays behavioural links. |
+| social-refresh-weekly-totals | every 10 min | 136 | 9 min | Social weekly rankings (`apps.social`, no money): recomputes weekly totals only for users whose health records changed since the watermark, then team totals and friends' feed milestones. Recomputes values; feed items are unique per (user, kind, key). |
+| social-reconcile-weekly-totals | 01:45 | 137 | 30 min | Same task with `{"full": true}`: every user with records in the open weeks (catches `queryset.update()` changes). |
+| social-finalize-week | Mon 09:00 | 138 | 45 min | Archives the Mon-Sun (EAT) week that ended (12 h grace): friends-rank snapshots, team ranks, non-monetary weekly badges, "weekly results" notices. Once per week via `WeeklyArchive`. |
 | risk-ml-features-and-scores | 01:30 | 140 | 60 min | Shadow risk model (`apps.risk_ml`), kwargs `{"days": 3}`: harvests labels, recomputes features and stores scores for the last 3 days. Upserts on unique keys (safe late or twice); never touches steps, trust or money. |
 
 To add a job: add an entry to `CELERY_BEAT_SCHEDULE` (task dotted path + `crontab`), and

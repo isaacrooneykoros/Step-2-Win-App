@@ -5,6 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Home, Trophy, Wallet, User, Footprints, Bell, Activity } from 'lucide-react';
 import { useStepsWebSocket } from '../../hooks/useStepsWebSocket';
+import { SocialNotifier } from '../social/SocialNotifier';
 import { useHealthSync, useSmartStepSync } from '../../hooks/useHealthSync';
 import { usePermissionStatus } from '../../hooks/usePermissionStatus';
 import { authService } from '../../services/api';
@@ -289,6 +290,9 @@ export default function MainLayout() {
           </div>
         )}
       </div>
+
+      {/* Friends inbox poll + one local notice for new social updates (Phase 4). */}
+      <SocialNotifier />
 
       <main id="main" className="flex-1">
         <div key={location.pathname} className="screen-enter">

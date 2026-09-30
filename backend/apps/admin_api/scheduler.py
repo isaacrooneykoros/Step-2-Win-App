@@ -83,6 +83,13 @@ JOB_OPTIONS: dict[str, dict[str, int]] = {
     # (00:05 UTC) but moves no money itself. Batched; 5,000 users take well under a
     # minute, the lease covers large growth.
     "linkage-recompute": {"priority": 135, "lease_seconds": 60 * 60},
+    # Social rankings (apps.social): bragging rights only, never money; before the
+    # heavy shadow risk model (kept last). The 10-minute
+    # refresh touches only changed users; the nightly reconcile and the Monday archive
+    # walk every user with steps that week.
+    "social-refresh-weekly-totals": {"priority": 136, "lease_seconds": 9 * 60},
+    "social-reconcile-weekly-totals": {"priority": 137, "lease_seconds": 30 * 60},
+    "social-finalize-week": {"priority": 138, "lease_seconds": 45 * 60},
 }
 
 # Privacy (apps/privacy). Exports are user-facing but light (a few per run); retention
