@@ -25,6 +25,7 @@ from django.contrib.auth import get_user_model
 from drf_spectacular.utils import (OpenApiTypes, extend_schema,
                                    inline_serializer)
 
+from apps.admin_api.roles import StaffActionPermission, staff
 from apps.admin_api.console import (AdminPageNumberPagination, filter_users,
                                     step_daily_totals, step_distribution,
                                     step_flag_reasons, user_overview)
@@ -70,16 +71,19 @@ def _admin_profile(user, request=None):
         "username": user.username,
         "email": user.email,
         "is_staff": user.is_staff,
+        "is_superuser": user.is_superuser,
         "is_active": user.is_active,
         "profile_picture_url": profile_picture_url,
     }
 
 
 class IsAdminUser(permissions.BasePermission):
-    """Custom permission to check if user is admin"""
+    """Legacy check: any active staff account. Admin endpoints use the role-based
+    permissions in apps/admin_api/roles.py (HasStaffPermission / StaffActionPermission)."""
 
     def has_permission(self, request, _view):
-        return request.user and request.user.is_staff
+        user = request.user
+        return bool(user and user.is_authenticated and user.is_active and user.is_staff)
 
 
 @extend_schema(
@@ -91,7 +95,7 @@ class IsAdminUser(permissions.BasePermission):
     },
 )
 @api_view(["GET", "PATCH"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def current_admin_profile(request):
     """Get or update the authenticated admin profile, including profile picture."""
@@ -131,7 +135,7 @@ def current_admin_profile(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def admin_notifications(request):
     """Return the admin notification summary and recent actionable alerts."""
     from apps.admin_api.models import AuditLog, SupportTicket
@@ -323,12 +327,21 @@ def admin_login(request):
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def admin_register(request):
-    """Register a new admin account"""
+    """Register a staff account.
+
+    With ``invite_code``: a person invited by the owner (Staff & roles) creates their
+    account; the email must match the invite and the account gets the invite's roles.
+    Without it: first-admin bootstrap only (ADMIN_REGISTRATION_CODE, while no staff
+    account exists); that account is the owner (superuser)."""
     username = request.data.get("username", "").strip()
     email = request.data.get("email", "").strip()
     password = request.data.get("password", "")
     confirm_password = request.data.get("confirm_password", "")
     admin_code = request.data.get("admin_code", "").strip()
+    invite_code = str(request.data.get("invite_code") or "").strip()
+
+    if invite_code:
+        return _register_with_invite(request, username, email, password, confirm_password, invite_code)
 
     required_code = os.getenv("ADMIN_REGISTRATION_CODE")
     if not required_code:
@@ -418,6 +431,73 @@ def admin_register(request):
     )
 
 
+def _register_with_invite(request, username, email, password, confirm_password, invite_code):
+    import uuid
+
+    from apps.admin_api.models import AuditLog, StaffInvite, StaffProfile
+    from apps.admin_api.roles import OWNER, clean_roles
+    from apps.admin_api.staff_views import accept_invite
+
+    if not username or not email or not password or not confirm_password:
+        return Response(
+            {"error": "Username, email, password and confirm_password are required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if password != confirm_password:
+        return Response({"error": "Passwords do not match"}, status=status.HTTP_400_BAD_REQUEST)
+    invite = accept_invite(invite_code, email)
+    if invite is None:
+        return Response(
+            {"error": "This invite code is not valid for that email, or it has expired. Ask the owner for a new one."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if User.objects.filter(username__iexact=username).exists():
+        return Response({"error": "Username already taken"}, status=status.HTTP_400_BAD_REQUEST)
+    if User.objects.filter(email__iexact=email).exists():
+        return Response(
+            {"error": "Email already registered. Ask the owner to grant staff access to that account instead."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        validate_password(password)
+    except Exception as error:
+        return Response({"error": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+
+    with db_transaction.atomic():
+        locked = StaffInvite.objects.select_for_update().get(id=invite.id)
+        if locked.status != "pending":
+            return Response({"error": "This invite was already used."}, status=status.HTTP_409_CONFLICT)
+        roles = clean_roles(locked.roles)
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            # Staff accounts have no M-Pesa number; the column is unique and required.
+            phone_number=f"staff_{uuid.uuid4().hex[:12]}",
+            is_staff=True,
+            is_superuser=OWNER in roles,
+        )
+        StaffProfile.objects.create(user=user, roles=[r for r in roles if r != OWNER], updated_by=locked.created_by)
+        locked.accepted_at = timezone.now()
+        locked.accepted_user = user
+        locked.save(update_fields=["accepted_at", "accepted_user"])
+        AuditLog.log_action(
+            admin=user, action="invite", resource_type="staff", resource_id=user.id, resource_name=user.username,
+            description=f"{user.username} accepted a staff invite",
+            changes={"invite_id": locked.id, "roles": roles}, request=request,
+        )
+
+    refresh = RefreshToken.for_user(user)
+    return Response(
+        {
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": _admin_profile(user, request=request),
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
 class NoDefaultWritesMixin:
     """
     Blocks the ModelViewSet's generic create/update/delete routes. The console uses the
@@ -451,7 +531,25 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
 
     queryset = User.objects.all()
     serializer_class = AdminUserSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, StaffActionPermission]
+    # Role permission per action (apps/admin_api/roles.py); "*" = reads.
+    staff_perms = {
+        "*": "console.view",
+        "ban_user": "users.ban",
+        "unban_user": "users.ban",
+        "reset_password": "users.edit",
+        "update_user": "users.edit",
+        "update_me": "console.view",
+        "delete_user": "owner.delete_users",
+        "sign_out_everywhere": "users.edit",
+        "unlock_login": "users.edit",
+        "message": "users.edit",
+        "reset_device": "users.devices",
+        "adjust_xp": "users.xp",
+        "revoke_badge": "users.xp",
+        "export": "users.export",
+        "correct_steps": "steps.correct",
+    }
     search_fields = ["username", "email"]
     filterset_fields = ["is_active", "is_staff"]
     pagination_class = AdminPageNumberPagination
@@ -481,6 +579,19 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
         )
 
     @staticmethod
+    def _staff_target_guard(request, user):
+        """Only the owner may change another staff account (password, details, access):
+        otherwise a support agent could take over an owner's account."""
+        from apps.admin_api.roles import is_owner
+
+        if user.is_staff and user.id != request.user.id and not is_owner(request.user):
+            return Response(
+                {"error": "Only the owner can change staff accounts.", "code": "staff_target"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    @staticmethod
     def _deleted_guard(user):
         """Accounts deleted by their owner are anonymised and can't be restored or edited."""
         if getattr(user, "deleted_at", None):
@@ -490,14 +601,6 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
                     "code": "account_deleted",
                 },
                 status=status.HTTP_409_CONFLICT,
-            )
-        return None
-
-    def _superuser_only(self, request):
-        if not request.user.is_superuser:
-            return Response(
-                {"error": "Only superusers can change staff access or delete accounts"},
-                status=status.HTTP_403_FORBIDDEN,
             )
         return None
 
@@ -513,6 +616,8 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
     def ban_user(self, request, pk=None):
         """Ban a specific user"""
         user = self.get_object()
+        if denied := self._staff_target_guard(request, user):
+            return denied
         if user.id == request.user.id:
             return Response(
                 {"error": "You cannot ban your own account"},
@@ -527,47 +632,21 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
     def unban_user(self, request, pk=None):
         """Unban a specific user"""
         user = self.get_object()
-        if denied := self._deleted_guard(user):
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
             return denied
         user.is_active = True
         user.save()
         self._audit(request, user, "unban", f"Unbanned {user.username}", {"is_active": {"old": False, "new": True}})
         return Response({"status": f"User {user.username} has been unbanned"})
 
-    @action(detail=True, methods=["post"])
-    def make_staff(self, request, pk=None):
-        """Promote user to staff"""
-        denied = self._superuser_only(request)
-        if denied:
-            return denied
-        user = self.get_object()
-        user.is_staff = True
-        user.save()
-        self._audit(request, user, "promote", f"Granted staff access to {user.username}", {"is_staff": {"old": False, "new": True}})
-        return Response({"status": f"User {user.username} is now staff"})
-
-    @action(detail=True, methods=["post"])
-    def remove_staff(self, request, pk=None):
-        """Remove staff status from a user"""
-        denied = self._superuser_only(request)
-        if denied:
-            return denied
-        user = self.get_object()
-        if user.id == request.user.id:
-            return Response(
-                {"error": "You cannot remove your own staff access"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        user.is_staff = False
-        user.save()
-        self._audit(request, user, "demote", f"Removed staff access from {user.username}", {"is_staff": {"old": True, "new": False}})
-        return Response({"status": f"User {user.username} is no longer staff"})
+    # Staff access (grant / change roles / remove) lives on the owner-only Staff & roles
+    # endpoints (apps/admin_api/staff_views.py), which record roles and audit them.
 
     @action(detail=True, methods=["post"])
     def reset_password(self, request, pk=None):
         """Reset user password"""
         user = self.get_object()
-        if denied := self._deleted_guard(user):
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
             return denied
         new_password = request.data.get("new_password", "")
 
@@ -590,14 +669,17 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["patch"])
     def update_user(self, request, pk=None):
-        """Update user details - phone_number, email, and username are required fields"""
+        """Update user details: username, email, phone, first/last name, daily goal."""
         user = self.get_object()
-        if denied := self._deleted_guard(user):
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
             return denied
         before = {
             "username": user.username,
             "email": user.email,
             "phone_number": user.phone_number,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "daily_goal": user.daily_goal,
         }
 
         # Update allowed fields
@@ -606,6 +688,29 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
         phone_number = request.data.get("phone_number")
 
         errors = {}
+
+        for name_field in ("first_name", "last_name"):
+            value = request.data.get(name_field)
+            if value is None:
+                continue
+            value = str(value).strip()
+            if len(value) > 150:
+                errors[name_field] = "Must be 150 characters or fewer"
+            else:
+                setattr(user, name_field, value)
+
+        daily_goal = request.data.get("daily_goal")
+        if daily_goal not in (None, ""):
+            try:
+                goal = int(daily_goal)
+            except (TypeError, ValueError):
+                errors["daily_goal"] = "Daily goal must be a whole number of steps"
+            else:
+                # Same range the app allows (apps/users/views.update_daily_goal).
+                if goal < 1000 or goal > 60000:
+                    errors["daily_goal"] = "Daily goal must be between 1,000 and 60,000 steps"
+                else:
+                    user.daily_goal = goal
 
         # Validate username if provided
         if username is not None and username != user.username:
@@ -651,44 +756,12 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
             if getattr(user, key) != old
         }
         if changed:
-            self._audit(request, user, "update", f"Updated contact details for {user.username}", changed)
+            self._audit(request, user, "update", f"Updated details for {user.username}", changed)
         serializer = AdminUserSerializer(user)
         return Response(serializer.data)
 
-    @action(detail=True, methods=["post"])
-    def reset_steps(self, request, pk=None):
-        """Reset a user's lifetime step counters."""
-        user = self.get_object()
-
-        before_steps = user.total_steps
-        before_best_day_steps = user.best_day_steps
-
-        user.total_steps = 0
-        user.best_day_steps = 0
-        user.save(update_fields=["total_steps", "best_day_steps", "updated_at"])
-
-        from apps.admin_api.models import AuditLog
-
-        AuditLog.log_action(
-            admin=request.user,
-            action="update",
-            resource_type="user",
-            resource_id=user.id,
-            resource_name=user.username,
-            description=f"Admin reset step counters for {user.username}",
-            changes={
-                "total_steps": {"old": before_steps, "new": 0},
-                "best_day_steps": {"old": before_best_day_steps, "new": 0},
-            },
-            request=request,
-        )
-
-        return Response(
-            {
-                "status": f"Step counters reset for {user.username}",
-                "user": AdminUserSerializer(user).data,
-            }
-        )
+    # The old reset_steps (zeroing the lifetime counters) is replaced by per-day step
+    # corrections with recompute: correct_steps below (apps/steps/corrections.py).
 
     @action(detail=False, methods=["patch"], url_path="me")
     def update_me(self, request):
@@ -727,9 +800,6 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
         (apps/users/account_deletion.py). Wallet, payment and challenge records are kept,
         detached from the person, so nothing cascades and the books still balance.
         """
-        denied = self._superuser_only(request)
-        if denied:
-            return denied
         user = self.get_object()
         if user.id == request.user.id:
             return Response({"error": "Cannot delete your own account"}, status=status.HTTP_400_BAD_REQUEST)
@@ -753,6 +823,301 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
             )
         self._audit(request, user, "delete", f"Deleted account {username} (anonymised; money records kept)")
         return Response({"status": f"Account {username} has been deleted and anonymised"})
+
+    # ── Admin console part A: user tools ────────────────────────────────────
+
+    def _reason_required(self, request, minimum=5):
+        reason = str(request.data.get("reason") or "").strip()[:500]
+        if len(reason) < minimum:
+            return None, Response(
+                {"error": f"A reason of at least {minimum} characters is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return reason, None
+
+    @action(detail=True, methods=["post"])
+    def sign_out_everywhere(self, request, pk=None):
+        """Revoke every refresh token and end every app session of the user."""
+        user = self.get_object()
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
+            return denied
+        from apps.users.account_deletion import _revoke_all_tokens
+
+        revoked = _revoke_all_tokens(user)
+        self._audit(request, user, "sign_out", f"Signed {user.username} out everywhere", {"tokens_revoked": revoked})
+        return Response({"status": f"{user.username} was signed out on every device.", "tokens_revoked": revoked})
+
+    @action(detail=True, methods=["post"])
+    def unlock_login(self, request, pk=None):
+        """Clear django-axes failed-login lockouts for the account."""
+        user = self.get_object()
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
+            return denied
+        from axes.models import AccessAttempt
+        from axes.utils import reset
+
+        names = {user.username, user.email}
+        attempts = AccessAttempt.objects.filter(username__in=names).count()
+        for name in names:
+            if name:
+                reset(username=name)
+        self._audit(request, user, "unlock", f"Cleared sign-in lockout for {user.username}", {"attempt_rows": attempts})
+        return Response({"status": f"Sign-in lockout cleared for {user.username}.", "cleared": attempts})
+
+    @action(detail=True, methods=["post"])
+    def message(self, request, pk=None):
+        """Open a support conversation to the user (they see it in Support in the app and can reply)."""
+        from apps.admin_api.models import SupportTicket, SupportTicketMessage
+
+        user = self.get_object()
+        if denied := self._deleted_guard(user):
+            return denied
+        subject = str(request.data.get("subject") or "").strip()[:255]
+        text = str(request.data.get("message") or "").strip()
+        category = request.data.get("category") or "general"
+        if category not in {c for c, _ in SupportTicket.CATEGORY_CHOICES}:
+            category = "general"
+        if not subject or len(text) < 2:
+            return Response({"error": "A subject and a message are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if len(text) > 5000:
+            return Response({"error": "The message must be 5,000 characters or fewer."}, status=status.HTTP_400_BAD_REQUEST)
+        with db_transaction.atomic():
+            ticket = SupportTicket.objects.create(
+                user=user, subject=subject, category=category,
+                message="Message from the Step2Win support team.",
+                status="in_progress", priority="medium", assigned_to=request.user,
+            )
+            SupportTicketMessage.objects.create(
+                ticket=ticket, sender=request.user, sender_username=request.user.username, is_admin=True, message=text,
+            )
+        self._audit(request, user, "message", f"Messaged {user.username}: {subject}", {"ticket_id": ticket.id})
+        return Response({"status": "Message sent.", "ticket_id": ticket.id}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def reset_device(self, request, pk=None):
+        """Deactivate one step-tracking device, or reset the whole binding.
+
+        mode=deactivate + registration_id: that device stops counting (the user must bind
+        again from it). mode=reset: every registration is deactivated, the account's bound
+        device is cleared and the 24 h switch cooldown is lifted, so the user can bind a new
+        phone now (e.g. a lost or replaced phone). Step history is not touched."""
+        from django.core.cache import cache
+
+        from apps.steps.models import DeviceRegistration
+
+        user = self.get_object()
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
+            return denied
+        reason, err = self._reason_required(request)
+        if err:
+            return err
+        mode = request.data.get("mode") or "reset"
+        if mode == "deactivate":
+            reg = DeviceRegistration.objects.filter(user=user, id=request.data.get("registration_id")).first()
+            if reg is None:
+                return Response({"error": "Device not found for this user."}, status=status.HTTP_404_NOT_FOUND)
+            with db_transaction.atomic():
+                DeviceRegistration.objects.filter(pk=reg.pk).update(is_active=False, updated_at=timezone.now())
+                if user.device_id and user.device_id == reg.device_id:
+                    User.objects.filter(id=user.id).update(device_id=None)
+            changes = {"registration_id": str(reg.id), "platform": reg.platform}
+            desc = f"Deactivated a {reg.platform} device of {user.username}"
+        elif mode == "reset":
+            with db_transaction.atomic():
+                n = DeviceRegistration.objects.filter(user=user, is_active=True).update(
+                    is_active=False, updated_at=timezone.now()
+                )
+                User.objects.filter(id=user.id).update(device_id=None)
+            cache.delete(f"device-rebind:{user.id}")
+            changes = {"deactivated": n, "cooldown_cleared": True}
+            desc = f"Reset the device binding of {user.username}"
+        else:
+            return Response({"error": "mode must be deactivate or reset"}, status=status.HTTP_400_BAD_REQUEST)
+        changes["reason"] = reason
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=request.user, action="device_reset", resource_type="user", resource_id=user.id,
+            resource_name=user.username, description=desc, changes=changes, request=request,
+        )
+        return Response({"status": desc, **{k: v for k, v in changes.items() if k != "reason"}})
+
+    @action(detail=True, methods=["post"])
+    def adjust_xp(self, request, pk=None):
+        """Add or remove XP through an XPEvent ("admin_adjustment"); never below 0 total."""
+        user = self.get_object()
+        if denied := self._deleted_guard(user):
+            return denied
+        reason, err = self._reason_required(request)
+        if err:
+            return err
+        try:
+            amount = int(request.data.get("amount"))
+        except (TypeError, ValueError):
+            return Response({"error": "amount must be a whole number"}, status=status.HTTP_400_BAD_REQUEST)
+        if amount == 0 or abs(amount) > 10000:
+            return Response({"error": "amount must be between -10,000 and 10,000 and not 0"}, status=status.HTTP_400_BAD_REQUEST)
+        xp, _ = UserXP.objects.get_or_create(user=user)
+        before = xp.total_xp
+        if amount < 0 and before + amount < 0:
+            return Response(
+                {"error": f"The user has only {before} XP; you can remove at most that."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        event = XPEvent.objects.create(
+            user=user, event_type="admin_adjustment", amount=amount, description=reason[:255],
+            metadata={"admin": request.user.username},
+        )
+        xp.refresh_from_db()
+        self._audit(
+            request, user, "xp_adjust", f"{'Added' if amount > 0 else 'Removed'} {abs(amount)} XP for {user.username}",
+            {"xp": {"old": before, "new": xp.total_xp}, "xp_event_id": event.id, "level": xp.level},
+        )
+        return Response({"status": "ok", "total_xp": xp.total_xp, "level": xp.level, "xp_event_id": event.id})
+
+    @action(detail=True, methods=["post"])
+    def revoke_badge(self, request, pk=None):
+        """Take a badge back from the user (the badge definition stays)."""
+        user = self.get_object()
+        reason, err = self._reason_required(request)
+        if err:
+            return err
+        ub = UserBadge.objects.filter(user=user, badge_id=request.data.get("badge_id")).select_related("badge").first()
+        if ub is None:
+            return Response({"error": "The user does not hold this badge."}, status=status.HTTP_404_NOT_FOUND)
+        name, earned = ub.badge.name, ub.earned_at
+        ub.delete()
+        self._audit(
+            request, user, "revoke", f"Revoked badge {name} from {user.username}",
+            {"badge_id": ub.badge_id, "badge": name, "earned_at": earned.isoformat() if earned else None},
+        )
+        return Response({"status": f"Badge {name} revoked."})
+
+    @action(detail=True, methods=["post"])
+    def correct_steps(self, request, pk=None):
+        """Set / void / clear a correction of one day's steps, with recompute (apps/steps/corrections.py)."""
+        from datetime import date as date_cls
+
+        from apps.steps.corrections import StepCorrectionError, correct_day
+
+        user = self.get_object()
+        if denied := self._deleted_guard(user):
+            return denied
+        try:
+            day = date_cls.fromisoformat(str(request.data.get("date") or ""))
+        except ValueError:
+            return Response({"error": "date must be YYYY-MM-DD"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            result = correct_day(
+                user=user, day=day, kind=request.data.get("kind"), steps=request.data.get("steps"),
+                reason=request.data.get("reason"), admin=request.user,
+            )
+        except StepCorrectionError as exc:
+            return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=request.user, action="steps_correction", resource_type="user", resource_id=user.id,
+            resource_name=user.username,
+            description=f"{ {'set': 'Set', 'void': 'Voided', 'clear': 'Removed the correction of'}[result['kind']] } steps for {user.username} on {result['date']}",
+            changes={**result, "reason": str(request.data.get("reason") or "")[:500]}, request=request,
+        )
+        return Response(result)
+
+    @action(detail=True, methods=["get"])
+    def records(self, request, pk=None):
+        """Read-only records for the drawer: consents, legal acceptances, change history
+        (django-auditlog), sign-in lockout, step corrections, badges and recent XP."""
+        from auditlog.models import LogEntry
+        from axes.models import AccessAttempt
+        from django.contrib.contenttypes.models import ContentType
+
+        from apps.legal.models import UserDocumentAck
+        from apps.privacy.models import Consent
+        from apps.steps.corrections import correction_row
+        from apps.steps.models import StepCorrection
+
+        user = self.get_object()
+        ct = ContentType.objects.get_for_model(User)
+        entries = LogEntry.objects.filter(content_type=ct, object_pk=str(user.pk)).select_related("actor").order_by("-timestamp")[:50]
+        limit = int(getattr(settings, "AXES_FAILURE_LIMIT", 5))
+        attempts = AccessAttempt.objects.filter(username__in=[user.username, user.email])
+        xp = UserXP.objects.filter(user=user).first()
+        return Response(
+            {
+                "consents": [
+                    {"id": c.id, "purpose": c.purpose, "granted": c.granted, "version": c.version,
+                     "source": c.source, "app_version": c.app_version, "created_at": c.created_at.isoformat()}
+                    for c in Consent.objects.filter(user=user).order_by("-created_at")[:100]
+                ],
+                "legal_acks": [
+                    {"id": a.id, "document": a.document.title, "document_type": a.document.document_type,
+                     "version_seen": a.version_seen, "current_version": a.document.version,
+                     "acknowledged_at": a.acknowledged_at.isoformat()}
+                    for a in UserDocumentAck.objects.filter(user=user).select_related("document").order_by("-acknowledged_at")
+                ],
+                "change_history": [
+                    {"id": e.id, "action": {0: "create", 1: "update", 2: "delete", 3: "access"}.get(e.action, str(e.action)),
+                     "changes": e.changes_dict, "actor": e.actor.username if e.actor_id else None,
+                     "timestamp": e.timestamp.isoformat()}
+                    for e in entries
+                ],
+                "lockout": {
+                    "locked": any(a.failures_since_start >= limit for a in attempts),
+                    "failures": sum(a.failures_since_start for a in attempts),
+                    "limit": limit,
+                },
+                "step_corrections": [
+                    correction_row(c) for c in StepCorrection.objects.filter(user=user).select_related("created_by")[:50]
+                ],
+                "badges": [
+                    {"badge_id": b.badge_id, "name": b.badge.name, "icon": b.badge.icon, "earned_at": b.earned_at.isoformat()}
+                    for b in UserBadge.objects.filter(user=user).select_related("badge").order_by("-earned_at")
+                ],
+                "xp": {"total_xp": xp.total_xp if xp else 0, "level": xp.level if xp else 1},
+                "xp_events": [
+                    {"id": e.id, "event_type": e.event_type, "amount": e.amount, "description": e.description,
+                     "created_at": e.created_at.isoformat()}
+                    for e in XPEvent.objects.filter(user=user).order_by("-created_at")[:20]
+                ],
+            }
+        )
+
+    @action(detail=False, methods=["get"])
+    def export(self, request):
+        """CSV of the filtered user list (same filters as the list). No secrets: no
+        password hashes, tokens, device ids or IP addresses."""
+        import csv
+
+        from django.http import HttpResponse
+
+        qs = filter_users(User.objects.all(), request.query_params)[:20000]
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="step2win-users-{timezone.localdate().isoformat()}.csv"'
+        writer = csv.writer(response)
+        cols = ["id", "username", "email", "phone_number", "first_name", "last_name", "status", "is_staff",
+                "date_joined", "last_login", "wallet_balance", "locked_balance", "total_earned", "trust_score",
+                "open_flags", "daily_goal", "current_streak"]
+        writer.writerow(cols)
+        n = 0
+        for u in qs:
+            status_label = "deleted" if u.deleted_at else ("active" if u.is_active else "banned")
+            row = [u.id, u.username, u.email, u.phone_number, u.first_name, u.last_name, status_label, u.is_staff,
+                   u.date_joined.isoformat() if u.date_joined else "", u.last_login.isoformat() if u.last_login else "",
+                   u.wallet_balance, u.locked_balance, u.total_earned, getattr(u, "trust_value", ""),
+                   getattr(u, "open_flags", ""), u.daily_goal, u.current_streak]
+            # Neutralise spreadsheet formulas in user-controlled text.
+            writer.writerow([f"'{v}" if isinstance(v, str) and v[:1] in ("=", "+", "-", "@") else v for v in row])
+            n += 1
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=request.user, action="export", resource_type="user",
+            description=f"Exported {n} users to CSV",
+            changes={"filters": {k: v for k, v in request.query_params.items() if k not in ("page", "page_size")}, "rows": n},
+            request=request,
+        )
+        return response
 
     @action(detail=False, methods=["get"])
     def user_stats(self, request):
@@ -811,7 +1176,21 @@ class AdminChallengeViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
 
     queryset = Challenge.objects.all()
     serializer_class = AdminChallengeSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, StaffActionPermission]
+    staff_perms = {
+        "*": "console.view",
+        "approve_challenge": "challenges.manage",
+        "reject_challenge": "challenges.manage",
+        "cancel_challenge": "challenges.manage",
+        "set_featured": "challenges.manage",
+        "update_challenge": "challenges.manage",
+        "delete_challenge": "challenges.manage",
+        "bulk_cancel": "challenges.manage",
+        "bulk_delete": "challenges.manage",
+        "set_archived": "challenges.manage",
+        "create_platform": "challenges.platform",
+        "remove_participant": "challenges.disqualify",
+    }
     filterset_fields = ["status", "creator"]
     pagination_class = AdminPageNumberPagination
 
@@ -832,6 +1211,13 @@ class AdminChallengeViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
             )
         if params.get("featured") == "true":
             qs = qs.filter(is_featured=True)
+        if params.get("platform") == "true":
+            qs = qs.filter(is_platform_challenge=True)
+        archived = params.get("archived")
+        if archived == "true":
+            qs = qs.filter(is_archived=True)
+        elif archived == "false":
+            qs = qs.filter(is_archived=False)
         ordering = params.get("ordering") or "-created_at"
         if ordering.lstrip("-") not in {
             "created_at",
@@ -1080,9 +1466,195 @@ class AdminChallengeViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
         # One by one through the shared service so each challenge's entries are refunded.
         from apps.challenges.services import cancel_challenge as cancel_and_refund
 
-        count = sum(1 for challenge in challenges if cancel_and_refund(challenge, reason="Bulk cancelled by admin"))
+        reason = str(request.data.get("reason") or "").strip()[:500]
+        count = 0
+        for challenge in challenges:
+            old_status = challenge.status
+            if cancel_and_refund(challenge, reason=f"Cancelled by admin: {reason}" if reason else "Bulk cancelled by admin"):
+                count += 1
+                self._audit(
+                    request, challenge, "cancel", f"Bulk cancelled challenge {challenge.name}",
+                    {"status": {"old": old_status, "new": "cancelled"}, **({"reason": reason} if reason else {})},
+                )
 
-        return Response({"status": f"{count} challenge(s) cancelled"})
+        return Response({"status": f"{count} challenge(s) cancelled", "cancelled": count})
+
+    @action(detail=True, methods=["post"])
+    def set_archived(self, request, pk=None):
+        """Hide (or show again) a completed / cancelled challenge in customer lists.
+        Participants keep it in their own history; nothing is deleted."""
+        challenge = self.get_object()
+        archived = bool(request.data.get("archived", True))
+        if archived and challenge.status not in ("completed", "cancelled"):
+            return Response(
+                {"error": "Only completed or cancelled challenges can be archived."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        old = challenge.is_archived
+        challenge.is_archived = archived
+        challenge.archived_at = timezone.now() if archived else None
+        challenge.save(update_fields=["is_archived", "archived_at", "updated_at"])
+        self._audit(
+            request, challenge, "archive", f"{'Archived' if archived else 'Unarchived'} challenge {challenge.name}",
+            {"is_archived": {"old": old, "new": archived}},
+        )
+        return Response(AdminChallengeSerializer(challenge).data)
+
+    @action(detail=False, methods=["post"])
+    def create_platform(self, request):
+        """Create a platform (sponsored) challenge, live now, open to everyone.
+
+        Funding: ``platform_bonus_kes`` is added to the payout pool at settlement
+        (Challenge.net_pool) and recorded then as a negative payments.PlatformRevenue row
+        ("platform_bonus"), i.e. paid out of platform revenue. It is spent only if someone
+        qualifies; if nobody does (entries refunded) or the challenge is cancelled, no
+        bonus leaves the platform. A bonus needs the finance.adjust permission too."""
+        from datetime import date as date_cls
+
+        from apps.admin_api.models import SystemSettings
+        from apps.admin_api.roles import has_perm
+
+        data = request.data
+        errors = {}
+        name = str(data.get("name") or "").strip()[:200]
+        if len(name) < 3:
+            errors["name"] = "Give the challenge a name (3+ characters)."
+        try:
+            milestone = int(data.get("milestone"))
+        except (TypeError, ValueError):
+            milestone = 0
+        settings_obj = SystemSettings.load()
+        if not (settings_obj.min_challenge_milestone <= milestone <= settings_obj.max_challenge_milestone):
+            errors["milestone"] = (
+                f"Between {settings_obj.min_challenge_milestone:,} and {settings_obj.max_challenge_milestone:,} steps."
+            )
+        try:
+            entry_fee = Decimal(str(data.get("entry_fee", "0") or "0")).quantize(Decimal("0.01"))
+            bonus = Decimal(str(data.get("platform_bonus_kes", "0") or "0")).quantize(Decimal("0.01"))
+        except Exception:
+            entry_fee, bonus = Decimal("-1"), Decimal("-1")
+        if entry_fee < 0 or entry_fee > settings_obj.max_challenge_entry_fee:
+            errors["entry_fee"] = f"Between 0 and {settings_obj.max_challenge_entry_fee}."
+        if bonus < 0 or bonus > Decimal("1000000"):
+            errors["platform_bonus_kes"] = "Between 0 and 1,000,000."
+        today = timezone.localdate()
+        try:
+            end_date = date_cls.fromisoformat(str(data.get("end_date") or ""))
+        except ValueError:
+            end_date = None
+        if end_date is None or end_date <= today or (end_date - today).days > 90:
+            errors["end_date"] = "An end date after today, at most 90 days away."
+        try:
+            max_participants = int(data.get("max_participants") or 100)
+        except (TypeError, ValueError):
+            max_participants = 0
+        if not (2 <= max_participants <= 1000):
+            errors["max_participants"] = "Between 2 and 1,000."
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        if bonus > 0 and not has_perm(request.user, "finance.adjust"):
+            return Response(
+                {"error": "A platform bonus spends platform money: it needs the finance role as well."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        challenge = Challenge.objects.create(
+            name=name,
+            description=str(data.get("description") or "").strip()[:2000],
+            creator=request.user,
+            milestone=milestone,
+            entry_fee=entry_fee,
+            max_participants=max_participants,
+            status="active",
+            start_date=today,
+            end_date=end_date,
+            is_private=False,
+            is_public=True,
+            is_featured=bool(data.get("is_featured")),
+            is_platform_challenge=True,
+            platform_bonus_kes=bonus,
+            win_condition="proportional",
+            payout_structure="proportional",
+        )
+        self._audit(
+            request, challenge, "create", f"Created platform challenge {challenge.name}",
+            {"entry_fee": str(entry_fee), "platform_bonus_kes": str(bonus), "milestone": milestone,
+             "end_date": end_date.isoformat(), "max_participants": max_participants},
+        )
+        return Response(AdminChallengeSerializer(challenge).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def remove_participant(self, request, pk=None):
+        """Disqualify / remove a participant from a live challenge.
+
+        mode=refund: the entry fee goes back to their wallet (refund ledger row).
+        mode=forfeit: the entry fee is kept by the platform (PlatformRevenue row
+        "forfeited_entry"); their wallet is not credited. Either way the entry leaves the
+        pool and their locked balance. Audited; the user gets an in-app notice."""
+        from apps.admin_api.notices import notice_to_user
+        from apps.payments.models import PlatformRevenue
+        from apps.wallet.models import WalletTransaction as WT
+
+        mode = request.data.get("mode")
+        reason = str(request.data.get("reason") or "").strip()[:500]
+        if mode not in ("refund", "forfeit"):
+            return Response({"error": "mode must be refund or forfeit"}, status=status.HTTP_400_BAD_REQUEST)
+        if len(reason) < 5:
+            return Response({"error": "A reason of at least 5 characters is required."}, status=status.HTTP_400_BAD_REQUEST)
+        with db_transaction.atomic():
+            challenge = Challenge.objects.select_for_update().get(pk=self.get_object().pk)
+            if challenge.status not in ("pending", "active"):
+                return Response(
+                    {"error": "Participants can only be removed from pending or live challenges."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            participant = (
+                Participant.objects.select_for_update().filter(challenge=challenge, user_id=request.data.get("user_id")).first()
+            )
+            if participant is None:
+                return Response({"error": "That user is not in this challenge."}, status=status.HTTP_404_NOT_FOUND)
+            user = User.objects.select_for_update().get(id=participant.user_id)
+            fee = challenge.entry_fee
+            steps = participant.steps
+            before = user.wallet_balance
+            user.locked_balance = max(Decimal("0.00"), user.locked_balance - fee)
+            ledger = {}
+            if mode == "refund":
+                user.wallet_balance = before + fee
+                user.save(update_fields=["wallet_balance", "locked_balance", "updated_at"])
+                if fee > 0:
+                    t = WT.objects.create(
+                        user=user, type="refund", amount=fee, balance_before=before, balance_after=user.wallet_balance,
+                        description=f"Removed from challenge: {challenge.name} (entry refunded)",
+                        metadata={"challenge_id": challenge.id, "source": "admin_remove_participant", "reason": reason},
+                    )
+                    ledger["wallet_transaction_id"] = t.id
+            else:
+                user.save(update_fields=["locked_balance", "updated_at"])
+                if fee > 0:
+                    rev = PlatformRevenue.objects.create(
+                        challenge=challenge, amount_kes=fee,
+                        narration=f"Forfeited entry: {user.username} removed from {challenge.name}"[:255],
+                        metadata={"kind": "forfeited_entry", "user_id": user.id, "reason": reason},
+                    )
+                    ledger["platform_revenue_id"] = rev.id
+            challenge.total_pool = max(Decimal("0.00"), challenge.total_pool - fee)
+            challenge.save(update_fields=["total_pool", "updated_at"])
+            participant.delete()
+        self._audit(
+            request, challenge, "disqualify",
+            f"Removed {user.username} from {challenge.name} ({'entry refunded' if mode == 'refund' else 'entry forfeited'})",
+            {"user_id": user.id, "username": user.username, "mode": mode, "entry_fee": str(fee), "steps": steps,
+             "reason": reason, **ledger},
+        )
+        notice_to_user(
+            user, request.user, "Challenge entry update",
+            f"You have been removed from the challenge \"{challenge.name}\". "
+            + (f"Your entry fee of KES {fee} is back in your wallet." if mode == "refund" and fee > 0 else "")
+            + (" Your entry fee was not refunded." if mode == "forfeit" and fee > 0 else "")
+            + f" Reason: {reason}",
+            category="challenge", team="support",
+        )
+        return Response({"status": "removed", "mode": mode, **ledger})
 
     @action(detail=False, methods=["post"])
     def bulk_delete(self, request):
@@ -1198,7 +1770,8 @@ class AdminTransactionViewSet(viewsets.ReadOnlyModelViewSet):
 
     queryset = WalletTransaction.objects.all()
     serializer_class = AdminTransactionSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, StaffActionPermission]
+    staff_perms = {"*": "finance.view"}
     filterset_fields = ["user", "type"]
 
     @action(detail=False, methods=["get"])
@@ -1245,71 +1818,6 @@ class AdminTransactionViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(daily_data)
 
 
-class AdminWithdrawalViewSet(viewsets.ModelViewSet):
-    """
-    Admin withdrawal management endpoint
-    """
-
-    queryset = Withdrawal.objects.all()
-    serializer_class = AdminWithdrawalSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
-    filterset_fields = ["user", "status"]
-
-    @action(detail=True, methods=["post"])
-    def approve_withdrawal(self, request, pk=None):
-        """Approve a withdrawal request"""
-        withdrawal = self.get_object()
-        if withdrawal.status != "pending":
-            return Response(
-                {"error": "Withdrawal is not pending"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        withdrawal.status = "approved"
-        withdrawal.processed_at = timezone.now()
-        withdrawal.processed_by = request.user
-        withdrawal.save()
-        return Response({"status": "Withdrawal approved"})
-
-    @action(detail=True, methods=["post"])
-    def reject_withdrawal(self, request, pk=None):
-        """Reject a withdrawal request"""
-        withdrawal = self.get_object()
-        reason = request.data.get("reason", "No reason provided")
-        withdrawal.status = "rejected"
-        withdrawal.processed_at = timezone.now()
-        withdrawal.processed_by = request.user
-        withdrawal.rejection_reason = reason
-        withdrawal.save()
-        return Response({"status": f"Withdrawal rejected. Reason: {reason}"})
-
-    @action(detail=False, methods=["get"])
-    def withdrawal_stats(self, request):
-        """Get withdrawal statistics"""
-        withdrawals = Withdrawal.objects.all()
-
-        total_pending = withdrawals.filter(status="pending").aggregate(Sum("amount"))[
-            "amount__sum"
-        ] or Decimal("0.00")
-        total_approved = withdrawals.filter(status="approved").aggregate(Sum("amount"))[
-            "amount__sum"
-        ] or Decimal("0.00")
-        total_rejected = withdrawals.filter(status="rejected").aggregate(Sum("amount"))[
-            "amount__sum"
-        ] or Decimal("0.00")
-
-        return Response(
-            {
-                "pending_count": withdrawals.filter(status="pending").count(),
-                "pending_amount": str(total_pending),
-                "approved_count": withdrawals.filter(status="approved").count(),
-                "approved_amount": str(total_approved),
-                "rejected_count": withdrawals.filter(status="rejected").count(),
-                "rejected_amount": str(total_rejected),
-                "total_withdrawals": withdrawals.count(),
-            }
-        )
-
-
 class AdminBadgeViewSet(viewsets.ModelViewSet):
     """
     Admin badge management endpoint
@@ -1317,7 +1825,15 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
 
     queryset = Badge.objects.all()
     serializer_class = AdminBadgeSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, StaffActionPermission]
+    staff_perms = {
+        "*": "console.view",
+        "create": "content.badges",
+        "update": "content.badges",
+        "partial_update": "content.badges",
+        "destroy": "content.badges",
+        "award_to_user": "users.xp",
+    }
     pagination_class = AdminPageNumberPagination
 
     def _audit(self, badge, action_name, description, changes=None):
@@ -1398,6 +1914,16 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
             user_badge, created = UserBadge.objects.get_or_create(
                 user=user, badge=badge
             )
+            if created:
+                from apps.admin_api.models import AuditLog
+
+                AuditLog.log_action(
+                    admin=request.user, action="award", resource_type="user", resource_id=user.id,
+                    resource_name=user.username, description=f"Awarded badge {badge.name} to {user.username}",
+                    changes={"badge_id": badge.id, "badge": badge.name,
+                             "reason": str(request.data.get("reason") or "")[:500]},
+                    request=request,
+                )
             return Response(
                 {
                     "status": "Badge awarded",
@@ -1435,7 +1961,8 @@ class AdminDashboardViewSet(viewsets.ViewSet):
     Main dashboard statistics endpoint
     """
 
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, StaffActionPermission]
+    staff_perms = {"*": "console.view"}
 
     @extend_schema(responses={200: OpenApiTypes.OBJECT})
     @action(detail=False, methods=["get"])
@@ -1774,7 +2301,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def get_system_settings(request):
     """Get current system settings"""
     from apps.admin_api.models import SystemSettings
@@ -1790,7 +2317,7 @@ def get_system_settings(request):
     responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("settings.system"))
 def update_system_settings(request):
     """Update system settings"""
     from apps.admin_api.models import AuditLog, SystemSettings
@@ -1890,7 +2417,7 @@ def update_system_settings(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def get_audit_logs(request):
     """Get audit logs with filtering"""
     from apps.admin_api.models import AuditLog
@@ -1965,7 +2492,7 @@ def get_audit_logs(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def get_steps_logs(request):
     """Get historical step logs for all users with pagination and filters."""
 
@@ -2071,7 +2598,7 @@ def get_steps_logs(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def get_steps_hourly_breakdown(request):
     """Get server-side hourly steps breakdown for a user/day."""
 
@@ -2170,7 +2697,7 @@ def get_steps_hourly_breakdown(request):
     responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
 )
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("support.view"))
 def get_support_tickets(request):
     """Get support tickets with filtering and pagination"""
     from apps.admin_api.models import SupportTicket
@@ -2229,7 +2756,7 @@ def get_support_tickets(request):
     responses={200: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT},
 )
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("support.view"))
 def get_support_ticket_detail(request, ticket_id):
     """Get a support ticket and its conversation thread"""
     from apps.admin_api.models import SupportTicket
@@ -2262,7 +2789,7 @@ def get_support_ticket_detail(request, ticket_id):
     },
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("support.reply"))
 def reply_support_ticket(request, ticket_id):
     """Post an admin reply to a support ticket"""
     from apps.admin_api.models import (AuditLog, SupportTicket,
@@ -2355,7 +2882,7 @@ def reply_support_ticket(request, ticket_id):
     },
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("support.reply"))
 def update_support_ticket(request, ticket_id):
     """Update support ticket status, priority, assignment, and admin notes"""
     from apps.admin_api.models import AuditLog, SupportTicket
@@ -2472,7 +2999,7 @@ def update_support_ticket(request, ticket_id):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("support.view"))
 def get_support_admins(request):
     """Get staff users eligible for support ticket assignment"""
     admins = (
@@ -2483,334 +3010,9 @@ def get_support_admins(request):
     return Response({"results": list(admins)})
 
 
-@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
-def get_revenue_report(request):
-    """Get revenue breakdown by category and time period"""
-    # Defense in depth: permission class already enforces is_staff
-    if not request.user.is_staff:
-        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
-
-    from datetime import timedelta
-
-    from django.db.models import Count, Sum
-
-    # Get time period (default: 30 days)
-    period_days = int(request.query_params.get("days", 30))
-    start_date = timezone.now() - timedelta(days=period_days)
-
-    # Revenue from deposits (entry_fee transactions)
-    deposits = WalletTransaction.objects.filter(
-        type="entry_fee", created_at__gte=start_date
-    ).aggregate(total=Sum("amount"), count=Count("id"))
-
-    # Payouts (payout transactions)
-    payouts = WalletTransaction.objects.filter(
-        type="payout", created_at__gte=start_date
-    ).aggregate(total=Sum("amount"), count=Count("id"))
-
-    # Withdrawals processed
-    withdrawals_data = Withdrawal.objects.filter(
-        status="completed", processed_at__gte=start_date
-    ).aggregate(total=Sum("amount"), count=Count("id"))
-
-    # Platform fees collected
-    from apps.admin_api.models import SystemSettings
-
-    settings = SystemSettings.load()
-    fee_percentage = settings.platform_fee_percentage
-
-    total_deposits = deposits["total"] or Decimal("0")
-    platform_fees = total_deposits * (fee_percentage / Decimal("100"))
-
-    # Revenue by day for chart
-    daily_revenue = []
-    for i in range(period_days):
-        day = start_date + timedelta(days=i)
-        day_end = day + timedelta(days=1)
-
-        day_deposits = WalletTransaction.objects.filter(
-            type="entry_fee", created_at__gte=day, created_at__lt=day_end
-        ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
-
-        day_fees = day_deposits * (fee_percentage / Decimal("100"))
-
-        daily_revenue.append(
-            {
-                "date": day.strftime("%Y-%m-%d"),
-                "revenue": float(day_fees),
-                "deposits": float(day_deposits),
-            }
-        )
-
-    return Response(
-        {
-            "summary": {
-                "total_deposits": float(total_deposits),
-                "total_payouts": float(payouts["total"] or 0),
-                "total_withdrawals": float(withdrawals_data["total"] or 0),
-                "platform_fees": float(platform_fees),
-                "net_revenue": float(
-                    platform_fees - (withdrawals_data["total"] or Decimal("0"))
-                ),
-                "deposit_count": deposits["count"],
-                "payout_count": payouts["count"],
-                "withdrawal_count": withdrawals_data["count"],
-            },
-            "daily_data": daily_revenue,
-        }
-    )
-
-
-@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
-def get_user_retention(request):
-    """Get user retention metrics and cohort analysis"""
-    # Defense in depth: permission class already enforces is_staff
-    if not request.user.is_staff:
-        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
-
-    from datetime import timedelta
-
-    from django.db.models import Q
-
-    # Get time period (default: 90 days)
-    period_days = int(request.query_params.get("days", 90))
-    start_date = timezone.now() - timedelta(days=period_days)
-
-    # New users by week
-    weekly_signups = []
-    weeks = period_days // 7
-
-    for i in range(weeks):
-        week_start = start_date + timedelta(weeks=i)
-        week_end = week_start + timedelta(weeks=1)
-
-        new_users = User.objects.filter(
-            date_joined__gte=week_start, date_joined__lt=week_end
-        ).count()
-
-        # Active users in that cohort (users who have transactions/challenges after signup)
-        active_users = (
-            User.objects.filter(date_joined__gte=week_start, date_joined__lt=week_end)
-            .filter(
-                Q(transactions__created_at__gte=week_end)
-                | Q(created_challenges__created_at__gte=week_end)
-            )
-            .distinct()
-            .count()
-        )
-
-        retention_rate = (active_users / new_users * 100) if new_users > 0 else 0
-
-        weekly_signups.append(
-            {
-                "week_start": week_start.strftime("%Y-%m-%d"),
-                "new_users": new_users,
-                "active_users": active_users,
-                "retention_rate": round(retention_rate, 2),
-            }
-        )
-
-    # Overall stats
-    total_users = User.objects.filter(date_joined__gte=start_date).count()
-    active_users = (
-        User.objects.filter(date_joined__gte=start_date, is_active=True)
-        .filter(
-            Q(transactions__created_at__gte=start_date)
-            | Q(created_challenges__created_at__gte=start_date)
-        )
-        .distinct()
-        .count()
-    )
-
-    return Response(
-        {
-            "summary": {
-                "total_users": total_users,
-                "active_users": active_users,
-                "overall_retention": round(
-                    (active_users / total_users * 100) if total_users > 0 else 0, 2
-                ),
-            },
-            "weekly_data": weekly_signups,
-        }
-    )
-
-
-@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
-def get_challenge_analytics(request):
-    """Get challenge success rates and analytics"""
-    # Defense in depth: permission class already enforces is_staff
-    if not request.user.is_staff:
-        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
-
-    from datetime import timedelta
-
-    from django.db.models import Avg, Count, Sum
-
-    # Get time period (default: 30 days)
-    period_days = int(request.query_params.get("days", 30))
-    start_date = timezone.now() - timedelta(days=period_days)
-
-    challenges = Challenge.objects.filter(created_at__gte=start_date)
-
-    # Status breakdown
-    status_breakdown = challenges.values("status").annotate(count=Count("id"))
-    status_dict = {item["status"]: item["count"] for item in status_breakdown}
-
-    # Success metrics
-    completed_challenges = challenges.filter(status="completed").count()
-    cancelled_challenges = challenges.filter(status="cancelled").count()
-    total_challenges = challenges.count()
-
-    completion_rate = (
-        (completed_challenges / total_challenges * 100) if total_challenges > 0 else 0
-    )
-
-    # Average participants (count participants per challenge)
-    challenges_with_count = challenges.annotate(participant_count=Count("participants"))
-    avg_participants = (
-        challenges_with_count.aggregate(avg=Avg("participant_count"))["avg"] or 0
-    )
-
-    # Total prize pool
-    total_pool = challenges.aggregate(total=Sum("total_pool"))["total"] or Decimal("0")
-
-    # Challenge creation trend (daily)
-    daily_challenges = []
-    for i in range(period_days):
-        day = start_date + timedelta(days=i)
-        day_end = day + timedelta(days=1)
-
-        count = Challenge.objects.filter(
-            created_at__gte=day, created_at__lt=day_end
-        ).count()
-
-        daily_challenges.append(
-            {
-                "date": day.strftime("%Y-%m-%d"),
-                "count": count,
-            }
-        )
-
-    # Participant engagement
-    total_participants = Participant.objects.filter(
-        challenge__created_at__gte=start_date
-    ).count()
-
-    # Winners
-    winners_count = Participant.objects.filter(
-        challenge__created_at__gte=start_date, payout__gt=0
-    ).count()
-
-    return Response(
-        {
-            "summary": {
-                "total_challenges": total_challenges,
-                "completed": completed_challenges,
-                "cancelled": cancelled_challenges,
-                "active": status_dict.get("active", 0),
-                "pending": status_dict.get("pending", 0),
-                "completion_rate": round(completion_rate, 2),
-                "avg_participants": round(avg_participants, 2),
-                "total_prize_pool": float(total_pool),
-                "total_participants": total_participants,
-                "winners_count": winners_count,
-            },
-            "daily_data": daily_challenges,
-            "status_breakdown": status_dict,
-        }
-    )
-
-
-@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
-def get_transaction_trends(request):
-    """Get transaction volume trends over time"""
-    # Defense in depth: permission class already enforces is_staff
-    if not request.user.is_staff:
-        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
-
-    from datetime import timedelta
-
-    from django.db.models import Count, Sum
-
-    # Get time period (default: 30 days)
-    period_days = int(request.query_params.get("days", 30))
-    start_date = timezone.now() - timedelta(days=period_days)
-
-    # Daily transaction data
-    daily_data = []
-    for i in range(period_days):
-        day = start_date + timedelta(days=i)
-        day_end = day + timedelta(days=1)
-
-        day_txs = WalletTransaction.objects.filter(
-            created_at__gte=day, created_at__lt=day_end
-        )
-
-        deposits = day_txs.filter(type="entry_fee").aggregate(
-            total=Sum("amount"), count=Count("id")
-        )
-
-        payouts = day_txs.filter(type="payout").aggregate(
-            total=Sum("amount"), count=Count("id")
-        )
-
-        daily_data.append(
-            {
-                "date": day.strftime("%Y-%m-%d"),
-                "deposit_amount": float(deposits["total"] or 0),
-                "deposit_count": deposits["count"],
-                "payout_amount": float(payouts["total"] or 0),
-                "payout_count": payouts["count"],
-                "total_volume": float(
-                    (deposits["total"] or 0) + (payouts["total"] or 0)
-                ),
-            }
-        )
-
-    # Summary stats
-    period_transactions = WalletTransaction.objects.filter(created_at__gte=start_date)
-
-    total_volume = period_transactions.aggregate(total=Sum("amount"))[
-        "total"
-    ] or Decimal("0")
-    total_count = period_transactions.count()
-
-    deposits_total = period_transactions.filter(type="entry_fee").aggregate(
-        total=Sum("amount")
-    )["total"] or Decimal("0")
-
-    payouts_total = period_transactions.filter(type="payout").aggregate(
-        total=Sum("amount")
-    )["total"] or Decimal("0")
-
-    return Response(
-        {
-            "summary": {
-                "total_volume": float(total_volume),
-                "total_transactions": total_count,
-                "total_deposits": float(deposits_total),
-                "total_payouts": float(payouts_total),
-                "avg_transaction_value": (
-                    float(total_volume / total_count) if total_count > 0 else 0
-                ),
-            },
-            "daily_data": daily_data,
-        }
-    )
-
-
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("trust.view"))
 def fraud_overview(request):
     from apps.steps.models import FraudFlag, TrustScore
 
@@ -2884,66 +3086,12 @@ def fraud_overview(request):
     )
 
 
-@extend_schema(
-    request=OpenApiTypes.OBJECT,
-    responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
-)
-@api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
-def action_flag(request, flag_id):
-    from apps.steps.models import FraudFlag, TrustScore
-
-    action = request.data.get("action")
-    admin_note = str(request.data.get("admin_note") or "").strip()
-
-    valid_actions = {
-        "dismiss",
-        "warn",
-        "restrict",
-        "suspend",
-        "ban",
-        "unrestrict",
-        "unsuspend",
-        "unban",
-    }
-    if action not in valid_actions:
-        return Response({"error": "Invalid action"}, status=400)
-    if len(admin_note) > 500:
-        return Response(
-            {"error": "admin_note must be 500 characters or fewer"}, status=400
-        )
-
-    flag = get_object_or_404(FraudFlag, id=flag_id)
-    flag.reviewed = True
-    flag.actioned = action != "dismiss"
-    details = flag.details if isinstance(flag.details, dict) else {}
-    details.update(
-        {
-            "admin_action": action,
-            "reviewed_at": timezone.now().isoformat(),
-        }
-    )
-    if admin_note:
-        details["admin_note"] = admin_note
-    else:
-        details.pop("admin_note", None)
-    flag.details = details
-    flag.save(update_fields=["reviewed", "actioned", "details"])
-
-    trust, _ = TrustScore.objects.get_or_create(user=flag.user)
-    # Same semantics as the trust console (TrustScore.apply_admin_action): an admin
-    # restrict / suspend / ban is locked and not undone by automatic recovery.
-    trust.apply_admin_action(action)
-
-    return Response({"status": f"Flag {action}ed"})
-
-
 # ── Payment Management (PochPay) ──────────────────────────────────────────────
 
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.view"))
 def payments_overview(request):
     """Admin dashboard financial overview."""
     from datetime import timedelta
@@ -2990,7 +3138,7 @@ def payments_overview(request):
     request=None, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT}
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.withdrawals"))
 def retry_payout(request, txn_id):
     """Admin checks current IntaSend status of a failed/pending payout."""
     from apps.payments import intasend
@@ -3029,7 +3177,7 @@ def retry_payout(request, txn_id):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.view"))
 def withdrawal_queue(request):
     """
     Returns all pending withdrawals for admin review.
@@ -3067,7 +3215,7 @@ def withdrawal_queue(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.view"))
 def withdrawal_stats(request):
     """Stats for the admin withdrawal dashboard."""
     from django.db.models import Sum
@@ -3117,7 +3265,7 @@ def withdrawal_stats(request):
     },
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.withdrawals"))
 def approve_withdrawal(request, withdrawal_id):
     """
     Admin approves a withdrawal. This immediately sends it to IntaSend.
@@ -3139,6 +3287,7 @@ def approve_withdrawal(request, withdrawal_id):
         _notify_user(
             withdrawal.user,
             "withdrawal_approved",
+            admin=request.user,
             amount=withdrawal.amount_kes,
             method=withdrawal.method,
         )
@@ -3181,7 +3330,7 @@ def approve_withdrawal(request, withdrawal_id):
     responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.withdrawals"))
 def reject_withdrawal(request, withdrawal_id):
     """
     Admin rejects a withdrawal request.
@@ -3200,6 +3349,7 @@ def reject_withdrawal(request, withdrawal_id):
     _notify_user(
         withdrawal.user,
         "withdrawal_rejected",
+        admin=request.user,
         amount=withdrawal.amount_kes,
         reason=reason,
     )
@@ -3230,7 +3380,7 @@ def reject_withdrawal(request, withdrawal_id):
     },
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.withdrawals"))
 def retry_failed_withdrawal(request, withdrawal_id):
     """
     Admin checks current IntaSend status of a failed withdrawal.
@@ -3270,7 +3420,7 @@ def retry_failed_withdrawal(request, withdrawal_id):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def ops_monitoring_dashboard(request):
     """
     Aggregated operational monitoring metrics for admin dashboards.

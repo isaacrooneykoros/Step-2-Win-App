@@ -17,6 +17,8 @@ export const LEDGER_TYPE_LABEL: Record<LedgerType, string> = {
   payout: 'Challenge payout',
   fee: 'Platform fee',
   refund: 'Refund',
+  adjustment: 'Adjustment',
+  reversal: 'Reversal',
 }
 
 export const WITHDRAWAL_STATUS_LABEL: Record<WithdrawalStatus, string> = {

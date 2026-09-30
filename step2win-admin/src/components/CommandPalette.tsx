@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { CornerDownLeft, Monitor, Moon, Search, Sun } from 'lucide-react'
 import type { ElementType } from 'react'
-import { NAV_GROUPS } from '../lib/nav'
+import { useVisibleNavGroups } from '../lib/permissions'
 import { useThemeStore, type ThemePreference } from '../lib/theme'
 import { useFocusTrap } from '../lib/useFocusTrap'
 import { cn } from '../lib/cn'
@@ -34,6 +34,7 @@ export default function CommandPalette({ open, onClose }: Props) {
 function PaletteDialog({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
+  const navGroups = useVisibleNavGroups()
   const navigate = useNavigate()
   const setTheme = useThemeStore((s) => s.setPreference)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -42,7 +43,7 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
   const ref = useFocusTrap<HTMLDivElement>(true, onClose, inputRef)
 
   const items = useMemo<PaletteItem[]>(() => {
-    const pages = NAV_GROUPS.flatMap((g) =>
+    const pages = navGroups.flatMap((g) =>
       g.items.map((i) => ({
         id: `page:${i.to}`,
         label: i.label,
@@ -61,7 +62,7 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
       theme('dark', 'Use dark theme', Moon),
       theme('system', 'Match system theme', Monitor),
     ]
-  }, [navigate, setTheme])
+  }, [navigate, setTheme, navGroups])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

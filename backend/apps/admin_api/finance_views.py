@@ -29,6 +29,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from apps.admin_api.views import IsAdminUser
+from apps.admin_api.roles import staff
 from apps.challenges.models import Challenge, Participant
 from apps.payments.models import (PaymentTransaction, PlatformRevenue,
                                   WithdrawalRequest)
@@ -164,7 +165,7 @@ def _withdrawal_row(w):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("finance.view"))
 def finance_withdrawals(request):
     """
     Withdrawal requests with filters, for the review queue and history.
@@ -231,7 +232,7 @@ def finance_withdrawals(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("finance.view"))
 def finance_withdrawal_detail(request, withdrawal_id):
     """One withdrawal plus the context an operator needs to decide on it."""
     from apps.steps.models import FraudFlag
@@ -405,7 +406,7 @@ def _ledger_row(t):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("finance.view"))
 def finance_ledger(request):
     """
     Wallet ledger (WalletTransaction) with server-side filters and totals for
@@ -445,7 +446,7 @@ def finance_ledger(request):
 
 @extend_schema(responses={(200, "text/csv"): OpenApiTypes.STR})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("finance.view"))
 def finance_ledger_export(request):
     """CSV of the filtered ledger (max 50,000 rows)."""
     qs = _ledger_queryset(request)[:50000]
@@ -653,7 +654,7 @@ def _reconciliation():
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("finance.view"))
 def finance_report(request):
     """Financial report for a period: revenue, flows, withdrawals, pools, checks."""
     date_from, date_to = _period(request, 30)
@@ -782,7 +783,7 @@ STEP_BUCKETS = [
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("finance.view"))
 def finance_analytics(request):
     """
     Product analytics for a period: users, walking activity, retention cohorts,

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Pencil, Star, StarOff, Trash2, Trophy, X } from 'lucide-react'
+import { Archive, ArchiveRestore, Check, Pencil, Star, StarOff, Trash2, Trophy, UserMinus, X } from 'lucide-react'
 import { SlideOver } from '../SlideOver'
 import { StatusBadge } from '../StatusBadge'
 import { DetailRow } from '../DetailRow'
@@ -18,6 +18,7 @@ import { ApiError, consoleApi } from './api'
 import type { ChallengeRow } from './types'
 import { ActionNotice, ChangeList, Figure, SectionTitle, Timestamp } from './shared'
 import { challengeStatusLabel, formatDay, humanize, MILESTONES, type ChallengeAction } from './utils'
+import { usePermissions } from '../../lib/permissions'
 
 
 /** Challenge record: money, participants leaderboard, timeline and every supported admin action. */
@@ -26,6 +27,8 @@ export function ChallengeDrawer({ challengeId, onClose, initialAction }: { chall
   const qc = useQueryClient()
   const [action, setAction] = useState<ChallengeAction | null>(initialAction ?? null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<{ userId: number; username: string; steps: number } | null>(null)
+  const { can } = usePermissions()
   const q = useQuery({
     queryKey: ['admin', 'challenge-results', challengeId],
     queryFn: () => consoleApi.challengeResults(challengeId as number),
@@ -45,7 +48,9 @@ export function ChallengeDrawer({ challengeId, onClose, initialAction }: { chall
 
   const qualified = results.filter((r) => r.qualified).length
   const paid = results.reduce((s, r) => s + Number(r.payout || 0), 0)
-  const canFeature = c && !c.is_private && (c.status === 'pending' || c.status === 'active')
+  const canFeature = c && !c.is_private && (c.status === 'pending' || c.status === 'active') && can('challenges.manage')
+  const manage = can('challenges.manage')
+  const canRemove = c && (c.status === 'pending' || c.status === 'active') && can('challenges.disqualify')
 
   return (
     <SlideOver
@@ -58,11 +63,13 @@ export function ChallengeDrawer({ challengeId, onClose, initialAction }: { chall
         <span className="flex flex-wrap items-center gap-1.5">
           <StatusBadge size="sm" status={c.status === 'active' ? 'live' : c.status} label={challengeStatusLabel(c.status)} />
           {c.is_featured && <StatusBadge size="sm" tone="info" label="Featured" />}
+          {c.is_platform_challenge && <StatusBadge size="sm" tone="brand" label="Platform" />}
+          {c.is_archived && <StatusBadge size="sm" tone="neutral" label="Archived" />}
         </span>
       )}
       footer={c && (
         <>
-          {c.status === 'pending' && (
+          {c.status === 'pending' && manage && (
             <>
               <Button size="sm" variant="secondary" leftIcon={<Pencil size={13} />} onClick={() => setAction('edit')}>Edit</Button>
               <Button size="sm" variant="danger-soft" leftIcon={<X size={13} />} onClick={() => setAction('reject')}>Reject</Button>
@@ -74,8 +81,13 @@ export function ChallengeDrawer({ challengeId, onClose, initialAction }: { chall
               {c.is_featured ? 'Unfeature' : 'Feature'}
             </Button>
           )}
-          {c.status === 'active' && <Button size="sm" variant="danger-soft" onClick={() => setAction('cancel')}>Cancel challenge</Button>}
-          {c.status === 'cancelled' && (
+          {c.status === 'active' && manage && <Button size="sm" variant="danger-soft" onClick={() => setAction('cancel')}>Cancel challenge</Button>}
+          {(c.status === 'completed' || c.status === 'cancelled') && manage && (
+            <Button size="sm" variant="secondary" leftIcon={c.is_archived ? <ArchiveRestore size={13} /> : <Archive size={13} />} onClick={() => setAction(c.is_archived ? 'unarchive' : 'archive')}>
+              {c.is_archived ? 'Unarchive' : 'Archive'}
+            </Button>
+          )}
+          {c.status === 'cancelled' && manage && (
             <Button size="sm" variant="danger-soft" leftIcon={<Trash2 size={13} />} onClick={() => setAction('delete')}>Delete</Button>
           )}
         </>
@@ -134,6 +146,7 @@ export function ChallengeDrawer({ challengeId, onClose, initialAction }: { chall
                       <th scope="col" className="sticky top-0 border-b border-surface-border bg-surface-overlay px-3 py-2 text-right font-medium">Steps</th>
                       <th scope="col" className="sticky top-0 border-b border-surface-border bg-surface-overlay px-3 py-2 font-medium">Milestone</th>
                       <th scope="col" className="sticky top-0 border-b border-surface-border bg-surface-overlay px-3 py-2 text-right font-medium">Payout</th>
+                      {canRemove && <th scope="col" className="sticky top-0 border-b border-surface-border bg-surface-overlay px-3 py-2"><span className="sr-only">Actions</span></th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -159,6 +172,11 @@ export function ChallengeDrawer({ challengeId, onClose, initialAction }: { chall
                             </span>
                           </td>
                           <td className="mono px-3 py-1.5 text-right text-[13px]">{Number(r.payout) > 0 ? formatKES(r.payout) : '—'}</td>
+                          {canRemove && (
+                            <td className="px-2 py-1 text-right">
+                              <Button size="sm" variant="ghost" leftIcon={<UserMinus size={12} />} onClick={() => setRemoving({ userId: r.user_id, username: r.user, steps: r.steps })}>Remove</Button>
+                            </td>
+                          )}
                         </tr>
                       )
                     })}
@@ -188,6 +206,7 @@ export function ChallengeDrawer({ challengeId, onClose, initialAction }: { chall
       )}
 
       {c && action && <ChallengeActions key={action} challenge={c} action={action} onClose={() => setAction(null)} onDone={done} />}
+      {c && removing && <RemoveParticipant challenge={c} who={removing} onClose={() => setRemoving(null)} onDone={(m) => { setRemoving(null); done(m) }} />}
     </SlideOver>
   )
 }
@@ -208,6 +227,8 @@ function ChallengeActions({ challenge: c, action, onClose, onDone }: {
         case 'feature': await consoleApi.setFeatured(c.id, true); return [`${c.name} is featured in discovery.`]
         case 'unfeature': await consoleApi.setFeatured(c.id, false); return [`${c.name} is no longer featured.`]
         case 'delete': await consoleApi.deleteChallenge(c.id); return [`${c.name} was deleted.`, true]
+        case 'archive': await consoleApi.setArchived(c.id, true); return [`${c.name} is archived and hidden from customer lists.`]
+        case 'unarchive': await consoleApi.setArchived(c.id, false); return [`${c.name} is visible again.`]
         case 'edit':
           await consoleApi.updateChallenge(c.id, {
             name: form.name.trim(), milestone: Number(form.milestone), max_participants: Number(form.max_participants), end_date: form.end_date,
@@ -277,6 +298,18 @@ function ChallengeActions({ challenge: c, action, onClose, onDone }: {
           {errorLine}
         </ConfirmModal>
       )
+    case 'archive':
+    case 'unarchive':
+      return (
+        <ConfirmModal open onClose={onClose} onConfirm={run} loading={loading} variant="info"
+          title={action === 'archive' ? 'Archive challenge' : 'Unarchive challenge'} confirmLabel={action === 'archive' ? 'Archive' : 'Unarchive'}
+          message={action === 'archive'
+            ? 'Hides the finished challenge from customer lists. Its participants still see it in their own history; results and payouts are kept.'
+            : 'Shows the challenge in customer lists again.'}
+          details={details}>
+          {errorLine}
+        </ConfirmModal>
+      )
     case 'delete':
       return (
         <ConfirmModal open onClose={onClose} onConfirm={run} loading={loading} variant="danger" title="Delete challenge permanently" confirmLabel="Delete"
@@ -309,4 +342,36 @@ function ChallengeActions({ challenge: c, action, onClose, onDone }: {
         </Modal>
       )
   }
+}
+
+function RemoveParticipant({ challenge: c, who, onClose, onDone }: {
+  challenge: ChallengeRow; who: { userId: number; username: string; steps: number }; onClose: () => void; onDone: (msg: string) => void
+}) {
+  const [mode, setMode] = useState<'refund' | 'forfeit'>('refund')
+  const [reason, setReason] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const m = useMutation({
+    mutationFn: () => consoleApi.removeParticipant(c.id, who.userId, mode, reason.trim()),
+    onSuccess: () => onDone(`${who.username} was removed (${mode === 'refund' ? 'entry refunded' : 'entry forfeited'}).`),
+    onError: (e) => setError(e instanceof Error ? e.message : 'Request failed'),
+  })
+  const fee = Number(c.entry_fee)
+  return (
+    <ConfirmModal open onClose={onClose} onConfirm={() => m.mutate()} loading={m.isPending} variant="danger"
+      title={`Remove ${who.username} from ${c.name}`} confirmLabel="Remove participant" confirmDisabled={reason.trim().length < 5}
+      message="The participant leaves the live challenge and its pool. They get an in-app notice."
+      details={[
+        { label: 'Participant', value: who.username },
+        { label: 'Steps so far', value: <span className="num">{formatNumber(who.steps)}</span> },
+        { label: 'Entry fee', value: <span className="mono">{fee ? formatKES(c.entry_fee) : 'Free'}</span> },
+      ]}
+      consequence={fee ? (mode === 'refund' ? `${formatKES(c.entry_fee)} goes back to their wallet (refund ledger row).` : `${formatKES(c.entry_fee)} is kept by the platform (recorded as platform revenue). Their wallet is not credited.`) : undefined}>
+      <Select label="Entry fee" value={mode} onChange={(e) => setMode(e.target.value as 'refund' | 'forfeit')}>
+        <option value="refund">Refund the entry fee</option>
+        <option value="forfeit">Forfeit the entry fee (confirmed cheating)</option>
+      </Select>
+      <Textarea label="Reason (kept in the audit log and shown to the user)" value={reason} onChange={(e) => setReason(e.target.value)} rows={2} maxLength={500} required />
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+    </ConfirmModal>
+  )
 }

@@ -110,6 +110,10 @@ class ChallengeListView(generics.ListAPIView):
         queryset = queryset.exclude(
             Q(status="pending") & ~Q(participants__user=self.request.user)
         )
+        # Archived by staff (finished challenges): only their participants still see them.
+        queryset = queryset.exclude(
+            Q(is_archived=True) & ~Q(participants__user=self.request.user)
+        )
 
         return queryset.order_by("-created_at")
 
@@ -1156,8 +1160,10 @@ def challenge_lobby_card(request, pk):
         )
     except Challenge.DoesNotExist:
         return Response({"error": "Challenge not found"}, status=404)
-    if challenge.status == "pending" and not challenge.participants.filter(user=request.user).exists():
-        return Response({"error": "Challenge not found"}, status=404)  # awaiting approval
+    if (challenge.status == "pending" or challenge.is_archived) and not challenge.participants.filter(
+        user=request.user
+    ).exists():
+        return Response({"error": "Challenge not found"}, status=404)  # awaiting approval / archived
 
     Challenge.objects.filter(pk=pk).update(view_count=F("view_count") + 1)
 
@@ -1190,6 +1196,8 @@ def spectator_leaderboard(request, pk):
     try:
         challenge = Challenge.objects.get(pk=pk, is_public=True, is_private=False)
     except Challenge.DoesNotExist:
+        return Response({"error": "Challenge not found or not public"}, status=404)
+    if challenge.is_archived and not challenge.participants.filter(user=request.user).exists():
         return Response({"error": "Challenge not found or not public"}, status=404)
 
     if challenge.status == "pending":
@@ -1236,50 +1244,6 @@ def spectator_leaderboard(request, pk):
             "user_is_participant": challenge.participants.filter(
                 user=request.user
             ).exists(),
-        }
-    )
-
-
-@extend_schema(
-    request=inline_serializer(
-        name="FeatureChallengeRequest",
-        fields={"hours": serializers.IntegerField(required=False)},
-    ),
-    responses={
-        200: inline_serializer(
-            name="FeatureChallengeResponse",
-            fields={
-                "message": serializers.CharField(),
-                "featured_until": serializers.CharField(),
-            },
-        )
-    },
-)
-@api_view(["POST"])
-@permission_classes([IsAdminUser])
-def feature_challenge(request, pk):
-    """
-    Admin marks a challenge as featured.
-    Request body: { "hours": 24 }  — how long to feature it for
-    """
-    from datetime import timedelta
-
-    from django.utils import timezone
-
-    try:
-        challenge = Challenge.objects.get(pk=pk)
-    except Challenge.DoesNotExist:
-        return Response({"error": "Not found"}, status=404)
-
-    hours = request.data.get("hours", 24)
-    challenge.is_featured = True
-    challenge.featured_until = timezone.now() + timedelta(hours=int(hours))
-    challenge.save(update_fields=["is_featured", "featured_until"])
-
-    return Response(
-        {
-            "message": f"Challenge featured for {hours} hours.",
-            "featured_until": challenge.featured_until.isoformat(),
         }
     )
 

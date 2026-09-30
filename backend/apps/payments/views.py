@@ -327,14 +327,50 @@ def _create_wallet_transaction(user, type, amount, reference, description):
         )
 
 
-def _notify_user(user, event: str, **kwargs):
-    """
-    Sends in-app notification / push notification.
-    Connect to your existing notification system.
-    """
-    # TODO: integrate with your existing notification system
-    # For now, log it
-    logger.info(f"Notification | user={user.id} | event={event} | data={kwargs}")
+_NOTICE_COPY = {
+    "withdrawal_approved": (
+        "Withdrawal approved",
+        "Your withdrawal of KES {amount} was approved and is on its way. "
+        "M-Pesa usually confirms within a few minutes.",
+    ),
+    "withdrawal_rejected": (
+        "Withdrawal not approved",
+        "Your withdrawal of KES {amount} was not approved, and the full amount is back in your "
+        "Step2Win wallet. Reason: {reason}",
+    ),
+    "withdrawal_completed": (
+        "Withdrawal paid",
+        "Your withdrawal of KES {amount} has been paid.",
+    ),
+    "withdrawal_failed": (
+        "Withdrawal could not be paid",
+        "We could not complete your withdrawal of KES {amount}. The full amount is back in your "
+        "Step2Win wallet, so you can try again. {reason}",
+    ),
+    "deposit_credited": (
+        "Deposit received",
+        "Your M-Pesa deposit of KES {amount} has been added to your Step2Win wallet.",
+    ),
+}
+
+
+def _notify_user(user, event: str, admin=None, **kwargs):
+    """In-app notice in the user's Support inbox (apps/admin_api/notices.py).
+
+    Never raises: a notice must not block the money action that sent it."""
+    logger.info(f"Notification | user={user.id} | event={event}")
+    copy = _NOTICE_COPY.get(event)
+    if copy is None:
+        return None
+    subject, template = copy
+    values = {"amount": kwargs.get("amount", ""), "reason": kwargs.get("reason") or ""}
+    try:
+        message = template.format(**values).strip()
+    except Exception:
+        message = template
+    from apps.admin_api.notices import notice_to_user
+
+    return notice_to_user(user, admin, subject, message, category="payment", team="payments")
 
 
 # ────────────────────────────────────────────────────────────────────────────

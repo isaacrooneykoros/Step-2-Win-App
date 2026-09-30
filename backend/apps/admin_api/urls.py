@@ -1,22 +1,21 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from apps.admin_api import (finance_views, jobs_views, support_views,
-                            system_views, trust_views)
+from apps.admin_api import (finance_views, jobs_views, money_views,
+                            staff_views, support_views, system_views,
+                            trust_views)
 
 from apps.admin_api.views import (AdminBadgeViewSet, AdminChallengeViewSet,
                                   AdminDashboardViewSet,
                                   AdminTransactionViewSet, AdminUserViewSet,
-                                  action_flag, admin_login,
+                                  admin_login,
                                   admin_notifications, admin_register,
                                   approve_withdrawal, current_admin_profile,
                                   fraud_overview, get_audit_logs,
-                                  get_challenge_analytics, get_revenue_report,
                                   get_steps_hourly_breakdown, get_steps_logs,
                                   get_support_admins,
                                   get_support_ticket_detail,
                                   get_support_tickets, get_system_settings,
-                                  get_transaction_trends, get_user_retention,
                                   ops_monitoring_dashboard, payments_overview,
                                   reject_withdrawal, reply_support_ticket,
                                   retry_failed_withdrawal, retry_payout,
@@ -45,16 +44,6 @@ urlpatterns = [
     path("audit-logs/", get_audit_logs, name="audit-logs"),
     path("steps/logs/", get_steps_logs, name="steps-logs"),
     path("steps/hourly/", get_steps_hourly_breakdown, name="steps-hourly"),
-    path("reports/revenue/", get_revenue_report, name="revenue-report"),
-    path("reports/retention/", get_user_retention, name="user-retention"),
-    path(
-        "reports/challenge-analytics/",
-        get_challenge_analytics,
-        name="challenge-analytics",
-    ),
-    path(
-        "reports/transaction-trends/", get_transaction_trends, name="transaction-trends"
-    ),
     path("support/tickets/", get_support_tickets, name="support-tickets"),
     path(
         "support/tickets/<int:ticket_id>/",
@@ -100,7 +89,6 @@ urlpatterns = [
     # Settings page context (apps/admin_api/system_views.py)
     path("settings/context/", system_views.settings_context, name="settings-context"),
     path("fraud/", fraud_overview, name="fraud-overview"),
-    path("fraud/<int:flag_id>/action/", action_flag, name="fraud-action-flag"),
     path("payments/overview/", payments_overview, name="payments-overview"),
     path("payments/<uuid:txn_id>/retry/", retry_payout, name="retry-payout"),
     path("withdrawals/", withdrawal_queue, name="withdrawal-queue"),
@@ -150,6 +138,24 @@ urlpatterns = [
     # Scheduled jobs (apps/admin_api/jobs_views.py)
     path("monitoring/jobs/", jobs_views.scheduled_jobs, name="scheduled-jobs"),
     path("monitoring/jobs/<str:name>/run/", jobs_views.run_scheduled_job_now, name="scheduled-job-run"),
+    # Admin console part A: staff roles, money controls, deposits, wallet corrections
+    path("me/permissions/", staff_views.my_permissions, name="me-permissions"),
+    path("staff/", staff_views.staff_list, name="staff-list"),
+    path("staff/invite/", staff_views.staff_invite, name="staff-invite"),
+    path("staff/<int:user_id>/roles/", staff_views.staff_set_roles, name="staff-roles"),
+    path("staff/<int:user_id>/remove/", staff_views.staff_remove, name="staff-remove"),
+    path("staff/invites/<int:invite_id>/revoke/", staff_views.staff_invite_revoke, name="staff-invite-revoke"),
+    path("finance/controls/", staff_views.finance_controls, name="finance-controls"),
+    path("finance/corrections/", money_views.corrections, name="finance-corrections"),
+    path("finance/adjustments/", money_views.create_adjustment, name="finance-adjustments"),
+    path("finance/transactions/<int:txn_id>/reverse/", money_views.create_reversal, name="finance-reverse"),
+    path("finance/corrections/<int:correction_id>/approve/", money_views.approve_correction_view, name="finance-correction-approve"),
+    path("finance/corrections/<int:correction_id>/reject/", money_views.reject_correction_view, name="finance-correction-reject"),
+    path("finance/deposits/", money_views.deposits, name="finance-deposits"),
+    path("finance/deposits/<uuid:txn_id>/", money_views.deposit_detail, name="finance-deposit-detail"),
+    path("finance/deposits/<uuid:txn_id>/verify/", money_views.deposit_verify, name="finance-deposit-verify"),
+    path("finance/withdrawals/<uuid:withdrawal_id>/resolve/", money_views.withdrawal_resolve, name="finance-withdrawal-resolve"),
+    path("finance/withdrawals/<uuid:withdrawal_id>/history/", money_views.withdrawal_history, name="finance-withdrawal-history"),
     # Admin console Part B (ops, anti-cheat policy, support desk actions)
     path("", include("apps.admin_api.console_b_urls")),
     path("", include(router.urls)),

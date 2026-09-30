@@ -516,6 +516,10 @@ def refresh_day(record, *, save: bool = True) -> dict[str, Any]:
     record.tier_unverified = tiers["unverified"]
     record.eligible_steps = eligible
     record.active_minutes = active
+    # Staff correction of the day (apps/steps/corrections.py), always on top.
+    from .corrections import apply_to_record
+
+    apply_to_record(record)
     record.verification = build_breakdown(record)
     if save and record.pk:
         type(record).objects.filter(pk=record.pk).update(

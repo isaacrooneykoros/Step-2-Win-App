@@ -22,6 +22,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
+from apps.admin_api.roles import staff
 from rest_framework.throttling import UserRateThrottle
 
 from . import consent as consent_mod
@@ -178,7 +179,7 @@ def summary(request):
 
 @extend_schema(request=None, responses=None)
 @api_view(["GET", "PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes(staff("console.view", write="settings.system"))
 def admin_settings(request):
     s = PrivacySettings.load()
     if request.method == "GET":

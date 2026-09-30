@@ -839,3 +839,42 @@ class HealthSourceDay(models.Model):
 
     def __str__(self):
         return f"{self.user_id} {self.date} {self.provider}"
+
+
+class StepCorrection(models.Model):
+    """A staff correction of one user-day's credited steps (admin console).
+
+    Append-only: the newest row for a (user, date) is the one in force. "set" fixes the
+    day's credited and money-eligible steps to ``steps``; "void" makes them 0; "clear"
+    removes the correction so the day goes back to what its syncs earned. Raw evidence
+    (sync events, hourly rows, evidence streams, last_raw_steps) is never changed:
+    evidence.refresh_day re-applies the correction on top every time it recomputes the
+    day. See apps/steps/corrections.py.
+    """
+
+    KIND_SET = "set"
+    KIND_VOID = "void"
+    KIND_CLEAR = "clear"
+    KIND_CHOICES = [(KIND_SET, "Set steps"), (KIND_VOID, "Void day"), (KIND_CLEAR, "Remove correction")]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="step_corrections"
+    )
+    date = models.DateField()
+    kind = models.CharField(max_length=8, choices=KIND_CHOICES)
+    steps = models.IntegerField(null=True, blank=True)
+    # What the day showed just before this correction (credited / money-eligible).
+    previous_steps = models.IntegerField(default=0)
+    previous_eligible_steps = models.IntegerField(null=True, blank=True)
+    reason = models.TextField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["user", "date", "-created_at"], name="steps_corr_user_date_idx")]
+
+    def __str__(self):
+        return f"{self.kind} {self.user_id} {self.date} -> {self.steps}"

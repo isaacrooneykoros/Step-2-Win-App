@@ -102,7 +102,7 @@ export interface WithdrawalDetail {
   } | null
 }
 
-export type LedgerType = 'deposit' | 'withdrawal' | 'challenge_entry' | 'payout' | 'fee' | 'refund'
+export type LedgerType = 'deposit' | 'withdrawal' | 'challenge_entry' | 'payout' | 'fee' | 'refund' | 'adjustment' | 'reversal'
 
 export interface LedgerRow {
   id: number

@@ -22,6 +22,9 @@ class WalletTransaction(models.Model):
         ("payout", "Payout"),
         ("fee", "Platform Fee"),
         ("refund", "Refund"),
+        # Staff corrections (apps/admin_api/money.py). Never edits existing rows.
+        ("adjustment", "Adjustment"),
+        ("reversal", "Reversal"),
     ]
 
     user = models.ForeignKey(
@@ -51,6 +54,15 @@ class WalletTransaction(models.Model):
     )
     metadata = models.JSONField(
         null=True, blank=True, help_text="Additional transaction data"
+    )
+    # Set on a "reversal" row: the row it reverses. One-to-one, so a row can be
+    # reversed once only (enforced by the database).
+    reversal_of = models.OneToOneField(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reversed_by",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -2,7 +2,7 @@ import type { ElementType } from 'react'
 import {
   Activity, ArrowLeftRight, Award, Banknote, BarChart3, FileBarChart, FileText, Footprints,
   Gauge, HeadphonesIcon, LayoutDashboard, LifeBuoy, Megaphone, Network, Scale, Settings, ShieldAlert, ShieldCheck,
-  SlidersHorizontal, Trophy, Users, UsersRound,
+  SlidersHorizontal, Trophy, UserCog, Users, UsersRound, Wallet,
 } from 'lucide-react'
 
 /** Keys the layout fills with live counts (queues that need an operator). */
@@ -50,7 +50,8 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Finance',
     items: [
-      { to: '/transactions', label: 'Transactions', icon: ArrowLeftRight, keywords: 'wallet ledger deposits payouts mpesa' },
+      { to: '/transactions', label: 'Transactions', icon: ArrowLeftRight, keywords: 'wallet ledger deposits payouts mpesa adjust reverse' },
+      { to: '/deposits', label: 'Deposits', icon: Wallet, keywords: 'mpesa stk deposit verify intasend stuck callback' },
       { to: '/withdrawals', label: 'Withdrawals', icon: Banknote, badgeKey: 'pendingWithdrawals', keywords: 'payout queue approve mpesa' },
       { to: '/payout-reviews', label: 'Payout reviews', icon: Scale, badgeKey: 'heldPayouts', keywords: 'held payouts winnings review release forfeit anti-cheat' },
     ],
@@ -84,6 +85,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/monitoring/ops', label: 'Ops monitoring', icon: Gauge, badgeKey: 'opsBreaches', keywords: 'health callbacks stuck drift' },
       { to: '/settings', label: 'Settings', icon: Settings, keywords: 'profile configuration fees' },
+      { to: '/staff', label: 'Staff & roles', icon: UserCog, keywords: 'staff team roles invite permissions owner' },
     ],
   },
 ]

@@ -28,6 +28,8 @@ import { AnnouncementsPage } from './pages/AnnouncementsPage';
 import { HelpCentrePage } from './pages/HelpCentrePage';
 import { AntiCheatPolicyPage } from './pages/AntiCheatPolicyPage';
 import { TrustToolsPage } from './pages/TrustToolsPage';
+import { DepositsPage } from './pages/DepositsPage';
+import { StaffPage } from './pages/StaffPage';
 
 function App() {
   const loadSession = useAuthStore((state) => state.loadSession);
@@ -69,6 +71,8 @@ function App() {
           <Route path="help-centre" element={<HelpCentrePage />} />
           <Route path="anti-cheat-policy" element={<AntiCheatPolicyPage />} />
           <Route path="trust-tools" element={<TrustToolsPage />} />
+          <Route path="deposits" element={<DepositsPage />} />
+          <Route path="staff" element={<StaffPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

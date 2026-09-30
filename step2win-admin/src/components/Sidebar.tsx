@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { ChevronsLeft, ChevronsRight, LogOut, X } from 'lucide-react'
-import { NAV_GROUPS, SIDEBAR_WIDTH } from '../lib/nav'
+import { SIDEBAR_WIDTH } from '../lib/nav'
+import { useVisibleNavGroups } from '../lib/permissions'
 import { cn } from '../lib/cn'
 import { BrandMark } from './BrandMark'
 
@@ -37,6 +38,7 @@ export default function Sidebar({
   const [collapsedLocal, setCollapsedLocal] = useState(() => localStorage.getItem(STORAGE_KEY) === 'true')
   const collapsed = collapsedProp ?? collapsedLocal
   const { pathname } = useLocation()
+  const navGroups = useVisibleNavGroups()
 
   const toggle = () => {
     if (onToggleCollapsed) return onToggleCollapsed()
@@ -86,7 +88,7 @@ export default function Sidebar({
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-2.5">
-          {NAV_GROUPS.map((group, gi) => (
+          {navGroups.map((group, gi) => (
             <div key={group.label} className={gi > 0 ? 'mt-3' : ''}>
               {rail ? (
                 gi > 0 && <div className="mx-auto mb-2 h-px w-6 bg-sidebar-border" aria-hidden />

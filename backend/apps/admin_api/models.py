@@ -291,6 +291,22 @@ class AuditLog(models.Model):
         ("remove_member", "Remove member"),
         ("transfer_ownership", "Transfer ownership"),
         ("reorder", "Reorder"),
+        # Admin console part A (staff roles, money controls, user tools)
+        ("invite", "Invite"),
+        ("roles_change", "Roles Change"),
+        ("adjust", "Adjust"),
+        ("reverse", "Reverse"),
+        ("resolve", "Resolve"),
+        ("export", "Export"),
+        ("sign_out", "Sign Out Everywhere"),
+        ("unlock", "Unlock"),
+        ("device_reset", "Device Reset"),
+        ("steps_correction", "Steps Correction"),
+        ("xp_adjust", "XP Adjust"),
+        ("award", "Award"),
+        ("revoke", "Revoke"),
+        ("message", "Message"),
+        ("disqualify", "Disqualify"),
     ]
 
     RESOURCE_CHOICES = [
@@ -318,6 +334,11 @@ class AuditLog(models.Model):
         ("risk_model", "Risk model"),
         ("scheduled_job", "Scheduled job"),
         ("data_export", "Data export"),
+        # Admin console part A
+        ("staff", "Staff"),
+        ("deposit", "Deposit"),
+        ("wallet", "Wallet"),
+        ("steps", "Steps"),
     ]
 
     # Who performed the action
@@ -603,3 +624,6 @@ class ScheduledJobRun(models.Model):
 
     def __str__(self):
         return f"{self.name} {self.started_at:%Y-%m-%d %H:%M} {self.status}"
+# Staff roles, staff invites and money controls (admin console part A).
+from apps.admin_api.staff_models import (ConsoleControls, StaffInvite,  # noqa: E402,F401
+                                         StaffProfile, WalletCorrection)

@@ -28,6 +28,7 @@ from apps.admin_api.support_rules import overdue_q, sla_hours, with_wait_start
 from apps.admin_api.serializers import (SupportTicketMessageSerializer,
                                         SupportTicketSerializer)
 from apps.admin_api.views import IsAdminUser
+from apps.admin_api.roles import staff
 
 User = get_user_model()
 
@@ -142,7 +143,7 @@ def _apply_view(qs, view, user, now=None, targets=None):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("support.view"))
 def support_queue(request):
     """Ticket queue with helpdesk views, filters, counts and waiting times.
 
@@ -233,7 +234,7 @@ def support_queue(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("support.view"))
 def support_conversation(request, ticket_id):
     """One ticket with its messages and the staff activity on it (audit trail)."""
     ticket = get_object_or_404(_annotated(), pk=ticket_id)
@@ -270,7 +271,7 @@ def _clean_tag(raw) -> str:
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET", "POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("support.view", write="support.reply"))
 def support_tags(request):
     """GET: every tag with how many open tickets carry it. POST {name}: create."""
     if request.method == "POST":
@@ -304,7 +305,7 @@ def _audit_tag(request, action, tag, description, changes=None):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT, 204: None})
 @api_view(["PATCH", "DELETE"])
-@permission_classes(ADMIN)
+@permission_classes(staff("support.reply"))
 def support_tag_delete(request, tag_id):
     """PATCH {name}: rename (every ticket keeps the tag). DELETE: remove from all tickets."""
     tag = get_object_or_404(SupportTag, pk=tag_id)
@@ -329,7 +330,7 @@ def support_tag_delete(request, tag_id):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("support.reply"))
 def support_ticket_tags(request, ticket_id):
     """Replace a ticket's tags. Body: {"tags": ["refund", "mpesa-delay"]}. Unknown names are created."""
     ticket = get_object_or_404(SupportTicket, pk=ticket_id)
@@ -405,7 +406,7 @@ def _template_input(data, partial=False):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET", "POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("support.view", write="support.reply"))
 def support_templates(request):
     """GET: saved replies (most used first within title order is left to the client). POST: create."""
     if request.method == "POST":
@@ -421,7 +422,7 @@ def support_templates(request):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["PATCH", "DELETE"])
-@permission_classes(ADMIN)
+@permission_classes(staff("support.reply"))
 def support_template_detail(request, template_id):
     t = get_object_or_404(SupportReplyTemplate, pk=template_id)
     if request.method == "DELETE":
@@ -452,7 +453,7 @@ def _audit_template(request, action, t, description, changes=None):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("support.view"))
 def support_template_used(request, template_id):
     """Count an insert so the most useful replies float to the top."""
     updated = SupportReplyTemplate.objects.filter(pk=template_id).update(usage_count=F("usage_count") + 1)

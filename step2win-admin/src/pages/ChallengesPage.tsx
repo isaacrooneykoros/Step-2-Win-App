@@ -2,8 +2,8 @@ import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
 import { useIsFlashing } from '../lib/realtime/store'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Ban, CheckCircle2, Clock, Coins, Lock, RefreshCw, Star, Trophy, Users } from 'lucide-react'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Archive, Ban, CheckCircle2, Clock, Coins, Lock, Plus, RefreshCw, Star, Trophy, Users } from 'lucide-react'
 import { PageHeader } from '../components/PageHeader'
 import { StatCard } from '../components/StatCard'
 import { StatusBadge } from '../components/StatusBadge'
@@ -21,6 +21,11 @@ import { consoleApi } from '../components/users/api'
 import type { ChallengeRow } from '../components/users/types'
 import { Timestamp } from '../components/users/shared'
 import { ChallengeDrawer } from '../components/users/ChallengeDrawer'
+import { PlatformChallengeModal } from '../components/users/PlatformChallengeModal'
+import { ConfirmModal } from '../components/ConfirmModal'
+import { Textarea } from '../components/ui/Input'
+import { ActionNotice } from '../components/users/shared'
+import { usePermissions } from '../lib/permissions'
 import { challengeStatusLabel, formatDay, useDebounced, type ChallengeAction } from '../components/users/utils'
 
 type StatusTab = 'all' | 'pending' | 'active' | 'completed' | 'cancelled'
@@ -48,6 +53,13 @@ export function ChallengesPage() {
   const [pendingAction, setPendingAction] = useState<ChallengeAction | null>(null)
   const q = useDebounced(search.trim(), 300)
   const openId = params.get('open') ? Number(params.get('open')) : null
+  const qc = useQueryClient()
+  const { can } = usePermissions()
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkReason, setBulkReason] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
+  const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
 
   const ordering = `${sort.dir === 'desc' ? '-' : ''}${SORT_FIELD[sort.key] ?? 'created_at'}`
   const refetchInterval = useLiveRefetchInterval(30_000)
@@ -75,7 +87,30 @@ export function ChallengesPage() {
     setParams(p, { replace: true })
   }
 
+  const bulkCancel = useMutation({
+    mutationFn: () => consoleApi.bulkCancelChallenges(selectedIds, bulkReason.trim()),
+    onSuccess: (res) => {
+      setNotice({ tone: 'success', text: `${res.cancelled} challenge${res.cancelled === 1 ? '' : 's'} cancelled; every entry was refunded.` })
+      setSelectedIds([]); setBulkOpen(false); setBulkReason('')
+      void qc.invalidateQueries({ queryKey: ['admin', 'challenges'] })
+      void qc.invalidateQueries({ queryKey: ['admin', 'challenge-stats'] })
+    },
+    onError: (e) => { setBulkOpen(false); setNotice({ tone: 'danger', text: e instanceof Error ? e.message : 'Bulk cancel failed.' }) },
+  })
+  const rowsNow = listQ.data?.results ?? []
+  const cancellable = (c: ChallengeRow) => c.status === 'pending' || c.status === 'active'
+  const selectedRows = rowsNow.filter((c) => selectedIds.includes(c.id))
+  const toggleSelect = (id: number) => setSelectedIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]))
+  const manage = can('challenges.manage')
+
   const columns: Column<ChallengeRow>[] = [
+    ...(manage ? [{
+      key: 'select', label: '', width: '36px',
+      render: (c: ChallengeRow) => cancellable(c) ? (
+        <input type="checkbox" aria-label={`Select ${c.name}`} className="accent-[var(--brand)]" checked={selectedIds.includes(c.id)}
+          onClick={(e) => e.stopPropagation()} onChange={() => toggleSelect(c.id)} />
+      ) : null,
+    }] : []),
     {
       key: 'name', label: 'Challenge', sortable: true, width: '28%',
       render: (c) => (
@@ -84,6 +119,8 @@ export function ChallengesPage() {
             <span className="truncate font-medium text-ink-primary">{c.name}</span>
             {c.is_featured && <Star size={12} className="shrink-0 text-ink-muted" aria-label="Featured" />}
             {c.is_private && <Lock size={12} className="shrink-0 text-ink-muted" aria-label="Private" />}
+            {c.is_archived && <Archive size={12} className="shrink-0 text-ink-muted" aria-label="Archived" />}
+            {c.is_platform_challenge && <StatusBadge size="sm" tone="brand" label="Platform" />}
           </span>
           <span className="block truncate text-xs text-ink-muted">by {c.created_by_username}</span>
         </span>
@@ -126,12 +163,18 @@ export function ChallengesPage() {
         title="Challenges"
         description="Approve new challenges, watch live pools and step into any challenge's leaderboard."
         actions={
-          <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={listQ.isFetching || statsQ.isFetching}
-            onClick={() => { void listQ.refetch(); void statsQ.refetch(); void queueQ.refetch() }}>
-            Refresh
-          </Button>
+          <>
+            {can('challenges.platform') && (
+              <Button size="sm" variant="primary" leftIcon={<Plus size={13} />} onClick={() => setCreateOpen(true)}>Platform challenge</Button>
+            )}
+            <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={listQ.isFetching || statsQ.isFetching}
+              onClick={() => { void listQ.refetch(); void statsQ.refetch(); void queueQ.refetch() }}>
+              Refresh
+            </Button>
+          </>
         }
       />
+      {notice && <ActionNotice tone={notice.tone} onDismiss={() => setNotice(null)}>{notice.text}</ActionNotice>}
 
       {statsQ.error && !s ? (
         <ErrorState variant="inline" title="Could not load challenge totals" error={statsQ.error} onRetry={() => void statsQ.refetch()} />
@@ -202,7 +245,18 @@ export function ChallengesPage() {
           onSort={(k) => { setSort((cur) => (cur.key === k ? { key: k, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: k === 'name' ? 'asc' : 'desc' })); setPage(1) }}
           skeletonRows={8}
           toolbar={
-            <Toolbar actions={<span className="num text-xs text-ink-muted">{listQ.data ? `${formatNumber(listQ.data.count)} challenges` : ''}</span>}>
+            <Toolbar actions={
+              <span className="flex items-center gap-2">
+                {selectedIds.length > 0 && (
+                  <>
+                    <span className="text-xs text-ink-secondary">{selectedIds.length} selected</span>
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>Clear</Button>
+                    <Button size="sm" variant="danger-soft" leftIcon={<Ban size={13} />} onClick={() => setBulkOpen(true)}>Cancel selected</Button>
+                  </>
+                )}
+                <span className="num text-xs text-ink-muted">{listQ.data ? `${formatNumber(listQ.data.count)} challenges` : ''}</span>
+              </span>
+            }>
               <SearchInput size="sm" value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search name, creator or invite code" containerClassName="sm:w-72" />
             </Toolbar>
           }
@@ -216,6 +270,20 @@ export function ChallengesPage() {
       </div>
 
       <ChallengeDrawer key={`${openId}-${pendingAction ?? ''}`} challengeId={openId} initialAction={pendingAction} onClose={() => open(null)} />
+      {createOpen && (
+        <PlatformChallengeModal open onClose={() => setCreateOpen(false)} onDone={(msg, id) => {
+          setCreateOpen(false); setNotice({ tone: 'success', text: msg })
+          void qc.invalidateQueries({ queryKey: ['admin', 'challenges'] }); open(id)
+        }} />
+      )}
+      <ConfirmModal open={bulkOpen} onClose={() => setBulkOpen(false)} onConfirm={() => bulkCancel.mutate()} loading={bulkCancel.isPending}
+        variant="danger" title={`Cancel ${selectedIds.length} challenge${selectedIds.length === 1 ? '' : 's'}`} confirmLabel="Cancel challenges"
+        confirmText="CANCEL" confirmDisabled={!bulkReason.trim()}
+        message="Each challenge is closed and every entry is refunded to its participant's wallet, with a refund row in their history."
+        details={selectedRows.slice(0, 6).map((c) => ({ label: c.name, value: `${formatNumber(c.current_entries)} entries · ${formatKES(c.total_pool)}` }))}
+        consequence="This cannot be undone.">
+        <Textarea label="Reason (kept in the audit log)" rows={2} value={bulkReason} onChange={(e) => setBulkReason(e.target.value)} maxLength={500} required />
+      </ConfirmModal>
     </div>
   )
 }

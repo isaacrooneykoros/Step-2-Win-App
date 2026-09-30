@@ -46,34 +46,13 @@ class BadgeViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = BadgeSerializer(all_badges, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
-    def award_to_user(self, request, slug=None):
-        """Admin endpoint to award badge to user"""
-        badge = self.get_object()
-        user_id = request.data.get("user_id")
-
-        if not user_id:
-            return Response(
-                {"error": "user_id is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            user_badge, created = UserBadge.objects.get_or_create(
-                user_id=user_id, badge=badge
-            )
-            serializer = UserBadgeSerializer(user_badge)
-            return Response(
-                serializer.data,
-                status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-            )
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    # Awarding / revoking badges is an audited admin console action:
+    # /api/admin/badges/<id>/award_to_user/ and /api/admin/users/<id>/revoke_badge/.
 
 
 @extend_schema_view(
     my_xp=extend_schema(responses={200: UserXPSerializer}),
     leaderboard=extend_schema(responses={200: UserXPSerializer(many=True)}),
-    award_xp=extend_schema(responses={200: OpenApiTypes.OBJECT}),
 )
 class UserXPViewSet(viewsets.ViewSet):
     """
@@ -109,45 +88,8 @@ class UserXPViewSet(viewsets.ViewSet):
         serializer = UserXPSerializer(top_users, many=True)
         return Response(serializer.data)
 
-    @extend_schema(responses={200: OpenApiTypes.OBJECT})
-    @action(
-        detail=False, methods=["post"], permission_classes=[permissions.IsAdminUser]
-    )
-    def award_xp(self, request):
-        """Admin endpoint to award XP to a user"""
-        user_id = request.data.get("user_id")
-        amount = request.data.get("amount", 0)
-        reason = request.data.get("reason", "manual_award")
-
-        if not user_id or not amount:
-            return Response(
-                {"error": "user_id and amount are required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            xp_profile = UserXP.objects.get(user_id=user_id)
-            result = xp_profile.add_xp(int(amount), source=reason)
-
-            # Create XP event
-            XPEvent.objects.create(
-                user_id=user_id,
-                event_type="manual_award",
-                amount=int(amount),
-                description=reason,
-            )
-
-            serializer = UserXPSerializer(xp_profile)
-            return Response(
-                {
-                    "xp_profile": serializer.data,
-                    "result": result,
-                }
-            )
-        except UserXP.DoesNotExist:
-            return Response(
-                {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+    # XP adjustments are an audited admin console action (XPEvent
+    # "admin_adjustment"): POST /api/admin/users/<id>/adjust_xp/.
 
 
 class XPEventViewSet(viewsets.ReadOnlyModelViewSet):

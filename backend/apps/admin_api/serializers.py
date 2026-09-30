@@ -144,6 +144,9 @@ class AdminUserSerializer(serializers.ModelSerializer):
             "username",
             "email",
             "phone_number",
+            "first_name",
+            "last_name",
+            "daily_goal",
             "wallet_balance",
             "available_balance",
             "locked_balance",
@@ -287,6 +290,8 @@ class AdminChallengeSerializer(serializers.ModelSerializer):
             "win_condition",
             "payout_structure",
             "net_pool",
+            "is_archived",
+            "archived_at",
             "created_at",
             "updated_at",
         ]

@@ -23,6 +23,7 @@ from rest_framework.response import Response
 
 from apps.admin_api.models import AuditLog
 from apps.admin_api.views import IsAdminUser
+from apps.admin_api.roles import staff
 
 from .graph import summarize_pair
 from .models import (HouseholdMark, LinkageRun, LinkageSettings, LinkCluster,
@@ -114,7 +115,7 @@ def _mark_row(m: HouseholdMark, names) -> dict:
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def user_linked_accounts(request, user_id: int):
     from apps.challenges.models import HeldPayout
     from apps.steps.models import TrustScore
@@ -181,7 +182,7 @@ def _last_run():
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def user_timeline(request, user_id: int):
     user = get_object_or_404(User, pk=user_id)
     start, end = parse_range(request.query_params)
@@ -190,7 +191,7 @@ def user_timeline(request, user_id: int):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def cluster_list(request):
     try:
         min_size = max(2, int(request.query_params.get("min_size", 2)))
@@ -242,7 +243,7 @@ def _audit(request, user_id, username, description, changes):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={201: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 def mark_household(request):
     raw = request.data.get("user_ids") or []
     try:
@@ -281,7 +282,7 @@ def mark_household(request):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 def revoke_household(request, mark_id: int):
     note, err = _clean_note(request.data.get("note"))
     if err:
@@ -304,7 +305,7 @@ def revoke_household(request, mark_id: int):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET", "PATCH"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view", write="settings.system"))
 def linkage_settings(request):
     cfg = LinkageSettings.load()
     if request.method == "GET":
