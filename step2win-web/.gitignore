@@ -30,3 +30,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+
+# Emitted by an accidental `tsc -b` (the project builds with plain `tsc`); never commit
+*.tsbuildinfo
+/vite.config.js
+/vite.config.d.ts
