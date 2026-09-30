@@ -2,6 +2,7 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth import authenticate
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
@@ -15,6 +16,7 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.admin_api.models import SupportTicket, SupportTicketMessage
+from apps.core.sanitizers import sanitize_text
 from apps.core.throttles import (DashboardReadRateThrottle,
                                  DeviceBindRateThrottle, LoginRateThrottle,
                                  ProfilePictureUploadRateThrottle,
@@ -881,6 +883,13 @@ def reply_support_ticket(request, ticket_id):
     if not message:
         return Response(
             {"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        message = sanitize_text(message, max_length=5000)
+    except ValidationError as exc:
+        return Response(
+            {"error": exc.message}, status=status.HTTP_400_BAD_REQUEST
         )
 
     reply = SupportTicketMessage.objects.create(
