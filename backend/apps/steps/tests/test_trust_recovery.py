@@ -154,11 +154,15 @@ class AdminEndpointsUseTheLockTests(APITestCase):
             trust.recover(1, today=date(2026, 1, 1) + timedelta(days=i))
         self.assertEqual(trust.status, "RESTRICT")
 
-    def test_legacy_flag_action_suspend_is_locked(self):
+    def test_flag_action_suspend_is_locked(self):
         flag = FraudFlag.objects.create(
             user=self.user, flag_type="step_velocity_spike", severity="high", date=date(2026, 9, 1)
         )
-        r = self.client.post(f"/api/admin/fraud/{flag.id}/action/", {"action": "suspend"}, format="json")
+        r = self.client.post(
+            f"/api/admin/trust/flags/{flag.id}/action/",
+            {"action": "suspend", "reason": "Velocity spike confirmed"},
+            format="json",
+        )
         self.assertEqual(r.status_code, 200, r.content)
         trust = TrustScore.objects.get(user=self.user)
         self.assertEqual(trust.admin_status, "suspend")

@@ -101,23 +101,23 @@ class AdminEndpointAuthorizationTests(TestCase):
         token = self._get_tokens(self.regular_user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
-        response = self.client.get("/api/admin/reports/revenue/")
+        # The legacy /reports/* endpoints were removed; the finance report replaced them.
+        response = self.client.get("/api/admin/finance/report/")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_regular_user_cannot_access_user_retention(self):
-        """Regular users should not access retention analytics."""
-        token = self._get_tokens(self.regular_user)
+    def test_legacy_report_endpoints_are_gone(self):
+        token = self._get_tokens(self.admin_user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
-
-        response = self.client.get("/api/admin/reports/retention/")
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        for path in ("/api/admin/reports/revenue/", "/api/admin/reports/retention/",
+                     "/api/admin/reports/challenge-analytics/", "/api/admin/reports/transaction-trends/"):
+            self.assertEqual(self.client.get(path).status_code, status.HTTP_404_NOT_FOUND)
 
     def test_regular_user_cannot_access_challenge_analytics(self):
-        """Regular users should not access challenge analytics."""
+        """Regular users should not access finance analytics."""
         token = self._get_tokens(self.regular_user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
-        response = self.client.get("/api/admin/reports/challenge-analytics/")
+        response = self.client.get("/api/admin/finance/analytics/")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_regular_user_cannot_access_withdrawal_queue(self):

@@ -99,18 +99,16 @@ class TrustConsoleTests(TestCase):
         # Second decision on the same flag is refused.
         self.assertEqual(self.client.post(url, {"action": "dismiss", "reason": "again please"}, format="json").status_code, 409)
 
-    def test_trust_mapping_matches_legacy_endpoint(self):
+    def test_trust_mapping_and_legacy_route_removed(self):
         self.auth()
+        f0 = FraudFlag.objects.create(user=self.user, flag_type="x", severity="high", date=timezone.localdate())
+        # The unaudited legacy route is gone; decisions go through the trust console.
+        self.assertEqual(self.client.post(f"/api/admin/fraud/{f0.id}/action/", {"action": "warn"}, format="json").status_code, 404)
         for action, expected in (("warn", 95), ("restrict", 35), ("suspend", 10), ("ban", 0)):
-            TrustScore.objects.update_or_create(user=self.user, defaults={"score": 100})
-            f1 = FraudFlag.objects.create(user=self.user, flag_type="x", severity="high", date=timezone.localdate())
-            self.client.post(f"/api/admin/fraud/{f1.id}/action/", {"action": action}, format="json")
-            legacy = TrustScore.objects.get(user=self.user).score
             TrustScore.objects.update_or_create(user=self.user, defaults={"score": 100})
             f2 = FraudFlag.objects.create(user=self.user, flag_type="x", severity="high", date=timezone.localdate())
             self.client.post(f"/api/admin/trust/flags/{f2.id}/action/", {"action": action, "reason": "mapping check"}, format="json")
-            self.assertEqual(TrustScore.objects.get(user=self.user).score, legacy)
-            self.assertEqual(legacy, expected)
+            self.assertEqual(TrustScore.objects.get(user=self.user).score, expected)
 
     def test_session_decision(self):
         self.auth()

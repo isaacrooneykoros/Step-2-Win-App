@@ -116,9 +116,11 @@ class UserActionAuditTests(ConsoleTestBase):
 
     def test_staff_changes_require_superuser(self):
         self.client.force_authenticate(self.staff)
-        self.assertEqual(self.client.post(f"/api/admin/users/{self.bob.id}/make_staff/").status_code, 403)
+        # Staff access is granted through the owner-only Staff & roles endpoints.
+        body = {"identifier": self.bob.username, "roles": ["support"]}
+        self.assertEqual(self.client.post("/api/admin/staff/invite/", body, format="json").status_code, 403)
         self.client.force_authenticate(self.superuser)
-        self.assertEqual(self.client.post(f"/api/admin/users/{self.bob.id}/make_staff/").status_code, 200)
+        self.assertEqual(self.client.post("/api/admin/staff/invite/", body, format="json").status_code, 200)
         self.assertTrue(AuditLog.objects.filter(action="promote", resource_id=self.bob.id).exists())
 
     def test_delete_refuses_accounts_holding_money(self):
