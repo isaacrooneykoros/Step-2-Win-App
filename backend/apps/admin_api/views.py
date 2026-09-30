@@ -824,6 +824,301 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
         self._audit(request, user, "delete", f"Deleted account {username} (anonymised; money records kept)")
         return Response({"status": f"Account {username} has been deleted and anonymised"})
 
+    # ── Admin console part A: user tools ────────────────────────────────────
+
+    def _reason_required(self, request, minimum=5):
+        reason = str(request.data.get("reason") or "").strip()[:500]
+        if len(reason) < minimum:
+            return None, Response(
+                {"error": f"A reason of at least {minimum} characters is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return reason, None
+
+    @action(detail=True, methods=["post"])
+    def sign_out_everywhere(self, request, pk=None):
+        """Revoke every refresh token and end every app session of the user."""
+        user = self.get_object()
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
+            return denied
+        from apps.users.account_deletion import _revoke_all_tokens
+
+        revoked = _revoke_all_tokens(user)
+        self._audit(request, user, "sign_out", f"Signed {user.username} out everywhere", {"tokens_revoked": revoked})
+        return Response({"status": f"{user.username} was signed out on every device.", "tokens_revoked": revoked})
+
+    @action(detail=True, methods=["post"])
+    def unlock_login(self, request, pk=None):
+        """Clear django-axes failed-login lockouts for the account."""
+        user = self.get_object()
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
+            return denied
+        from axes.models import AccessAttempt
+        from axes.utils import reset
+
+        names = {user.username, user.email}
+        attempts = AccessAttempt.objects.filter(username__in=names).count()
+        for name in names:
+            if name:
+                reset(username=name)
+        self._audit(request, user, "unlock", f"Cleared sign-in lockout for {user.username}", {"attempt_rows": attempts})
+        return Response({"status": f"Sign-in lockout cleared for {user.username}.", "cleared": attempts})
+
+    @action(detail=True, methods=["post"])
+    def message(self, request, pk=None):
+        """Open a support conversation to the user (they see it in Support in the app and can reply)."""
+        from apps.admin_api.models import SupportTicket, SupportTicketMessage
+
+        user = self.get_object()
+        if denied := self._deleted_guard(user):
+            return denied
+        subject = str(request.data.get("subject") or "").strip()[:255]
+        text = str(request.data.get("message") or "").strip()
+        category = request.data.get("category") or "general"
+        if category not in {c for c, _ in SupportTicket.CATEGORY_CHOICES}:
+            category = "general"
+        if not subject or len(text) < 2:
+            return Response({"error": "A subject and a message are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if len(text) > 5000:
+            return Response({"error": "The message must be 5,000 characters or fewer."}, status=status.HTTP_400_BAD_REQUEST)
+        with db_transaction.atomic():
+            ticket = SupportTicket.objects.create(
+                user=user, subject=subject, category=category,
+                message="Message from the Step2Win support team.",
+                status="in_progress", priority="medium", assigned_to=request.user,
+            )
+            SupportTicketMessage.objects.create(
+                ticket=ticket, sender=request.user, sender_username=request.user.username, is_admin=True, message=text,
+            )
+        self._audit(request, user, "message", f"Messaged {user.username}: {subject}", {"ticket_id": ticket.id})
+        return Response({"status": "Message sent.", "ticket_id": ticket.id}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def reset_device(self, request, pk=None):
+        """Deactivate one step-tracking device, or reset the whole binding.
+
+        mode=deactivate + registration_id: that device stops counting (the user must bind
+        again from it). mode=reset: every registration is deactivated, the account's bound
+        device is cleared and the 24 h switch cooldown is lifted, so the user can bind a new
+        phone now (e.g. a lost or replaced phone). Step history is not touched."""
+        from django.core.cache import cache
+
+        from apps.steps.models import DeviceRegistration
+
+        user = self.get_object()
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
+            return denied
+        reason, err = self._reason_required(request)
+        if err:
+            return err
+        mode = request.data.get("mode") or "reset"
+        if mode == "deactivate":
+            reg = DeviceRegistration.objects.filter(user=user, id=request.data.get("registration_id")).first()
+            if reg is None:
+                return Response({"error": "Device not found for this user."}, status=status.HTTP_404_NOT_FOUND)
+            with db_transaction.atomic():
+                DeviceRegistration.objects.filter(pk=reg.pk).update(is_active=False, updated_at=timezone.now())
+                if user.device_id and user.device_id == reg.device_id:
+                    User.objects.filter(id=user.id).update(device_id=None)
+            changes = {"registration_id": str(reg.id), "platform": reg.platform}
+            desc = f"Deactivated a {reg.platform} device of {user.username}"
+        elif mode == "reset":
+            with db_transaction.atomic():
+                n = DeviceRegistration.objects.filter(user=user, is_active=True).update(
+                    is_active=False, updated_at=timezone.now()
+                )
+                User.objects.filter(id=user.id).update(device_id=None)
+            cache.delete(f"device-rebind:{user.id}")
+            changes = {"deactivated": n, "cooldown_cleared": True}
+            desc = f"Reset the device binding of {user.username}"
+        else:
+            return Response({"error": "mode must be deactivate or reset"}, status=status.HTTP_400_BAD_REQUEST)
+        changes["reason"] = reason
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=request.user, action="device_reset", resource_type="user", resource_id=user.id,
+            resource_name=user.username, description=desc, changes=changes, request=request,
+        )
+        return Response({"status": desc, **{k: v for k, v in changes.items() if k != "reason"}})
+
+    @action(detail=True, methods=["post"])
+    def adjust_xp(self, request, pk=None):
+        """Add or remove XP through an XPEvent ("admin_adjustment"); never below 0 total."""
+        user = self.get_object()
+        if denied := self._deleted_guard(user):
+            return denied
+        reason, err = self._reason_required(request)
+        if err:
+            return err
+        try:
+            amount = int(request.data.get("amount"))
+        except (TypeError, ValueError):
+            return Response({"error": "amount must be a whole number"}, status=status.HTTP_400_BAD_REQUEST)
+        if amount == 0 or abs(amount) > 10000:
+            return Response({"error": "amount must be between -10,000 and 10,000 and not 0"}, status=status.HTTP_400_BAD_REQUEST)
+        xp, _ = UserXP.objects.get_or_create(user=user)
+        before = xp.total_xp
+        if amount < 0 and before + amount < 0:
+            return Response(
+                {"error": f"The user has only {before} XP; you can remove at most that."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        event = XPEvent.objects.create(
+            user=user, event_type="admin_adjustment", amount=amount, description=reason[:255],
+            metadata={"admin": request.user.username},
+        )
+        xp.refresh_from_db()
+        self._audit(
+            request, user, "xp_adjust", f"{'Added' if amount > 0 else 'Removed'} {abs(amount)} XP for {user.username}",
+            {"xp": {"old": before, "new": xp.total_xp}, "xp_event_id": event.id, "level": xp.level},
+        )
+        return Response({"status": "ok", "total_xp": xp.total_xp, "level": xp.level, "xp_event_id": event.id})
+
+    @action(detail=True, methods=["post"])
+    def revoke_badge(self, request, pk=None):
+        """Take a badge back from the user (the badge definition stays)."""
+        user = self.get_object()
+        reason, err = self._reason_required(request)
+        if err:
+            return err
+        ub = UserBadge.objects.filter(user=user, badge_id=request.data.get("badge_id")).select_related("badge").first()
+        if ub is None:
+            return Response({"error": "The user does not hold this badge."}, status=status.HTTP_404_NOT_FOUND)
+        name, earned = ub.badge.name, ub.earned_at
+        ub.delete()
+        self._audit(
+            request, user, "revoke", f"Revoked badge {name} from {user.username}",
+            {"badge_id": ub.badge_id, "badge": name, "earned_at": earned.isoformat() if earned else None},
+        )
+        return Response({"status": f"Badge {name} revoked."})
+
+    @action(detail=True, methods=["post"])
+    def correct_steps(self, request, pk=None):
+        """Set / void / clear a correction of one day's steps, with recompute (apps/steps/corrections.py)."""
+        from datetime import date as date_cls
+
+        from apps.steps.corrections import StepCorrectionError, correct_day
+
+        user = self.get_object()
+        if denied := self._deleted_guard(user):
+            return denied
+        try:
+            day = date_cls.fromisoformat(str(request.data.get("date") or ""))
+        except ValueError:
+            return Response({"error": "date must be YYYY-MM-DD"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            result = correct_day(
+                user=user, day=day, kind=request.data.get("kind"), steps=request.data.get("steps"),
+                reason=request.data.get("reason"), admin=request.user,
+            )
+        except StepCorrectionError as exc:
+            return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=request.user, action="steps_correction", resource_type="user", resource_id=user.id,
+            resource_name=user.username,
+            description=f"{ {'set': 'Set', 'void': 'Voided', 'clear': 'Removed the correction of'}[result['kind']] } steps for {user.username} on {result['date']}",
+            changes={**result, "reason": str(request.data.get("reason") or "")[:500]}, request=request,
+        )
+        return Response(result)
+
+    @action(detail=True, methods=["get"])
+    def records(self, request, pk=None):
+        """Read-only records for the drawer: consents, legal acceptances, change history
+        (django-auditlog), sign-in lockout, step corrections, badges and recent XP."""
+        from auditlog.models import LogEntry
+        from axes.models import AccessAttempt
+        from django.contrib.contenttypes.models import ContentType
+
+        from apps.legal.models import UserDocumentAck
+        from apps.privacy.models import Consent
+        from apps.steps.corrections import correction_row
+        from apps.steps.models import StepCorrection
+
+        user = self.get_object()
+        ct = ContentType.objects.get_for_model(User)
+        entries = LogEntry.objects.filter(content_type=ct, object_pk=str(user.pk)).select_related("actor").order_by("-timestamp")[:50]
+        limit = int(getattr(settings, "AXES_FAILURE_LIMIT", 5))
+        attempts = AccessAttempt.objects.filter(username__in=[user.username, user.email])
+        xp = UserXP.objects.filter(user=user).first()
+        return Response(
+            {
+                "consents": [
+                    {"id": c.id, "purpose": c.purpose, "granted": c.granted, "version": c.version,
+                     "source": c.source, "app_version": c.app_version, "created_at": c.created_at.isoformat()}
+                    for c in Consent.objects.filter(user=user).order_by("-created_at")[:100]
+                ],
+                "legal_acks": [
+                    {"id": a.id, "document": a.document.title, "document_type": a.document.document_type,
+                     "version_seen": a.version_seen, "current_version": a.document.version,
+                     "acknowledged_at": a.acknowledged_at.isoformat()}
+                    for a in UserDocumentAck.objects.filter(user=user).select_related("document").order_by("-acknowledged_at")
+                ],
+                "change_history": [
+                    {"id": e.id, "action": {0: "create", 1: "update", 2: "delete", 3: "access"}.get(e.action, str(e.action)),
+                     "changes": e.changes_dict, "actor": e.actor.username if e.actor_id else None,
+                     "timestamp": e.timestamp.isoformat()}
+                    for e in entries
+                ],
+                "lockout": {
+                    "locked": any(a.failures_since_start >= limit for a in attempts),
+                    "failures": sum(a.failures_since_start for a in attempts),
+                    "limit": limit,
+                },
+                "step_corrections": [
+                    correction_row(c) for c in StepCorrection.objects.filter(user=user).select_related("created_by")[:50]
+                ],
+                "badges": [
+                    {"badge_id": b.badge_id, "name": b.badge.name, "icon": b.badge.icon, "earned_at": b.earned_at.isoformat()}
+                    for b in UserBadge.objects.filter(user=user).select_related("badge").order_by("-earned_at")
+                ],
+                "xp": {"total_xp": xp.total_xp if xp else 0, "level": xp.level if xp else 1},
+                "xp_events": [
+                    {"id": e.id, "event_type": e.event_type, "amount": e.amount, "description": e.description,
+                     "created_at": e.created_at.isoformat()}
+                    for e in XPEvent.objects.filter(user=user).order_by("-created_at")[:20]
+                ],
+            }
+        )
+
+    @action(detail=False, methods=["get"])
+    def export(self, request):
+        """CSV of the filtered user list (same filters as the list). No secrets: no
+        password hashes, tokens, device ids or IP addresses."""
+        import csv
+
+        from django.http import HttpResponse
+
+        qs = filter_users(User.objects.all(), request.query_params)[:20000]
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="step2win-users-{timezone.localdate().isoformat()}.csv"'
+        writer = csv.writer(response)
+        cols = ["id", "username", "email", "phone_number", "first_name", "last_name", "status", "is_staff",
+                "date_joined", "last_login", "wallet_balance", "locked_balance", "total_earned", "trust_score",
+                "open_flags", "daily_goal", "current_streak"]
+        writer.writerow(cols)
+        n = 0
+        for u in qs:
+            status_label = "deleted" if u.deleted_at else ("active" if u.is_active else "banned")
+            row = [u.id, u.username, u.email, u.phone_number, u.first_name, u.last_name, status_label, u.is_staff,
+                   u.date_joined.isoformat() if u.date_joined else "", u.last_login.isoformat() if u.last_login else "",
+                   u.wallet_balance, u.locked_balance, u.total_earned, getattr(u, "trust_value", ""),
+                   getattr(u, "open_flags", ""), u.daily_goal, u.current_streak]
+            # Neutralise spreadsheet formulas in user-controlled text.
+            writer.writerow([f"'{v}" if isinstance(v, str) and v[:1] in ("=", "+", "-", "@") else v for v in row])
+            n += 1
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=request.user, action="export", resource_type="user",
+            description=f"Exported {n} users to CSV",
+            changes={"filters": {k: v for k, v in request.query_params.items() if k not in ("page", "page_size")}, "rows": n},
+            request=request,
+        )
+        return response
+
     @action(detail=False, methods=["get"])
     def user_stats(self, request):
         """Get overall user statistics"""
@@ -1395,6 +1690,16 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
             user_badge, created = UserBadge.objects.get_or_create(
                 user=user, badge=badge
             )
+            if created:
+                from apps.admin_api.models import AuditLog
+
+                AuditLog.log_action(
+                    admin=request.user, action="award", resource_type="user", resource_id=user.id,
+                    resource_name=user.username, description=f"Awarded badge {badge.name} to {user.username}",
+                    changes={"badge_id": badge.id, "badge": badge.name,
+                             "reason": str(request.data.get("reason") or "")[:500]},
+                    request=request,
+                )
             return Response(
                 {
                     "status": "Badge awarded",
