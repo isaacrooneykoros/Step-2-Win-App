@@ -1,5 +1,6 @@
 import { useId, useState, type KeyboardEvent } from 'react'
-import { Check, CircleDot, Plus, X } from 'lucide-react'
+import { AlertTriangle, Check, CircleDot, Plus, X } from 'lucide-react'
+import type { RuleInfo } from './api'
 import { cn } from '../../lib/cn'
 import { Button } from '../ui/Button'
 import { Input, Select, Textarea } from '../ui/Input'
@@ -17,22 +18,111 @@ interface SettingFieldProps {
   enforcedBy?: string
   /** Staff accounts for 'staff' and 'categoryMap' fields. */
   staff?: StaffOption[]
+  /** For console rules with a server fallback: what the server says. */
+  rule?: RuleInfo
   onChange: (value: FormValue) => void
 }
 
+function serverText(def: FieldDef, rule?: RuleInfo): string | null {
+  if (!rule) return null
+  const v = rule.server_value
+  if (v === null || v === undefined || v === '') return def.kind === 'date' ? 'Server value: none' : null
+  if (typeof v === 'boolean') return `Server default: ${v ? 'On' : 'Off'}`
+  const shown = def.kind === 'optNumber' ? display(def, String(v)) : String(v)
+  const role = rule.bound === 'cap' ? ' (hard ceiling)' : rule.bound === 'floor' ? ' (hard floor)' : ''
+  return `Server value: ${shown}${role}`
+}
+
 /** One setting: control, what it affects, and what it was before this edit. */
-export function SettingField({ def, value, saved, changed, error, enforcedBy, staff = [], onChange }: SettingFieldProps) {
+export function SettingField({ def, value, saved, changed, error, enforcedBy, staff = [], rule, onChange }: SettingFieldProps) {
   const id = useId()
   const staffName = (uid: number) => staff.find((u) => u.id === uid)?.username ?? `#${uid}`
+  const server = serverText(def, rule)
   const effect = (
-    <p className={cn('mt-1.5 flex items-start gap-1.5 text-2xs', enforcedBy ? 'text-ink-secondary' : 'text-ink-muted')}>
-      <CircleDot size={11} className={cn('mt-px shrink-0', enforcedBy ? 'text-success' : 'text-ink-disabled')} aria-hidden />
-      <span>{enforcedBy ? <>Used by: {enforcedBy}</> : 'Stored only. The backend does not act on this setting yet.'}</span>
-    </p>
+    <>
+      {def.warning && (
+        <p className="mt-1.5 flex items-start gap-1.5 rounded-md border border-warning-line bg-warning-soft px-2 py-1.5 text-2xs text-warning">
+          <AlertTriangle size={12} className="mt-px shrink-0" aria-hidden />
+          <span>{def.warning}</span>
+        </p>
+      )}
+      {server && (
+        <p className="mt-1.5 text-2xs text-ink-muted">
+          {server}{rule?.floor !== undefined ? ` · never below ${rule.floor}` : ''}
+          {rule && <> · in force now: <span className="font-medium text-ink-secondary">{rule.source === 'console' ? 'console value' : 'server value'}</span></>}
+        </p>
+      )}
+      <p className={cn('mt-1.5 flex items-start gap-1.5 text-2xs', enforcedBy ? 'text-ink-secondary' : 'text-ink-muted')}>
+        <CircleDot size={11} className={cn('mt-px shrink-0', enforcedBy ? 'text-success' : 'text-ink-disabled')} aria-hidden />
+        <span>{enforcedBy ? <>Used by: {enforcedBy}</> : 'Stored only. The backend does not act on this setting yet.'}</span>
+      </p>
+    </>
   )
   const was = changed && (
     <p className="mt-1 text-2xs font-medium text-warning">Unsaved · was {display(def, saved, staffName)}</p>
   )
+
+  if (def.kind === 'triBool') {
+    const serverOn = rule?.server_value === true
+    return (
+      <div className={cn('rounded-md border px-3 py-2.5 sm:col-span-2', changed ? 'border-warning-line bg-warning-soft/40' : 'border-surface-border')}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p id={id} className="text-sm font-medium text-ink-primary">{def.label}</p>
+            {def.hint && <p className="mt-0.5 text-xs text-ink-muted">{def.hint}</p>}
+          </div>
+          <div role="radiogroup" aria-labelledby={id} className="inline-flex shrink-0 rounded-md border border-surface-strong bg-surface-sunken p-0.5">
+            {([
+              ['inherit', rule ? `Server (${serverOn ? 'On' : 'Off'})` : 'Server default'],
+              ['on', 'On'],
+              ['off', 'Off'],
+            ] as const).map(([v, label]) => (
+              <button key={v} type="button" role="radio" aria-checked={value === v} onClick={() => onChange(v)}
+                className={cn('h-7 rounded px-2.5 text-xs font-medium transition-colors',
+                  value === v ? 'bg-surface-card text-ink-primary shadow-card' : 'text-ink-secondary hover:text-ink-primary')}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {effect}
+        {was}
+      </div>
+    )
+  }
+
+  if (def.kind === 'date') {
+    return (
+      <div>
+        <Input label={def.label} type="date" value={String(value)} onChange={(e) => onChange(e.target.value)} hint={def.hint} error={error}
+          className={cn('num', changed && !error && 'border-warning')} />
+        {effect}
+        {was}
+      </div>
+    )
+  }
+
+  if (def.kind === 'optNumber') {
+    const placeholder = rule && rule.server_value !== null && rule.server_value !== undefined
+      ? `Server: ${display(def, String(rule.server_value))}` : 'Server value'
+    return (
+      <div>
+        <Input
+          label={def.label}
+          value={String(value)}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          inputMode={def.numKind === 'int' ? 'numeric' : 'decimal'}
+          hint={def.hint ? `${def.hint} Leave blank to use the server value.` : 'Leave blank to use the server value.'}
+          error={error}
+          className={cn('num', changed && !error && 'border-warning')}
+          rightSlot={def.unit ? <span className="pointer-events-none pr-2 text-xs text-ink-muted">{def.unit}</span> : undefined}
+        />
+        {effect}
+        {was}
+      </div>
+    )
+  }
 
   if (def.kind === 'bool') {
     const on = value === true

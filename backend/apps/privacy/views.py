@@ -214,7 +214,7 @@ def admin_settings(request):
         else:
             updates[key] = number
     if errors:
-        return Response({"error": "Invalid settings.", "fields": errors}, status=400)
+        return Response({"error": "Invalid settings.", "fields": errors, **errors}, status=400)
     before = s.as_dict()
     for key, value in updates.items():
         setattr(s, key, value)
