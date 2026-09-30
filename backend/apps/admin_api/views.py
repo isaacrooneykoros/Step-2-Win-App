@@ -396,11 +396,13 @@ def admin_register(request):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
+            # The first admin owns the console: superuser, so it can manage staff.
             user = User.objects.create_user(
                 username=username,
                 email=email,
                 password=password,
                 is_staff=True,
+                is_superuser=True,
             )
     finally:
         cache.delete(lock_key)
@@ -416,7 +418,33 @@ def admin_register(request):
     )
 
 
-class AdminUserViewSet(viewsets.ModelViewSet):
+class NoDefaultWritesMixin:
+    """
+    Blocks the ModelViewSet's generic create/update/delete routes. The console uses the
+    dedicated actions below, which validate, protect money and write the audit log; the
+    generic routes skipped all of that (e.g. PATCH is_staff, or DELETE a live challenge).
+    """
+
+    def _no_generic_write(self):
+        return Response(
+            {"error": "Use the dedicated admin action for this change.", "code": "use_admin_action"},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    def create(self, request, *args, **kwargs):
+        return self._no_generic_write()
+
+    def update(self, request, *args, **kwargs):
+        return self._no_generic_write()
+
+    def partial_update(self, request, *args, **kwargs):
+        return self._no_generic_write()
+
+    def destroy(self, request, *args, **kwargs):
+        return self._no_generic_write()
+
+
+class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
     """
     Admin user management endpoint
     """
@@ -694,61 +722,37 @@ class AdminUserViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["delete"])
     def delete_user(self, request, pk=None):
-        """Delete user (hard delete)"""
+        """
+        Delete an account the safe way: anonymise it and remove personal data
+        (apps/users/account_deletion.py). Wallet, payment and challenge records are kept,
+        detached from the person, so nothing cascades and the books still balance.
+        """
         denied = self._superuser_only(request)
         if denied:
             return denied
         user = self.get_object()
-
-        # Never destroy an account that still holds or has committed money.
-        if (user.wallet_balance or 0) != 0 or (user.locked_balance or 0) != 0:
-            return Response(
-                {
-                    "error": "Cannot delete an account with a wallet or locked balance. Ban it instead."
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Prevent deleting self
         if user.id == request.user.id:
-            return Response(
-                {"error": "Cannot delete your own account"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"error": "Cannot delete your own account"}, status=status.HTTP_400_BAD_REQUEST)
+        deleted = self._deleted_guard(user)
+        if deleted:
+            return deleted
 
-        # Prevent deleting last admin
-        if user.is_staff and User.objects.filter(is_staff=True).count() <= 1:
-            return Response(
-                {"error": "Cannot delete the last admin account"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        from apps.users.account_deletion import AccountDeletionError, delete_account
 
         username = user.username
-        user_id = user.id
-        from django.db.models import ProtectedError
-
         try:
-            user.delete()
-        except ProtectedError:
+            delete_account(user, channel="admin")
+        except AccountDeletionError as exc:
             return Response(
                 {
-                    "error": "This account has withdrawal records that must be kept. Ban it instead."
+                    "error": "This account can't be deleted yet.",
+                    "code": exc.code,
+                    "blockers": [{"code": b.code, "message": b.message} for b in exc.blockers],
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_409_CONFLICT,
             )
-        from apps.admin_api.models import AuditLog
-
-        AuditLog.log_action(
-            admin=request.user,
-            action="delete",
-            resource_type="user",
-            resource_id=user_id,
-            resource_name=username,
-            description=f"Permanently deleted {username}",
-            changes={"reason": str(request.data.get("reason") or "").strip()[:500]} if request.data.get("reason") else None,
-            request=request,
-        )
-        return Response({"status": f"User {username} has been permanently deleted"})
+        self._audit(request, user, "delete", f"Deleted account {username} (anonymised; money records kept)")
+        return Response({"status": f"Account {username} has been deleted and anonymised"})
 
     @action(detail=False, methods=["get"])
     def user_stats(self, request):
@@ -800,7 +804,7 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class AdminChallengeViewSet(viewsets.ModelViewSet):
+class AdminChallengeViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
     """
     Admin challenge management endpoint
     """
@@ -962,6 +966,33 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
         max_participants = request.data.get("max_participants")
         end_date = request.data.get("end_date")
 
+        # Changing the goal or end date of a live challenge people already paid into
+        # changes who qualifies: not allowed once there are participants.
+        live_with_entries = challenge.status in ("pending", "active") and challenge.participants.exists()
+        if live_with_entries and (
+            (milestone is not None and int(milestone) != challenge.milestone)
+            or (end_date and str(end_date) != str(challenge.end_date))
+        ):
+            return Response(
+                {
+                    "error": "People have already joined this challenge, so its goal and end date can't change. "
+                    "Cancel it (entries are refunded) and create a new one instead.",
+                    "code": "challenge_has_entries",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if max_participants is not None and int(max_participants) < challenge.participants.count():
+            return Response(
+                {"error": "Max participants can't be lower than the number already joined."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        before = {
+            "name": challenge.name,
+            "milestone": challenge.milestone,
+            "max_participants": challenge.max_participants,
+            "end_date": str(challenge.end_date),
+        }
+
         if name:
             challenge.name = name
 
@@ -975,6 +1006,22 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
             challenge.end_date = end_date
 
         challenge.save()
+        challenge.refresh_from_db()
+        after = {
+            "name": challenge.name,
+            "milestone": challenge.milestone,
+            "max_participants": challenge.max_participants,
+            "end_date": str(challenge.end_date),
+        }
+        changes = {k: {"old": before[k], "new": after[k]} for k in before if before[k] != after[k]}
+        if changes:
+            from apps.admin_api.models import AuditLog
+
+            AuditLog.log_action(
+                admin=request.user, action="update", resource_type="challenge", resource_id=challenge.id,
+                resource_name=challenge.name, description=f"Edited challenge {challenge.name}",
+                changes=changes, request=request,
+            )
         serializer = AdminChallengeSerializer(challenge)
         return Response(serializer.data)
 
@@ -983,17 +1030,35 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
         """Delete challenge (hard delete)"""
         challenge = self.get_object()
 
-        # Only allow deletion of cancelled or completed challenges
-        if challenge.status in ["pending", "active"]:
+        # Only cancelled challenges: pending/active must be cancelled first (entries
+        # refunded), and completed ones keep their results and payouts.
+        if challenge.status != "cancelled":
             return Response(
                 {
-                    "error": "Cannot delete pending or active challenges. Cancel them first."
+                    "error": "Only cancelled challenges can be deleted. Cancel it first (entries are refunded); "
+                    "completed challenges are kept for their results and payouts."
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        from django.db.models import ProtectedError
+
+        from apps.admin_api.models import AuditLog
+
         challenge_name = challenge.name
-        challenge.delete()
+        challenge_id = challenge.id
+        try:
+            challenge.delete()
+        except ProtectedError:
+            return Response(
+                {"error": "This challenge has money records that must be kept, so it can't be deleted."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        AuditLog.log_action(
+            admin=request.user, action="delete", resource_type="challenge", resource_id=challenge_id,
+            resource_name=challenge_name, description=f"Deleted cancelled challenge {challenge_name}",
+            request=request,
+        )
         return Response(
             {"status": f"Challenge {challenge_name} has been permanently deleted"}
         )
@@ -1030,12 +1095,23 @@ class AdminChallengeViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Only delete cancelled or completed challenges
-        challenges = Challenge.objects.filter(
-            id__in=challenge_ids, status__in=["cancelled", "completed"]
-        )
-        count = challenges.count()
-        challenges.delete()
+        # Only cancelled challenges; completed ones keep their results and payouts.
+        from django.db.models import ProtectedError
+
+        from apps.admin_api.models import AuditLog
+
+        count = 0
+        for challenge in Challenge.objects.filter(id__in=challenge_ids, status="cancelled"):
+            name, cid = challenge.name, challenge.id
+            try:
+                challenge.delete()
+            except ProtectedError:
+                continue
+            count += 1
+            AuditLog.log_action(
+                admin=request.user, action="delete", resource_type="challenge", resource_id=cid,
+                resource_name=name, description=f"Bulk deleted cancelled challenge {name}", request=request,
+            )
 
         return Response({"status": f"{count} challenge(s) deleted"})
 
@@ -3011,6 +3087,14 @@ def approve_withdrawal(request, withdrawal_id):
             method=withdrawal.method,
         )
 
+        from apps.admin_api.models import AuditLog
+
+        AuditLog.log_action(
+            admin=request.user, action="approve", resource_type="withdrawal",  # UUID id: kept in changes (resource_id is an integer)
+            resource_name=withdrawal.user.username,
+            description=f"Approved withdrawal of KES {withdrawal.amount_kes} ({withdrawal.method})",
+            changes={"withdrawal_id": str(withdrawal.id), "amount_kes": str(withdrawal.amount_kes), "tracking_id": tracking_id}, request=request,
+        )
         logger.info(
             f"Withdrawal approved and sent | id={withdrawal_id} | "
             f"admin={request.user.username} | KES {withdrawal.amount_kes} | "
@@ -3064,6 +3148,14 @@ def reject_withdrawal(request, withdrawal_id):
         reason=reason,
     )
 
+    from apps.admin_api.models import AuditLog
+
+    AuditLog.log_action(
+        admin=request.user, action="reject", resource_type="withdrawal",  # UUID id: kept in changes (resource_id is an integer)
+        resource_name=withdrawal.user.username,
+        description=f"Rejected withdrawal of KES {withdrawal.amount_kes} (refunded)",
+        changes={"withdrawal_id": str(withdrawal.id), "amount_kes": str(withdrawal.amount_kes), "reason": str(reason)[:500]}, request=request,
+    )
     logger.info(
         f"Withdrawal rejected | id={withdrawal_id} | "
         f"admin={request.user.username} | reason={reason}"

@@ -123,11 +123,12 @@ class UserActionAuditTests(ConsoleTestBase):
 
     def test_delete_refuses_accounts_holding_money(self):
         res = self.client.delete(f"/api/admin/users/{self.alice.id}/delete_user/")
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 409)  # blockers listed; nothing deleted
         self.assertTrue(User.objects.filter(id=self.alice.id).exists())
         res = self.client.delete(f"/api/admin/users/{self.bob.id}/delete_user/")
         self.assertEqual(res.status_code, 200)
-        self.assertTrue(AuditLog.objects.filter(action="delete", resource_name="bob").exists())
+        # The deleted person is anonymised, including in staff logs: find the row by id.
+        self.assertTrue(AuditLog.objects.filter(action="delete", resource_type="user", resource_id=self.bob.id).exists())
 
     def test_update_user_logs_changes(self):
         res = self.client.patch(f"/api/admin/users/{self.bob.id}/update_user/", {"email": "bob2@example.com"}, format="json")

@@ -85,11 +85,16 @@ class AdminPayoutPolicyTests(TestCase):
     def test_admin_cannot_switch_to_a_rank_payout(self):
         self.challenge.payout_structure = "proportional"
         self.challenge.save(update_fields=["payout_structure"])
+        # The generic edit route is closed (405); no admin action can set a rank payout.
         response = self._patch({"payout_structure": "winner_takes_all"})
-        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.status_code, 405, response.content)
         self.challenge.refresh_from_db()
         self.assertEqual(self.challenge.payout_structure, "proportional")
 
     def test_existing_rank_challenge_can_still_be_edited(self):
-        response = self._patch({"payout_structure": "top_3", "name": "Legacy rank renamed"})
+        response = self.client.patch(
+            f"/api/admin/challenges/{self.challenge.id}/update_challenge/", {"name": "Legacy rank renamed"}, format="json"
+        )
         self.assertEqual(response.status_code, 200, response.content)
+        self.challenge.refresh_from_db()
+        self.assertEqual(self.challenge.payout_structure, "top_3")
