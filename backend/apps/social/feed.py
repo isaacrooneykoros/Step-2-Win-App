@@ -64,7 +64,8 @@ def list_feed(me, *, before_id: int | None = None, request=None) -> dict:
     actors = (friend_ids(me.id) - hidden_user_ids(me.id)) | {me.id}
     since = timezone.now() - timedelta(days=FEED_WINDOW_DAYS)
     qs = FeedEvent.objects.filter(
-        user_id__in=actors, created_at__gte=since, user__is_active=True, user__deleted_at__isnull=True
+        user_id__in=actors, created_at__gte=since, user__is_active=True, user__deleted_at__isnull=True,
+        hidden_at__isnull=True,
     ).select_related("user", "user__social_profile")
     if before_id:
         qs = qs.filter(id__lt=before_id)
@@ -113,7 +114,7 @@ def react(me, event_id: int, kind: str | None) -> dict:
     from .friends import are_friends
 
     require_social_enabled("feed")
-    event = FeedEvent.objects.select_related("user").filter(id=event_id).first()
+    event = FeedEvent.objects.select_related("user").filter(id=event_id, hidden_at__isnull=True).first()
     if event is None or event.user_id in hidden_user_ids(me.id):
         raise SocialError("not_found", "This update isn't available.", 404)
     if event.user_id != me.id and not are_friends(me.id, event.user_id):

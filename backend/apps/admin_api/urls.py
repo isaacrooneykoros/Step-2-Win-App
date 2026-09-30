@@ -150,5 +150,7 @@ urlpatterns = [
     # Scheduled jobs (apps/admin_api/jobs_views.py)
     path("monitoring/jobs/", jobs_views.scheduled_jobs, name="scheduled-jobs"),
     path("monitoring/jobs/<str:name>/run/", jobs_views.run_scheduled_job_now, name="scheduled-job-run"),
+    # Admin console Part B (ops, anti-cheat policy, support desk actions)
+    path("", include("apps.admin_api.console_b_urls")),
     path("", include(router.urls)),
 ]

@@ -2,6 +2,7 @@
 Security utilities for session management, replay detection, and token handling.
 """
 
+import copy
 import hashlib
 import hmac
 import json
@@ -266,6 +267,32 @@ def get_trust_reward_modifier(user) -> float:
     return modifiers.get(profile.trust_tier, 0.95)
 
 
+# Built-in policy used when no AntiCheatPolicy version is active. The admin console
+# (Anti-cheat policy page) creates new versions from the active one or from this.
+DEFAULT_ANTICHEAT_POLICY = {
+    "ml": {
+        "high_shake_threshold": 0.80,
+        "moderate_shake_threshold": 0.65,
+        "high_walk_threshold": 0.70,
+        "shake_risk_max": 30.0,
+        "walk_credit_max": 8.0,
+        "label_shake_penalty": 12.0,
+        "legacy_unverified_penalty": 8.0,
+    },
+    "session": {
+        "max_steps_per_minute": 180,
+        "max_session_hours": 12,
+        "min_windows_for_full_trust": 5,
+        "high_interval_variability_ms": 180,
+    },
+    "trust": {
+        "min_trust_score": 0,
+        "max_trust_score": 100,
+        "default_trust_score": 50,
+    },
+}
+
+
 def get_active_policy():
     """
     Get the active AntiCheatPolicy, with safe default fallback.
@@ -280,28 +307,7 @@ def get_active_policy():
         return policy.config
 
     # Safe default config if no active policy exists
-    return {
-        "ml": {
-            "high_shake_threshold": 0.80,
-            "moderate_shake_threshold": 0.65,
-            "high_walk_threshold": 0.70,
-            "shake_risk_max": 30.0,
-            "walk_credit_max": 8.0,
-            "label_shake_penalty": 12.0,
-            "legacy_unverified_penalty": 8.0,
-        },
-        "session": {
-            "max_steps_per_minute": 180,
-            "max_session_hours": 12,
-            "min_windows_for_full_trust": 5,
-            "high_interval_variability_ms": 180,
-        },
-        "trust": {
-            "min_trust_score": 0,
-            "max_trust_score": 100,
-            "default_trust_score": 50,
-        },
-    }
+    return copy.deepcopy(DEFAULT_ANTICHEAT_POLICY)
 
 
 def get_active_policy_version() -> str:

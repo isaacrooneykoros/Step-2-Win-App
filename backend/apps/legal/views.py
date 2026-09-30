@@ -1,6 +1,6 @@
 import logging
 
-from drf_spectacular.utils import extend_schema, inline_serializer
+from drf_spectacular.utils import OpenApiTypes, extend_schema, inline_serializer
 from rest_framework import serializers
 from rest_framework.decorators import (api_view, parser_classes,
                                        permission_classes)
@@ -15,6 +15,20 @@ from .serializers import (LegalDocumentAdminSerializer,
 from .utils import process_uploaded_file
 
 logger = logging.getLogger(__name__)
+
+# Customers must always be able to read these; publish a new version instead of archiving.
+NEVER_ARCHIVE = ("terms_and_conditions", "privacy_policy")
+
+
+def _audit(request, action, doc, description, changes=None):
+    """Every staff write on legal documents lands in the admin audit log."""
+    from apps.admin_api.models import AuditLog
+
+    AuditLog.log_action(
+        admin=request.user, action=action, resource_type="legal_document", resource_id=doc.pk,
+        resource_name=f"{doc.title} v{doc.version_label}"[:255], description=description,
+        changes=changes, request=request,
+    )
 
 
 # ── PUBLIC ENDPOINTS (mobile app) ────────────────────────────────────────────
@@ -130,10 +144,11 @@ def list_documents_admin(request):
         ),
     },
 )
-@api_view(["GET", "PUT", "PATCH"])
+@api_view(["GET", "PUT", "PATCH", "DELETE"])
 @permission_classes([IsAdminUser])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def document_detail_admin(request, pk):
+    # ROLE: content
     """
     GET  — fetch single document for editing
     PUT/PATCH — update document content (text or file upload)
@@ -152,6 +167,19 @@ def document_detail_admin(request, pk):
     if request.method == "GET":
         serializer = LegalDocumentAdminSerializer(doc)
         return Response(serializer.data)
+
+    if request.method == "DELETE":
+        # Only drafts that were never published: anything customers may have read
+        # (or accepted) stays, and is archived instead.
+        if doc.status != "draft" or doc.published_at or doc.history.exists() or doc.user_acks.exists():
+            return Response(
+                {"error": "Only drafts that were never published can be deleted. Archive it instead."},
+                status=409,
+            )
+        _audit(request, "delete", doc, f"Deleted draft legal document {doc.title}",
+               {"document_type": doc.document_type})
+        doc.delete()
+        return Response(status=204)
 
     # PUT / PATCH
     uploaded_file = request.FILES.get("uploaded_file")
@@ -179,7 +207,20 @@ def document_detail_admin(request, pk):
         doc, data=data, partial=(request.method == "PATCH")
     )
     if serializer.is_valid():
+        before = {k: getattr(doc, k) for k in serializer.validated_data if k != "uploaded_file"}
         serializer.save(last_edited_by=request.user)
+        changes = {}
+        for k, old in before.items():
+            new = getattr(doc, k)
+            if old != new:
+                changes[k] = (
+                    {"old": f"{len(old or '')} chars", "new": f"{len(new or '')} chars"}
+                    if k in ("draft_html", "content_html") else {"old": str(old), "new": str(new)}
+                )
+        if uploaded_file:
+            changes["uploaded_file"] = {"new": uploaded_file.name}
+        if changes:
+            _audit(request, "update", doc, f"Edited draft of {doc.title}", changes)
         return Response(serializer.data)
     return Response(serializer.errors, status=400)
 
@@ -204,6 +245,8 @@ def create_document_admin(request):
     serializer = LegalDocumentAdminSerializer(data=request.data)
     if serializer.is_valid():
         doc = serializer.save(last_edited_by=request.user)
+        _audit(request, "create", doc, f"Created legal document {doc.title} (draft)",
+               {"document_type": doc.document_type})
         return Response(LegalDocumentAdminSerializer(doc).data, status=201)
     return Response(serializer.errors, status=400)
 
@@ -296,6 +339,9 @@ def publish_document(request, pk):
         f"Legal document published: {doc.title} v{doc.version_label} "
         f"by {request.user.username}"
     )
+    _audit(request, "publish", doc, f"Published {doc.title} v{doc.version_label}",
+           {"version": {"old": old_version, "new": doc.version}, "notify_users": bool(notify),
+            "change_summary": change_summary})
 
     return Response(
         {
@@ -382,6 +428,8 @@ def restore_version(request, pk, version_id):
     doc.draft_html = version.content_html
     doc.last_edited_by = request.user
     doc.save()
+    _audit(request, "restore", doc, f"Restored v{version.version_label} of {doc.title} into the draft",
+           {"from_version": version.version})
 
     return Response(
         {
@@ -391,3 +439,87 @@ def restore_version(request, pk, version_id):
             f"Review and publish to make it live.",
         }
     )
+
+
+# ── Archive / unarchive / acceptance stats (admin console Part B) ─────────────
+
+
+@extend_schema(request=None, responses={200: LegalDocumentAdminSerializer})
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def archive_document(request, pk):
+    """Unpublish: customers stop seeing the document. History and acceptances stay."""
+    # ROLE: content
+    try:
+        doc = LegalDocument.objects.get(pk=pk)
+    except LegalDocument.DoesNotExist:
+        return Response({"error": "Document not found"}, status=404)
+    if doc.document_type in NEVER_ARCHIVE:
+        return Response(
+            {"error": "The Terms and the Privacy Policy must stay readable. Publish a new version instead."},
+            status=409,
+        )
+    if doc.status != "published":
+        return Response({"error": "Only a published document can be archived."}, status=409)
+    doc.status = "archived"
+    doc.last_edited_by = request.user
+    doc.save(update_fields=["status", "last_edited_by", "updated_at"])
+    _audit(request, "archive", doc, f"Archived (unpublished) {doc.title}", {"status": {"old": "published", "new": "archived"}})
+    return Response(LegalDocumentAdminSerializer(doc).data)
+
+
+@extend_schema(request=None, responses={200: LegalDocumentAdminSerializer})
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def unarchive_document(request, pk):
+    """Put an archived document back online at the same version (no new version)."""
+    # ROLE: content
+    try:
+        doc = LegalDocument.objects.get(pk=pk)
+    except LegalDocument.DoesNotExist:
+        return Response({"error": "Document not found"}, status=404)
+    if doc.status != "archived" or not doc.content_html.strip():
+        return Response({"error": "Only an archived document with content can be put back online."}, status=409)
+    doc.status = "published"
+    doc.last_edited_by = request.user
+    doc.save(update_fields=["status", "last_edited_by", "updated_at"])
+    _audit(request, "publish", doc, f"Put {doc.title} v{doc.version_label} back online",
+           {"status": {"old": "archived", "new": "published"}})
+    return Response(LegalDocumentAdminSerializer(doc).data)
+
+
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def document_acks(request, pk):
+    """How many accounts have read each version (UserDocumentAck)."""
+    # ROLE: content
+    from django.contrib.auth import get_user_model
+    from django.db.models import Count
+
+    try:
+        doc = LegalDocument.objects.get(pk=pk)
+    except LegalDocument.DoesNotExist:
+        return Response({"error": "Document not found"}, status=404)
+    rows = list(
+        UserDocumentAck.objects.filter(document=doc).values("version_seen").annotate(n=Count("id")).order_by("-version_seen")
+    )
+    labels = dict(doc.history.values_list("version", "version_label"))
+    users = get_user_model().objects.filter(is_active=True, is_staff=False)
+    if hasattr(get_user_model(), "deleted_at"):
+        users = users.filter(deleted_at__isnull=True)
+    total_users = users.count()
+    current = sum(r["n"] for r in rows if r["version_seen"] >= doc.version)
+    return Response({
+        "document": doc.title,
+        "current_version": doc.version,
+        "current_version_label": doc.version_label,
+        "active_customers": total_users,
+        "acknowledged_current": current,
+        "acknowledged_current_pct": round(100 * current / total_users, 1) if total_users else None,
+        "by_version": [
+            {"version": r["version_seen"], "version_label": labels.get(r["version_seen"], f"1.{r['version_seen']}"),
+             "count": r["n"]}
+            for r in rows
+        ],
+    })

@@ -42,7 +42,7 @@ class BadgeViewSet(viewsets.ReadOnlyModelViewSet):
         earned_badges = UserBadge.objects.filter(user=request.user).values_list(
             "badge_id"
         )
-        all_badges = Badge.objects.exclude(id__in=earned_badges)
+        all_badges = Badge.objects.filter(is_retired=False).exclude(id__in=earned_badges)
         serializer = BadgeSerializer(all_badges, many=True)
         return Response(serializer.data)
 
@@ -293,7 +293,7 @@ class GamificationSummaryViewSet(viewsets.ViewSet):
             streak = DailyLoginStreak.objects.create(user=user)
 
         earned_badge_ids = UserBadge.objects.filter(user=user).values_list("badge_id")
-        upcoming_badges = Badge.objects.exclude(id__in=earned_badge_ids)[:5]
+        upcoming_badges = Badge.objects.filter(is_retired=False).exclude(id__in=earned_badge_ids)[:5]
 
         level_milestones = LevelMilestone.objects.filter(user=user).order_by("-level")[
             :5

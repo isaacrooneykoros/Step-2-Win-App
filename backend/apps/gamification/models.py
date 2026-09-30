@@ -49,6 +49,10 @@ class Badge(models.Model):
     criteria_value = models.IntegerField(
         null=True, blank=True, help_text="Threshold value for criteria"
     )
+    # Retired in the admin console: no longer awarded or listed as "to earn";
+    # people who hold it keep it. A badge anyone holds can't be deleted.
+    is_retired = models.BooleanField(default=False, db_index=True)
+    retired_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -72,7 +76,8 @@ class UserBadge(models.Model):
     """
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="badges")
-    badge = models.ForeignKey(Badge, on_delete=models.CASCADE, related_name="users")
+    # PROTECT: deleting a badge must never silently take it away from people.
+    badge = models.ForeignKey(Badge, on_delete=models.PROTECT, related_name="users")
     earned_at = models.DateTimeField(auto_now_add=True)
     is_new = models.BooleanField(
         default=True, help_text="Shows notification until user views"
@@ -156,8 +161,9 @@ class LevelMilestone(models.Model):
     level = models.IntegerField()
     reached_at = models.DateTimeField(auto_now_add=True)
     total_xp = models.IntegerField()
+    # PROTECT: a badge used as a level reward can't be deleted (retire it instead).
     reward_badge = models.ForeignKey(
-        Badge, on_delete=models.SET_NULL, null=True, blank=True
+        Badge, on_delete=models.PROTECT, null=True, blank=True
     )
 
     class Meta:

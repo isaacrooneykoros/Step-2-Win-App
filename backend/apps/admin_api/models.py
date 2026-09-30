@@ -566,6 +566,12 @@ class ScheduledJobState(models.Model):
     last_result = models.CharField(max_length=255, blank=True)
     run_count = models.PositiveIntegerField(default=0)
     lease_until = models.DateTimeField(null=True, blank=True)
+    # Paused by staff (Ops monitoring > Scheduled jobs): every runner skips the job
+    # until it is resumed. "Run now" still works (an explicit, audited decision).
+    paused = models.BooleanField(default=False)
+    paused_at = models.DateTimeField(null=True, blank=True)
+    paused_by = models.CharField(max_length=150, blank=True)
+    pause_reason = models.CharField(max_length=255, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -575,3 +581,25 @@ class ScheduledJobState(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.last_status or 'never run'})"
+
+
+class ScheduledJobRun(models.Model):
+    """One run of a scheduled job (the last RUN_HISTORY_PER_JOB per job are kept)."""
+
+    RUN_HISTORY_PER_JOB = 50
+
+    name = models.CharField(max_length=100, db_index=True)
+    trigger = models.CharField(max_length=20, blank=True)
+    started_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=10, blank=True)
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    error = models.TextField(blank=True)
+    result = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-started_at", "-id"]
+        indexes = [models.Index(fields=["name", "-started_at"])]
+
+    def __str__(self):
+        return f"{self.name} {self.started_at:%Y-%m-%d %H:%M} {self.status}"

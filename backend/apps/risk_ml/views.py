@@ -128,6 +128,39 @@ def label_user_day(request):
     return Response({"status": "ok", "created": created, "label": _label_row(obj)}, status=201 if created else 200)
 
 
+@extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
+@api_view(["POST"])
+@permission_classes(ADMIN)
+def activate_model(request, version: str):
+    """Make a trained model the active one of its kind (superuser; audited).
+
+    Shadow only: the active model scores user-days for evaluation; nothing is enforced.
+    """
+    # ROLE: owner
+    from .training import TrainingRefused, _activate
+
+    if not request.user.is_superuser:
+        return Response({"error": "Only a superuser can change the active model."}, status=403)
+    reason = str(request.data.get("reason") or "").strip()
+    if len(reason) < 5:
+        return Response({"error": "A reason of at least 5 characters is required."}, status=400)
+    art = get_object_or_404(ModelArtifact.objects.defer("payload"), version=version)
+    previous = ModelArtifact.objects.filter(kind=art.kind, is_active=True).exclude(pk=art.pk) \
+        .values_list("version", flat=True).first()
+    try:
+        _activate(art)
+    except TrainingRefused as exc:
+        return Response({"error": str(exc)}, status=409)
+    AuditLog.log_action(
+        admin=request.user, action="activate", resource_type="risk_model", resource_id=art.pk,
+        resource_name=art.version, description=f"Activated {art.kind} risk model {art.version}"
+        + (f" (was {previous})" if previous else "") + ". Shadow only.",
+        changes={"kind": art.kind, "version": art.version, "previous": previous, "reason": reason},
+        request=request,
+    )
+    return Response({"version": art.version, "kind": art.kind, "is_active": True, "previous": previous})
+
+
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
 @permission_classes(ADMIN)

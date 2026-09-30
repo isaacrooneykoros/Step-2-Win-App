@@ -806,7 +806,7 @@ def challenge_chat(request, pk):
         from .models import ChallengeMessage
 
         messages = (
-            ChallengeMessage.objects.filter(challenge=challenge)
+            ChallengeMessage.objects.filter(challenge=challenge, hidden_at__isnull=True)
             .select_related("user")
             .order_by("-created_at")[:100]
         )

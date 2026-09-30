@@ -407,10 +407,14 @@ class AdminBadgeSerializer(serializers.ModelSerializer):
             "criteria_type",
             "criteria_value",
             "users_earned",
+            "is_retired",
+            "retired_at",
             "created_at",
         ]
         read_only_fields = [
             "id",
+            "is_retired",
+            "retired_at",
             "created_at",
         ]
 

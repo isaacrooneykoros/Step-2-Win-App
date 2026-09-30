@@ -33,11 +33,14 @@ class WithdrawalRequestInputSerializer(serializers.Serializer):
     is_paybill = serializers.BooleanField(required=False, default=True)
 
     def validate_amount(self, value):
+        from django.conf import settings
+
         from apps.admin_api.business_rules import withdrawal_limits
 
-        limits = withdrawal_limits()
-        min_withdrawal = Decimal(str(limits["min_kes"]))
-        max_withdrawal = Decimal(str(limits["max_kes"]))
+        # The console minimum is checked (with its own message) by the withdrawal
+        # service; here only the server floor and the effective maximum.
+        min_withdrawal = Decimal(str(getattr(settings, "MIN_WITHDRAWAL_KES", 0) or 0))
+        max_withdrawal = Decimal(str(withdrawal_limits()["max_kes"]))
         if value < min_withdrawal:
             raise serializers.ValidationError(
                 f"Minimum withdrawal is KES {_fmt_kes(min_withdrawal)}"

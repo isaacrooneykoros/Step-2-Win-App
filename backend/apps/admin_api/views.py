@@ -1347,9 +1347,40 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
             {k: str(v) for k, v in serializer.validated_data.items()},
         )
 
-    def perform_destroy(self, instance):
-        self._audit(instance, "delete", f"Deleted badge {instance.name}")
-        instance.delete()
+    def destroy(self, request, *args, **kwargs):
+        # Delete only a badge nobody holds (and no level reward uses); otherwise retire.
+        badge = self.get_object()
+        holders = UserBadge.objects.filter(badge=badge).count()
+        from apps.gamification.models import LevelMilestone
+
+        rewards = LevelMilestone.objects.filter(reward_badge=badge).count()
+        if holders or rewards:
+            return Response(
+                {"error": f"{holders} people hold this badge. Retire it instead: they keep it, nobody new earns it.",
+                 "holders": holders, "level_rewards": rewards},
+                status=status.HTTP_409_CONFLICT,
+            )
+        self._audit(badge, "delete", f"Deleted badge {badge.name}")
+        badge.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"])
+    def retire(self, request, pk=None):
+        """Retire (hide) or bring back a badge. Body: {retired: true|false}. Holders keep it."""
+        # ROLE: content
+        badge = self.get_object()
+        retired = request.data.get("retired", True)
+        if not isinstance(retired, bool):
+            return Response({"error": "retired must be true or false"}, status=status.HTTP_400_BAD_REQUEST)
+        if badge.is_retired != retired:
+            badge.is_retired = retired
+            badge.retired_at = timezone.now() if retired else None
+            badge.save(update_fields=["is_retired", "retired_at", "updated_at"])
+            self._audit(badge, "retire" if retired else "restore",
+                        f"{'Retired' if retired else 'Brought back'} badge {badge.name}",
+                        {"is_retired": {"old": not retired, "new": retired},
+                         "holders": UserBadge.objects.filter(badge=badge).count()})
+        return Response(self.get_serializer(badge).data)
 
     @action(detail=True, methods=["post"])
     def award_to_user(self, request, pk=None):

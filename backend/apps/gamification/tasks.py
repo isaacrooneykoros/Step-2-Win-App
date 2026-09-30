@@ -150,7 +150,7 @@ def check_step_milestones(user_id):
         if user.total_steps >= steps:
             # Check if badge already awarded
             try:
-                badge = Badge.objects.get(slug=badge_slug)
+                badge = Badge.objects.get(slug=badge_slug, is_retired=False)
                 if not UserBadge.objects.filter(user=user, badge=badge).exists():
                     UserBadge.objects.create(user=user, badge=badge)
 
@@ -208,7 +208,7 @@ def award_streak_milestone_badges():
     awarded = 0
     for days, badge_slug in streak_milestones.items():
         try:
-            badge = Badge.objects.get(slug=badge_slug)
+            badge = Badge.objects.get(slug=badge_slug, is_retired=False)
 
             # Find users with this streak
             streaks = DailyLoginStreak.objects.filter(current_streak=days)

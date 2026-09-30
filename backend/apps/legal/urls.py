@@ -14,4 +14,7 @@ urlpatterns = [
     path("admin/documents/<int:pk>/publish/", views.publish_document),
     path("admin/documents/<int:pk>/history/", views.document_history),
     path("admin/documents/<int:pk>/restore/<int:version_id>/", views.restore_version),
+    path("admin/documents/<int:pk>/archive/", views.archive_document),  # ROLE: content
+    path("admin/documents/<int:pk>/unarchive/", views.unarchive_document),  # ROLE: content
+    path("admin/documents/<int:pk>/acks/", views.document_acks),  # ROLE: content
 ]
