@@ -13,6 +13,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import { SlideOver } from '../components/SlideOver'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { SafeText } from '../components/consoleb/SafeText'
+import { plainText } from '../components/consoleb/text'
 import { consoleB, type HelpArticle, type HelpCategory } from '../components/consoleb/api'
 import { ApiError } from '../components/system/http'
 import { cn } from '../lib/cn'
@@ -117,7 +118,7 @@ export function HelpCentrePage() {
     <div className="space-y-5">
       <PageHeader
         title="Help centre"
-        description="Questions and answers customers see under Profile > Help. Group them in categories, order them, and publish when ready."
+        description="Questions and answers customers see under Profile > Help centre. Group them in categories, order them, and publish when ready."
         actions={<Button size="sm" variant="primary" leftIcon={<Plus size={13} />} disabled={!categories.length} onClick={() => openArticle('new')}>New article</Button>}
       />
       {msg && (
@@ -183,7 +184,7 @@ export function HelpCentrePage() {
                         <li key={a.id} className="flex items-center gap-2 px-4 py-2.5">
                           <button type="button" className="min-w-0 flex-1 text-left" onClick={() => openArticle(a)}>
                             <span className="block truncate text-sm font-medium text-ink-primary">{a.title}</span>
-                            <span className="block truncate text-xs text-ink-muted">{a.body}</span>
+                            <span className="block truncate text-xs text-ink-muted">{plainText(a.body)}</span>
                           </button>
                           <StatusBadge size="sm" tone={a.is_published ? 'success' : 'neutral'} label={a.is_published ? 'Published' : 'Draft'} />
                           <span className="hidden w-20 text-right text-2xs text-ink-muted md:block">{formatRelative(a.updated_at)}</span>

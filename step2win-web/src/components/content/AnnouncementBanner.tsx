@@ -95,11 +95,11 @@ export function AnnouncementBanner() {
               {a.body && <SafeText text={a.body} className="mt-0.5 text-callout text-text-secondary" />}
               {a.link_url &&
                 (internal ? (
-                  <Link to={a.link_url} className={`mt-2 inline-flex min-h-touch items-center gap-0.5 text-callout font-semibold ${s.link}`}>
+                  <Link to={a.link_url} className={`-mb-2 mt-1 inline-flex min-h-touch items-center gap-0.5 text-callout font-semibold ${s.link}`}>
                     {linkLabel} <ChevronRight size={16} aria-hidden />
                   </Link>
                 ) : (
-                  <a href={a.link_url} target="_blank" rel="noopener noreferrer" className={`mt-2 inline-flex min-h-touch items-center gap-0.5 text-callout font-semibold ${s.link}`}>
+                  <a href={a.link_url} target="_blank" rel="noopener noreferrer" className={`-mb-2 mt-1 inline-flex min-h-touch items-center gap-0.5 text-callout font-semibold ${s.link}`}>
                     {linkLabel} <ChevronRight size={16} aria-hidden />
                   </a>
                 ))}

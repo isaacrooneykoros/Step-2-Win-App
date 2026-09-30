@@ -10,6 +10,7 @@ import { Button } from '../components/ui/Button'
 import { Input, Select, Textarea } from '../components/ui/Input'
 import { Tabs } from '../components/ui/Tabs'
 import { SafeText } from '../components/consoleb/SafeText'
+import { plainText as plain } from '../components/consoleb/text'
 import {
   AUDIENCES, consoleB, SEGMENTS, type Announcement, type AnnouncementInput, type AnnouncementState, type Severity,
 } from '../components/consoleb/api'
@@ -77,6 +78,10 @@ function toInput(d: Draft): AnnouncementInput {
     priority: Number.parseInt(d.priority || '0', 10) || 0,
   }
 }
+
+/** Body preview without the markdown markers. */
+const shortDate = (iso: string) =>
+  new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 function audienceLabel(a: Pick<Announcement, 'audience' | 'segment'>): string {
   if (a.audience === 'segment') return SEGMENTS.find((s) => s.value === a.segment)?.label ?? 'A group'
@@ -168,16 +173,18 @@ export function AnnouncementsPage() {
 
   const columns: Column<Announcement>[] = [
     { key: 'title', label: 'Announcement', render: (r) => (
-      <span className="block min-w-0">
+      <span className="block min-w-0 max-w-[16rem] xl:max-w-[26rem] 2xl:max-w-[36rem]">
         <span className="block truncate font-medium text-ink-primary">{r.title}</span>
-        <span className="block truncate text-xs text-ink-muted">{r.body || '—'}</span>
+        <span className="block truncate text-xs text-ink-muted">{plain(r.body) || '—'}</span>
       </span>
     ), sortable: true, sortValue: (r) => r.title },
     { key: 'state', label: 'State', render: (r) => <StatusBadge size="sm" tone={STATE_TONE[r.state]} label={r.state.charAt(0).toUpperCase() + r.state.slice(1)} showDot={r.state === 'live'} /> },
     { key: 'severity', label: 'Tone', hideBelow: 'md', render: (r) => <StatusBadge size="sm" status={r.severity} /> },
     { key: 'audience', label: 'Audience', hideBelow: 'lg', render: (r) => <span className="text-xs text-ink-secondary">{audienceLabel(r)}</span> },
     { key: 'window', label: 'Shown', hideBelow: 'lg', render: (r) => (
-      <span className="text-xs text-ink-secondary">{formatDateTime(r.starts_at)}{r.ends_at ? ` – ${formatDateTime(r.ends_at)}` : ' onwards'}</span>
+      <span className="whitespace-nowrap text-xs text-ink-secondary" title={`${formatDateTime(r.starts_at)}${r.ends_at ? ` – ${formatDateTime(r.ends_at)}` : ''}`}>
+        {shortDate(r.starts_at)}{r.ends_at ? ` – ${shortDate(r.ends_at)}` : ' onwards'}
+      </span>
     ), sortable: true, sortValue: (r) => r.starts_at },
     { key: 'reach', label: 'Reach', numeric: true, hideBelow: 'xl', render: (r) => (r.reach === null ? <span className="text-xs text-ink-muted">By device</span> : formatNumber(r.reach)) },
     { key: 'dismissals', label: 'Dismissed', numeric: true, hideBelow: 'xl', render: (r) => formatNumber(r.dismissals) },
