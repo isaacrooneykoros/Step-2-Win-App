@@ -274,6 +274,8 @@ export interface ChallengeRow {
   featured_until: string | null
   is_platform_challenge: boolean
   platform_bonus_kes: string
+  is_archived?: boolean
+  archived_at?: string | null
   win_condition: string
   payout_structure: string
   created_at: string

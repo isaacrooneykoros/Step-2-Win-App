@@ -89,7 +89,7 @@ export function isRecent(value: string, days = 7): boolean {
 
 export const MILESTONES = [10000, 15000, 20000, 25000, 30000, 40000, 50000, 65000, 80000, 100000, 125000, 150000, 200000, 250000, 300000]
 
-export type ChallengeAction = 'approve' | 'reject' | 'cancel' | 'feature' | 'unfeature' | 'delete' | 'edit'
+export type ChallengeAction = 'approve' | 'reject' | 'cancel' | 'feature' | 'unfeature' | 'delete' | 'edit' | 'archive' | 'unarchive'
 
 export function challengeStatusLabel(status: string) {
   return status === 'active' ? 'Live' : status === 'pending' ? 'Awaiting approval' : humanize(status)

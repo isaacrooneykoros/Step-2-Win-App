@@ -2,8 +2,9 @@ import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
 import { useIsFlashing } from '../lib/realtime/store'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Ban, RefreshCw, ShieldAlert, ShieldCheck, UserPlus, Users, UserX } from 'lucide-react'
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
+import { Ban, Download, RefreshCw, ShieldAlert, ShieldCheck, UserPlus, Users, UserX } from 'lucide-react'
+import { usePermissions } from '../lib/permissions'
 import { PageHeader } from '../components/PageHeader'
 import { StatCard } from '../components/StatCard'
 import { StatusBadge } from '../components/StatusBadge'
@@ -72,6 +73,20 @@ export function UsersPage() {
     placeholderData: keepPreviousData,
   })
   const statsQ = useQuery({ queryKey: ['admin', 'user-stats'], queryFn: consoleApi.userStats, refetchInterval })
+  const { can } = usePermissions()
+  const exportCsv = useMutation({
+    mutationFn: async () => {
+      const blob = await consoleApi.exportUsers({ search: q, status: status === 'all' ? undefined : status, trust: trust || undefined, ordering })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `step2win-users-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    },
+  })
   const s = statsQ.data
 
   const setFilter = (next: { status?: StatusFilter; trust?: string }) => {
@@ -157,12 +172,21 @@ export function UsersPage() {
         title="Users"
         description="Find an account, check its money and trust, and act on it. Every action is written to the audit log."
         actions={
-          <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={refreshing}
-            onClick={() => { void listQ.refetch(); void statsQ.refetch() }}>
-            Refresh
-          </Button>
+          <>
+            {can('users.export') && (
+              <Button size="sm" variant="secondary" leftIcon={<Download size={13} />} loading={exportCsv.isPending} onClick={() => exportCsv.mutate()}
+                title="Downloads the users matching the current filters (no passwords, tokens or device ids)">
+                Export CSV
+              </Button>
+            )}
+            <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={refreshing}
+              onClick={() => { void listQ.refetch(); void statsQ.refetch() }}>
+              Refresh
+            </Button>
+          </>
         }
       />
+      {exportCsv.error && <ErrorState variant="inline" title="Export failed" error={exportCsv.error} onRetry={() => exportCsv.mutate()} />}
 
       {statsQ.error && !s ? (
         <ErrorState variant="inline" title="Could not load user totals" error={statsQ.error} onRetry={() => void statsQ.refetch()} />

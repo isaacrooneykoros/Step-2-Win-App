@@ -8,6 +8,7 @@ import { StatusBadge } from '../StatusBadge'
 import { ErrorState } from '../ui/ErrorState'
 import { Skeleton } from '../ui/Skeleton'
 import { financeApi } from './api'
+import { StuckWithdrawalTools } from './StuckWithdrawal'
 import type { WithdrawalDetail, WithdrawalRow } from './types'
 import {
   AgeIndicator, CopyButton, METHOD_LABEL, Money, Section, WithdrawalStatusBadge, When, fullDestination, maskedDestination, toNum,
@@ -184,6 +185,8 @@ export function WithdrawalReview({ row }: { row: WithdrawalRow }) {
           </div>
         </Section>
       )}
+
+      <StuckWithdrawalTools id={w.id} status={w.status} amount={String(w.amount_kes)} username={row.username} />
 
       {q.isLoading ? (
         <ReviewSkeleton />

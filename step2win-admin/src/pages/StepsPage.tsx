@@ -27,6 +27,9 @@ import { consoleApi } from '../components/users/api'
 import type { StepLog } from '../components/users/types'
 import { InlineLink, SectionTitle, Timestamp, UserCell } from '../components/users/shared'
 import { daysAgo, downloadCsv, formatDay, humanize, isoDay, useDebounced } from '../components/users/utils'
+import { StepCorrectionModal } from '../components/users/StepCorrectionModal'
+import { ActionNotice } from '../components/users/shared'
+import { usePermissions } from '../lib/permissions'
 
 type Range = '7' | '30' | '90' | 'custom'
 const RANGES = [
@@ -288,6 +291,9 @@ export function StepsPage() {
 
 function DayDrawer({ row, onClose, onOpenUser }: { row: StepLog | null; onClose: () => void; onOpenUser: (id: number) => void }) {
   const navigate = useNavigate()
+  const { can } = usePermissions()
+  const [correcting, setCorrecting] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
   const hourlyQ = useQuery({
     queryKey: ['admin', 'step-hourly', row?.user_id, row?.date],
     queryFn: () => consoleApi.stepHourly(row!.user_id, row!.date),
@@ -306,12 +312,14 @@ function DayDrawer({ row, onClose, onOpenUser }: { row: StepLog | null; onClose:
       footer={row && (
         <>
           {row.is_suspicious && <Button size="sm" variant="secondary" leftIcon={<ShieldAlert size={13} />} onClick={() => navigate('/fraud')}>Review in anti-cheat</Button>}
+          {can('steps.correct') && <Button size="sm" variant="secondary" leftIcon={<Footprints size={13} />} onClick={() => setCorrecting(true)}>Correct day</Button>}
           <Button size="sm" variant="primary" onClick={() => onOpenUser(row.user_id)}>Open user</Button>
         </>
       )}
     >
       {row && (
         <div>
+          {notice && <div className="mb-3"><ActionNotice tone="success" onDismiss={() => setNotice(null)}>{notice}</ActionNotice></div>}
           <SectionTitle>Day record</SectionTitle>
           <DetailRow label="Steps" value={<span className="num font-semibold">{formatNumber(row.steps)}</span>} />
           <DetailRow label="Source" value={sourceLabel(row.source)} />
@@ -371,6 +379,10 @@ function DayDrawer({ row, onClose, onOpenUser }: { row: StepLog | null; onClose:
           )}
           <div className="mt-4"><InlineLink onClick={() => onOpenUser(row.user_id)}>See this user's 30-day activity</InlineLink></div>
         </div>
+      )}
+      {row && correcting && (
+        <StepCorrectionModal target={{ userId: row.user_id, username: row.username, date: String(row.date).slice(0, 10), steps: row.steps }}
+          onClose={() => setCorrecting(false)} onDone={(msg) => { setCorrecting(false); setNotice(msg) }} />
       )}
     </SlideOver>
   )
