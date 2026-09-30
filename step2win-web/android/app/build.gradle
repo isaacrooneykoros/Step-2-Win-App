@@ -1,4 +1,6 @@
 apply plugin: 'com.android.application'
+// Phase 1c: the Health Connect gateway is Kotlin (the SDK is coroutine-based).
+apply plugin: 'org.jetbrains.kotlin.android'
 
 // Release signing: the upload keystore lives OUTSIDE the repo. Lookup order:
 //   1. env STEP2WIN_KEYSTORE_PROPERTIES (path to a keystore.properties file)
@@ -82,6 +84,10 @@ android {
     }
 }
 
+kotlin {
+    jvmToolchain(21)
+}
+
 repositories {
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
@@ -94,6 +100,12 @@ dependencies {
     implementation 'com.google.android.play:integrity:1.4.0'
     // Background step sync (periodic, survives reboots and app kills, respects Doze).
     implementation 'androidx.work:work-runtime:2.10.3'
+    // Phase 1c: Health Connect (read-only, opt-in). Stable 1.1.0; minSdk 26 like the app.
+    implementation 'androidx.health.connect:connect-client:1.1.0'
+    // connect-client brings Guava at runtime; its "listenablefuture 9999.0-empty" stub then
+    // hides ListenableFuture from WorkManager's Worker at compile time. Same version, on
+    // the compile classpath too (no size change: it is already in the APK).
+    implementation 'com.google.guava:guava:31.1-android'
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"

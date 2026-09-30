@@ -5,6 +5,7 @@ import {
   FileText,
   Footprints,
   Gauge,
+  HeartPulse,
   Home,
   KeyRound,
   LifeBuoy,
@@ -19,6 +20,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import type { User } from '../../types';
+import type { HealthSourcesStatus } from '../../plugins/deviceStepCounter';
 import type { ThemeMode } from '../../config/theme';
 import { formatSteps } from '../../lib/format';
 import { ListGroup, ListRow } from '../ui/ListRow';
@@ -183,8 +185,11 @@ export function ActivitySection({
   onOpenStepTracking,
   onOpenCalibration,
   onCellular = false,
+  healthSources = null,
 }: {
   onCellular?: boolean;
+  /** Phase 1c: Health Connect / Apple Health status; null on the web or an older app build. */
+  healthSources?: Pick<HealthSourcesStatus, 'state' | 'platform'> | null;
   profile: User | undefined;
   stepPermission: string;
   outboxCount: number;
@@ -224,6 +229,19 @@ export function ActivitySection({
         onClick={onOpenCalibration}
         chevron
       />
+      {healthSources && (
+        <ListRow
+          leading={<IconTile icon={HeartPulse} tone={healthSources.state === 'connected' ? 'brand' : 'neutral'} size="sm" />}
+          title="Connected sources"
+          subtitle={healthSources.platform === 'ios' ? 'Apple Health: Apple Watch and other apps' : 'Health Connect: watches, bands and fitness apps'}
+          trailing={
+            <Pill tone={healthSources.state === 'connected' ? 'success' : healthSources.state === 'off' ? 'neutral' : 'warning'}>
+              {healthSources.state === 'connected' ? 'Connected' : healthSources.state === 'off' ? 'Off' : 'Needs attention'}
+            </Pill>
+          }
+          to="/settings/connected-sources"
+        />
+      )}
       <ListRow
         leading={<IconTile icon={UploadCloud} tone={outboxCount > 0 ? 'warning' : 'neutral'} size="sm" />}
         title="Step sync & outbox"

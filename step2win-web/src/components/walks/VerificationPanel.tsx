@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Hourglass, Info, ShieldCheck } from 'lucide-react';
+import { Ban, Hourglass, Info, ShieldCheck, Smartphone, Watch } from 'lucide-react';
 import { stepsService } from '../../services/api/steps';
 import type { DayBreakdown } from '../../types';
 import { formatSteps } from '../../lib/format';
@@ -105,6 +105,38 @@ function DayBreakdownView({ day }: { day: DayBreakdown }) {
         </Pill>
       )}
       <ReasonList className="mt-4" reasons={day.reasons} />
+      {day.sources && day.sources.length > 0 && <SourcesList sources={day.sources} />}
+    </div>
+  );
+}
+
+/** Phase 1c: the other apps / devices that reported steps for the day (Health Connect / Apple Health). */
+function SourcesList({ sources }: { sources: NonNullable<DayBreakdown['sources']> }) {
+  return (
+    <div className="mt-4 border-t border-border-light pt-3">
+      <p className="eyebrow mb-2">Other apps and devices</p>
+      <ul className="space-y-2">
+        {sources.map((source, index) => {
+          const Icon = source.status !== 'counted' ? Ban : source.kind === 'wearable' ? Watch : Smartphone;
+          const note =
+            source.status !== 'counted'
+              ? source.reason === 'manual'
+                ? 'typed in by hand, not counted'
+                : 'not counted'
+              : source.kind === 'wearable'
+                ? 'watch or band'
+                : 'confirms your phone';
+          return (
+            <li key={`${source.label}-${index}`} className="flex items-center gap-3">
+              <Icon size={16} className={source.status === 'counted' ? 'shrink-0 text-brand' : 'shrink-0 text-text-muted'} aria-hidden />
+              <p className="min-w-0 flex-1 truncate text-callout text-text-secondary">
+                {source.label} <span className="text-text-muted">· {note}</span>
+              </p>
+              <span className="num shrink-0 text-caption text-text-muted">{formatSteps(source.steps)}</span>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

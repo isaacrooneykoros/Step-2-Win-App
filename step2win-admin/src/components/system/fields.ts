@@ -93,6 +93,8 @@ export const FIELDS: FieldDef[] = [
       { value: 'enforce', label: 'Enforce: failed devices count for goals only' },
     ],
     hint: 'Enforce only after the Play Integrity service account is configured and the shadow verdicts look right. Enforced, steps from sessions that fail the check stop counting toward challenges; goals and streaks are unaffected.' },
+  { key: 'health_trusted_origins', label: 'Trusted health apps (Health Connect / Apple Health)', kind: 'text', section: 'payouts', risky: true, max: 4000,
+    hint: 'One app per line: its package or bundle id, a trailing * for a prefix, then "wearable" if the app only records watches or bands, then # and a label. Watch and band steps from these apps count toward challenges; phone-app steps only confirm. Steps typed in by hand never count. Leave empty to use the built-in list.' },
 
   { key: 'support_sla_urgent_hours', label: 'Reply target: urgent', kind: 'int', section: 'support', unit: 'hours', min: 1, max: 720 },
   { key: 'support_sla_high_hours', label: 'Reply target: high', kind: 'int', section: 'support', unit: 'hours', min: 1, max: 720 },

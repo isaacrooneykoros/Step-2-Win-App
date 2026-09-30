@@ -221,7 +221,7 @@ streaks and XP keep using it) falls in exactly one tier (`HealthRecord.tier_*`):
 | Tier | What | Counts toward challenges |
 |---|---|---|
 | `grandfathered` | credit the day already had when Phase 1b first saw it (cut-over) | yes |
-| `wearable` | reserved for Phase 1c (attested watch / band) | yes |
+| `wearable` | Phase 1c: watch / band steps from a trusted Health Connect / Apple Health app (see "Phase 1c") | yes |
 | `walk_session` | steps of a user-started walk the server verified | yes |
 | `sensor_verified` | phone-counter steps covered by on-device walking evidence (Android per-minute gait attribution; iOS CoreMotion, see below) | yes |
 | `unverified` | no evidence (app closed and nothing measuring, old app, web), motion that didn't look like walking, vehicle travel, a device failing integrity under the enforce policy | **no** |
@@ -449,6 +449,248 @@ monotonic counter. Until then iOS sessions stay `unchecked` and are never blocke
 sensor timestamps (Android `TYPE_STEP_DETECTOR` `SensorEvent.timestamp`); batched
 counter events are `arrival_batched`. Burst rules still apply only to `live_timed`.
 
+## Phase 1c: Health Connect and Apple Health as extra step sources
+
+Code: `apps/steps/health_sources.py` (allowlist, validation, provenance summary,
+reconciliation), `apps/steps/health_source_views.py` (`/api/steps/health-sources/`),
+`apps/steps/evidence.py::refresh_day` + `compute_tiers` (wiring), `apps/steps/verification.py`
+(reasons + `sources`). Android: `HealthSourceCore.java` (pure logic), `HealthSourceReader.java`
+(orchestration), `HealthConnectGateway.java` / `HealthConnectGatewayImpl.kt` (SDK),
+`HealthConnectPermissions.kt`, `HealthSources.java` (state, reads), uploads in
+`StepSyncEngine.java`, background reads in `StepSyncWorker.java`, privacy screen
+`HealthPermissionsRationaleActivity.java`. iOS: `HealthKitSources` in
+`DeviceStepCounterPlugin.swift`. Web: `screens/ConnectedSourcesScreen.tsx`,
+`services/healthSources.ts`. Tests: `apps/steps/tests/test_phase1c.py`,
+`android/app/src/test/.../HealthSourceTest.java`.
+
+### What it is (and isn't)
+
+- **Opt-in, read-only.** Nothing is read until the user taps "Connect" on Settings >
+  Activity > Connected sources, after an explanation screen; the permission prompts are
+  Health Connect's and Apple's own. Step2Win never writes health data.
+- Read: steps and exercise sessions / workouts (walking, running, hiking, treadmill,
+  wheelchair) of the **last 3 days**, each with its data origin (the app that wrote it),
+  device type (phone / watch / band / ring / ...) and recording method (automatic /
+  active / manual / unknown; iOS: `HKMetadataKeyWasUserEntered`). Workout routes are
+  reduced **on the phone** to a point count and a distance: coordinates never leave it.
+- Our own sensor never waits on it or depends on it. Late health data only confirms.
+
+### Trust by provenance (server-side; the client's labels only inform)
+
+`classify(origin, device, method)`:
+
+| Case | Trust | Effect |
+|---|---|---|
+| recording method manual / user entered | `manual` | never counted (goals or money); reason `manual_entry_not_counted` |
+| origin not on the allowlist | `untrusted` | never counted; reason `untrusted_app_not_counted` (unknown apps are shown as "Other app", never by package id) |
+| our own package | `ignored` | skipped |
+| trusted origin, device watch / band / ring (or unknown device from a `wearable`-only app) | `trusted` / `wearable` | the `wearable` tier (counts toward challenges); reason `wearable_verified` |
+| trusted origin, phone / other device | `trusted` / `phone_app` | corroboration; extra steps count for goals only |
+
+**Allowlist** = admin setting Settings > Payout review > "Trusted health apps"
+(`SystemSettings.health_trusted_origins`, one per line: `<id>[*] [wearable]  # label`;
+`*` = prefix; empty = the built-in list). Built-in list and how each id was verified
+(2026-09-30):
+
+| Id | App | Verified by |
+|---|---|---|
+| `android`, `com.android.healthconnect.phone.*` | the phone's own Health Connect step recording (Android 14+ with SDK ext. 20; "android" before the June 2026 update, a per-app Synthetic Package Name after it) | developer.android.com Health Connect "Read data" guide |
+| `com.sec.android.app.shealth` | Samsung Health (Galaxy Watch data syncs in under this origin) | Google Play listing (HTTP 200, title "Samsung Health") |
+| `com.google.android.apps.fitness` | Google Fit | Google Play listing |
+| `com.fitbit.FitbitMobile` | Fitbit (now "Google Health (Fitbit)") | Google Play listing; iOS: iTunes lookup of the same bundle id |
+| `com.garmin.android.apps.connectmobile` (wearable) | Garmin Connect | Google Play listing |
+| `com.xiaomi.wearable` (wearable) | Mi Fitness (Xiaomi Wear) | Google Play listing |
+| `com.huami.watch.hmwatchmanager` (wearable) | Zepp (Amazfit) | Google Play listing |
+| `com.xiaomi.hm.health` (wearable) | Zepp Life (Mi Band) | Google Play listing |
+| `com.huawei.health` | Huawei Health | **not on Google Play** (AppGallery only; the id is Huawei's published package, not verified against a store page here). Huawei Health rarely writes to Health Connect. |
+| `com.strava` | Strava (workouts with GPS routes) | Google Play listing |
+| `com.apple.health.*` | Apple Health's own sources (iPhone and Apple Watch; each device is `com.apple.health.<UUID>`) | Apple HealthKit behaviour (source bundle ids); verify on a device |
+| `com.strava.stravaride` | Strava (iOS) | iTunes lookup API |
+| `com.garmin.connect.mobile` (wearable) | Garmin Connect (iOS) | iTunes lookup API |
+| `com.huami.watch` (wearable) | Zepp (iOS) | iTunes lookup API |
+| `HM.wristband` (wearable) | Zepp Life (iOS) | iTunes search API |
+| `com.xiaomi.miwatch.pro` (wearable) | Mi Fitness (iOS) | iTunes search API |
+| `com.huawei.iossporthealth` | Huawei Health (iOS) | iTunes lookup API |
+
+The Health Connect app itself is `com.google.android.apps.healthdata` (Play listing
+verified; `HealthConnectClient.DEFAULT_PROVIDER_PACKAGE_NAME` in connect-client 1.1.0).
+
+### Merging without double counting (`health_sources.plan_day`)
+
+- Per hour, trusted sources are merged by **max**, never summed (a Galaxy Watch and
+  Samsung Health's phone count of the same walk are the same steps). The phone sends one
+  entry per (hour, origin, device type), bounded by Health Connect's per-origin hourly
+  aggregate (its own de-duplication) / Apple's per-source statistics.
+- Against our sensor, the day is merged by **max**: counted = max(our sensor's raw day
+  total (max over install streams), the trusted per-hour-max total). Not hour-by-hour
+  against our own sensor: our ledger puts catch-up steps (app killed, read on reopen) in
+  the hour it read them, so a per-hour max against another app's timeline would count the
+  same steps twice. Known, conservative limitation: a phone-only morning plus a
+  watch-only afternoon counts max(phone, watch) unless a phone app (Samsung Health, Google
+  Fit, Health Connect's own recording) also recorded the morning.
+- Extra credit = what trusted sources saw beyond our sensor, re-derived on every refresh
+  (never compounded): `HealthRecord.steps` = our sensor's credit + extra, capped at
+  60,000. `anticheat.health.applied_extra` keeps the part that came from health sources;
+  the sync path works on the sensor part only (`steps - applied_extra`).
+- Tiers (`compute_tiers(wearable=, workout_verified=, health_app_unverified=)`):
+  - **wearable** = trusted watch/band steps of the day. In hours a watch covered, the
+    phone's evidence buckets are consumed first from `verified`, then `walk`, `unknown`,
+    `shake`, `vehicle` (the watch saw those steps), so a watch never turns the same hour's
+    shaken phone steps into money while the phone also saw real walking.
+  - **corroboration** (Android): an hour whose phone-counter steps our gait couldn't judge
+    (`unknown`) moves to `sensor_verified` when a trusted *phone* app counted the same
+    hour within **±15%** and ≥ 250 steps (`health_app_confirmed`). Never `shake` or
+    `vehicle` steps: another app reading the same step counter proves the counter counted,
+    not that someone walked. iOS phone steps are already `sensor_verified`.
+  - **workouts**: a trusted, non-manual walking / running / hiking workout with a GPS route
+    (≥ 10 points, ≥ 300 m, route and reported distance within 35%), a plausible pace
+    (0.3-2.8 m/s walking/hiking, up to 6.0 m/s running) and stride (0.30-2.2 m) verifies
+    the phone steps of its window like a walk (`walk_session` tier, reason
+    `workout_verified`): Android takes them from that window's `unknown`, `verified`, `walk`
+    buckets. Treadmill / other types don't verify (no route).
+  - steps only a phone app counted beyond our sensor: goals only
+    (`health_app_not_verified`), **also while `STEP_MONEY_REQUIRES_EVIDENCE` is off**
+    (they were never our credit; with the rule off everything else counts as before).
+- **Disagreement** (review signal, never a punishment): phone-app steps ≥ 10,000 above
+  max(our sensor, wearables) and ≥ 2.5× it (e.g. Health Connect 40k vs sensor 4k, no
+  watch): that excess is withheld (not credited), reason `sources_disagree_under_review`,
+  MEDIUM `health_sources_disagree` flag. Our own sensor's steps still count; no trust
+  change, no suspicion. Payout holds' existing rule (large win + open MEDIUM+ flag) decides
+  about money.
+- **Huge watch day**: wearable steps ≥ 20,000 above our sensor and ≥ 3× it are credited
+  (a phone left at home is normal) with a MEDIUM `health_wearable_far_above_phone` flag
+  for review before large payouts. No user-facing reason (nothing is withheld).
+- Device integrity: a day blocked under the enforce policy moves wearable / workout steps
+  to `unverified` too (the upload came from the same unverified app).
+
+### API
+
+`POST /api/steps/health-sources/` (step session required: the server-registered platform
+must match the provider; 403 `SESSION_REQUIRED` / `SESSION_EXPIRED`, 400
+`HEALTH_SOURCES_INVALID`):
+
+```json
+{"session_id": "…", "session_token": "…", "date": "2026-09-29", "tz_offset_minutes": 180,
+ "health_sources": {
+   "provider": "health_connect", "platform": "android", "read_at": "2026-09-29T09:10:00Z",
+   "tz_offset_minutes": 180,
+   "hours": [{"hour": 9, "origin": "com.sec.android.app.shealth", "steps": 4000,
+              "device": "watch", "method": "automatic"}],
+   "workouts": [{"start": "2026-09-29T03:00:00Z", "end": "2026-09-29T03:40:00Z",
+                 "type": "running", "origin": "com.strava", "device": "phone",
+                 "method": "active", "distance_m": 6000, "steps": 5000,
+                 "route": {"points": 400, "distance_m": 5950}}]}}
+```
+
+Validation: provider `health_connect` (android) / `healthkit` (ios) and it must match the
+session's platform; ≤ 288 hour entries, ≤ 16 origins, ≤ 20 workouts (else 400); per entry
+steps ≤ 14,400 (4 steps/s for an hour, clipped); hours in the local future, unknown
+hours, malformed origins, naive timestamps and windows outside the local day are dropped
+(counted in `dropped`); a workout across midnight is clipped to the day with its distance
+and steps pro-rated; ≤ 8 days back. The same summary may also ride along as
+`health_sources` in `POST /api/steps/sync/` (a bad one never fails the step sync; it is
+redacted from `StepSyncEvent.raw_payload`). Response: `{day, verification}`.
+
+`GET /api/steps/health-sources/?days=N` (≤ 14): per day `{date, provider, read_at,
+received_at, origins [{label, trust, kind, steps, counted_steps}], not_counted {manual,
+untrusted}, counted_extra_steps, wearable_steps, corroborated_steps, workouts, under_review}`.
+
+`DELETE /api/steps/health-sources/` ("Remove imported data"): deletes every stored
+summary and recomputes those days from our own sensor.
+
+A day first created by a health upload (a watch-only day) is marked
+`anticheat.created_by = "health_sources"`; its first sensor sync is treated as the
+day's first (velocity bounded by the time since local midnight), so it isn't penalised.
+
+### Stored data (for the admin evidence timeline)
+
+- `HealthSourceDay` (one per user-day, `steps.0015`): `platform`, `provider`, `data` = the
+  cleaned upload (shape above plus `v`, `dropped`), `summary` = `{origins [{origin, label,
+  trust, kind, devices, steps, counted_steps}], not_counted, wearable_total,
+  phone_app_total, trusted_total, dropped}`, `uploads`, timestamps.
+- `HealthRecord.anticheat["health"]` (compact, recomputed at every refresh): `{v, provider,
+  applied_extra, applied_wearable_extra, applied_phone_app_extra, trusted_total,
+  wearable_total, sensor_raw, corroborated, workout_steps, withheld, disagreement,
+  wearable_review, not_counted {manual, untrusted}, origins [{label, trust, kind, steps,
+  counted_steps}] (≤ 12), workouts [{type, label, verdict, reason, verified_steps, start,
+  end}] (≤ 10)}`.
+- Breakdown (`GET /api/steps/verification/`): new reason codes `wearable_verified`,
+  `workout_verified`, `health_app_confirmed` (positive), `health_app_not_verified`,
+  `manual_entry_not_counted`, `untrusted_app_not_counted` (info),
+  `sources_disagree_under_review` (review), and `sources [{label, kind, status
+  counted|not_counted, reason trusted|manual|untrusted, steps}]`.
+- Deleted with the account (`account_deletion._delete_activity_data`: `health_sources`)
+  and by "Remove imported data".
+
+### Failure modes (nothing may break)
+
+| Situation | Behaviour |
+|---|---|
+| Android 9-13 without the Health Connect app | state `needs_install`: one-tap Play Store (`market://details?id=com.google.android.apps.healthdata&url=healthconnect%3A%2F%2Fonboarding`, web fallback); declining changes nothing |
+| Health Connect too old | `needs_update`, same Play Store link |
+| Android 8, or Android 14+ where Health Connect is unavailable (e.g. work profile) | `unavailable`; the app says our sensor carries on |
+| Permission denied / revoked in Health Connect | `permission_denied`; cached days and the changes token are dropped; "Allow access" re-opens Health Connect's prompt |
+| Provider crash, slow provider | Android: every SDK call has a 15 s timeout and a whole read a 45 s budget (today first); the read runs **after** our own step upload (health summaries go up in a second, health-only pass); a failed workout read keeps the cached workouts. iOS: 25 s per read. A failed read keeps the last good days; failures only set a status |
+| Budget phones (Tecno / Infinix / itel) with no Health Connect data | nothing to read: our sensor, gait evidence and walks work exactly as before |
+| Samsung / Google Fit batch syncs arriving late, near a deadline | our sensor keeps counting and uploading; late health data only adds confirmation / wearable steps when it arrives |
+| Background | Android: read in the WorkManager job only when `READ_HEALTH_DATA_IN_BACKGROUND` is granted and the feature is available (≤ every 30 min), else on app open / resume (≤ every 2 min). Other apps' routes can't be read in the background ("consent required"): a known route from an earlier foreground read is kept. iOS: HKObserverQuery + hourly background delivery caches the days; the app uploads on the next open |
+| Battery / data | last 3 days only; Health Connect changes token: only changed days (plus today) are re-read; a day's summary is uploaded only when its content hash changed, today's at most every 10 minutes |
+| Old app versions | send nothing: no change |
+
+### Store submission (owner)
+
+**Google Play (Health Connect).** Permissions declared in `AndroidManifest.xml` (read
+only, all used):
+
+- `android.permission.health.READ_STEPS` (steps, required for the feature)
+- `android.permission.health.READ_EXERCISE` (walking / running / hiking sessions)
+- `android.permission.health.READ_EXERCISE_ROUTES` (route of those sessions, reduced to
+  point count + distance on the phone)
+- `android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND` (read in the periodic sync
+  job instead of only when the app is open)
+
+Also in the manifest: `HealthPermissionsRationaleActivity` with
+`androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE` (Android 13 and lower) and the
+`ViewPermissionUsageActivity` activity-alias with `android.intent.action.VIEW_PERMISSION_USAGE`
++ category `android.intent.category.HEALTH_PERMISSIONS`, guarded by
+`android.permission.START_VIEW_PERMISSION_USAGE` (Android 14+); `<queries>` for
+`com.google.android.apps.healthdata`.
+
+Steps:
+1. Play Console > App content > **Health Connect** (health apps declaration): declare the
+   four permissions above with the justification text in
+   `backend/legal/HEALTH_CONNECT_DECLARATION.md` (drafted by the Compliance agent on its own
+   branch). Access type: read only; purpose: fitness challenge step counting and
+   verification; no advertising, no sale, no sharing with data brokers.
+2. Privacy policy (public URL) must describe Health Connect data use (what is read, why,
+   what is sent to the server, retention, deletion). The in-app rationale screen mirrors it.
+3. Data safety form: "Health and fitness > Fitness info" collected, not shared, processed
+   for app functionality and fraud prevention; users can request deletion (in-app).
+4. Health Connect may require a review video showing the permission flow: Settings >
+   Activity > Connected sources > Connect Health Connect.
+
+**Apple App Store (HealthKit).** Done in the repo: `App.entitlements` has
+`com.apple.developer.healthkit` (true), `com.apple.developer.healthkit.access` (empty: no
+clinical records) and `com.apple.developer.healthkit.background-delivery` (true);
+`Info.plist` has `NSHealthShareUsageDescription` (read only; no
+`NSHealthUpdateUsageDescription` because nothing is written) and
+`LSApplicationQueriesSchemes` `x-apple-health`. To do in Xcode / the developer portal
+(not possible on this machine):
+1. Apple Developer > Identifiers > the app id > enable **HealthKit** (and its Background
+   Delivery option); regenerate provisioning profiles.
+2. Xcode > target App > Signing & Capabilities: add **HealthKit** (tick "Background
+   Delivery"); confirm it points at `App/App.entitlements` and that `HealthKit.framework` is
+   linked (autolinking via `import HealthKit`).
+3. Build on a device and verify: the Health access sheet appears only after "Connect
+   Apple Health"; steps from iPhone and Apple Watch arrive with `com.apple.health.*`
+   sources and device models "iPhone" / "Watch"; `HKMetadataKeyWasUserEntered` entries
+   show as "manual"; a workout with a route yields a point count; background delivery
+   wakes the app (Xcode > Debug > Simulate Background Fetch is not enough: walk with the
+   watch and check `last_read_at`).
+4. App Store Connect > App Privacy: Health & Fitness data collected, linked to the user,
+   used for app functionality; not used for tracking. Review notes: explain the opt-in
+   Connected sources screen. HealthKit data must not be used for advertising or sold.
+
 ## Security hygiene
 
 `StepSyncEvent.raw_payload` no longer stores the plaintext `session_token` (replaced by
@@ -509,6 +751,26 @@ Nightly job `privacy-ip-retention`; migration `users.0015` converted existing ro
 edges, cluster membership and household marks are deleted when the account is deleted.
 
 ## Changelog
+
+### Phase 1c (2026-09-30) — Health Connect and Apple Health, with provenance
+
+1. Opt-in, read-only extra step sources: Health Connect (Android, connect-client 1.1.0)
+   and HealthKit (iOS): steps per hour / origin / device / recording method and workouts
+   with a route summary, last 3 days, incremental.
+2. Server-side trust: admin-editable allowlist; manual entries and unknown apps never
+   count; trusted watches / bands fill the `wearable` tier; trusted phone apps corroborate
+   (±15%, unmeasured steps only); route-verified workouts count like walks.
+3. Max, never sum (per hour across sources, per day against our sensor); extra credit
+   re-derived at every refresh; disagreement = MEDIUM flag + withheld excess + kind reason;
+   huge watch days = MEDIUM flag only.
+4. `/api/steps/health-sources/` (POST / GET / DELETE), optional `health_sources` in the
+   sync payload, account deletion, "why" reasons + `sources`.
+5. App: Settings > Activity > Connected sources (explanation, install / update / allow
+   flows, apps contributing, read now, disconnect, remove imported data); sources in the
+   day breakdown.
+
+Migrations: `steps.0015_phase1c_health_sources` (HealthSourceDay),
+`admin_api.0011_phase1c_health_sources` (SystemSettings.health_trusted_origins).
 
 ### Phase 1b (2026-09-29) — money needs real walking evidence
 

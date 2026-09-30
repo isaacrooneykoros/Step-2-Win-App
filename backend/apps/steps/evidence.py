@@ -4,7 +4,8 @@ Every credited step of a day falls in one tier:
 
 - ``grandfathered``   credit the day already had when it first met Phase 1b (days and
                       part-days before the cut-over keep their credit in full).
-- ``wearable``        reserved for Phase 1c (attested watch / band data).
+- ``wearable``        Phase 1c: watch / band steps from a trusted Health Connect / Apple
+                      Health origin (apps/steps/health_sources.py).
 - ``walk_session``    steps of a user-started walk the server verified (GPS route +
                       motion + consistency checks, apps/steps/walks.py).
 - ``sensor_verified`` phone step-counter steps covered by on-device walking evidence
@@ -225,8 +226,20 @@ def compute_tiers(
     server_vehicle_hours: set[int] | None = None,
     integrity_blocked: bool = False,
     no_evidence_reason: str = "app_update_needed",
+    wearable: int = 0,
+    workout_verified: int = 0,
+    health_app_unverified: int = 0,
 ) -> dict[str, Any]:
     """Split a day's credited steps into tiers. Pure function (tested directly).
+
+    Phase 1c (apps/steps/health_sources.py) inputs, all 0 without health sources:
+    wearable              trusted watch / band steps of the day (the `wearable` tier).
+    workout_verified      phone steps verified by a trusted workout's GPS route (counted
+                          in the `walk_session` tier, like a walk).
+    health_app_unverified credited steps that only a phone health app counted (beyond our
+                          sensor): goals only, explained as `health_app_not_verified`.
+    `evidence` is then the per-hour evidence already adjusted by health_sources.plan_day
+    (hours a wearable covered, hours a phone app corroborated).
 
     credited            HealthRecord.steps (credited, capped).
     grandfathered       credit the day had when it entered Phase 1b.
@@ -255,40 +268,46 @@ def compute_tiers(
         vehicle += int(entry.get("vehicle", 0) or 0)
         walk_bucket += int(entry.get("walk", 0) or 0)
 
+    wear = max(0, int(wearable))
+    workout = max(0, int(workout_verified))
     walk_tier = 0
     sensor = 0
     if evidence_source == "ios_coremotion":
-        # Apple's motion coprocessor counts steps from its own gait model; HealthKit
-        # provenance arrives in Phase 1c. Walks can still add a verified route.
-        walk_tier = max(0, int(walk_verified))
+        # Apple's motion coprocessor counts steps from its own gait model (the iPhone's
+        # own steps); Apple Watch steps from HealthKit are the wearable tier.
+        walk_tier = max(0, int(walk_verified)) + workout
         sensor = post
     elif evidence_source == "android_gait_v1":
         walk_tier = min(max(0, int(walk_verified)), walk_bucket)
         fallback = min(max(0, int(walk_gait_fallback)), max(0, walk_bucket - walk_tier))
+        walk_tier += workout
         sensor = verified + fallback
     else:
         # No device evidence (old app, web): only verified walks can count.
-        walk_tier = max(0, int(walk_verified))
+        walk_tier = max(0, int(walk_verified)) + workout
 
     reasons_steps = {
         "vehicle": vehicle,
         "unverified_motion": shake,
         "device_not_verified": 0,
+        "health_app_not_verified": max(0, int(health_app_unverified)),
     }
     if integrity_blocked:
-        reasons_steps["device_not_verified"] = min(post, walk_tier + sensor)
+        reasons_steps["device_not_verified"] = min(post, wear + walk_tier + sensor)
+        wear = 0
         walk_tier = 0
         sensor = 0
 
-    walk_tier = min(walk_tier, post)
-    sensor = min(sensor, post - walk_tier)
-    eligible = grandfathered + walk_tier + sensor
+    wear = min(wear, post)
+    walk_tier = min(walk_tier, post - wear)
+    sensor = min(sensor, post - wear - walk_tier)
+    eligible = grandfathered + wear + walk_tier + sensor
     unverified = credited - eligible
 
     # Explain the unverified part (largest known causes first, remainder = no evidence).
     remaining = unverified
     explained: dict[str, int] = {}
-    for code in ("device_not_verified", "vehicle", "unverified_motion"):
+    for code in ("device_not_verified", "vehicle", "unverified_motion", "health_app_not_verified"):
         take = min(remaining, max(0, reasons_steps[code]))
         if take:
             explained[code] = take
@@ -300,7 +319,7 @@ def compute_tiers(
     return {
         "tiers": {
             "grandfathered": grandfathered,
-            "wearable": 0,
+            "wearable": wear,
             "walk_session": walk_tier,
             "sensor_verified": sensor,
             "unverified": unverified,
@@ -414,11 +433,45 @@ def refresh_day(record, *, save: bool = True) -> dict[str, Any]:
     evidence = day_evidence(meta)
     source = meta.get("evidence_source")
     integrity = meta.get("integrity") or {}
+
+    # Phase 1c: Health Connect / Apple Health. The day's credit = our sensor's credit
+    # plus what trusted sources saw beyond our sensor (max, never a sum), capped.
+    from . import health_sources
+    from .anti_cheat import DAILY_STEP_CAP
+
+    health_plan = health_sources.day_plan_for_record(record, meta, evidence)
+    wearable = workout = health_app_extra = 0
+    tier_evidence = evidence
+    if health_plan is not None:
+        sensor_credit = health_plan["sensor_credit"]
+        wanted = health_plan["extra_wearable"] + health_plan["extra_phone_app"]
+        credited = min(max(DAILY_STEP_CAP, sensor_credit), sensor_credit + wanted)
+        applied = credited - sensor_credit
+        applied_wearable = min(applied, health_plan["extra_wearable"])
+        applied_phone_app = applied - applied_wearable
+        wearable = health_plan["wearable_steps"]
+        workout = health_plan["workout_steps"]
+        health_app_extra = applied_phone_app
+        tier_evidence = health_plan["adjusted_evidence"]
+        meta["health"] = health_sources.public_summary(
+            health_plan["summary"],
+            health_plan,
+            applied_wearable=applied_wearable,
+            applied_phone_app=applied_phone_app,
+            provider=health_plan["stored"].provider,
+        )
+        record.steps = credited
+    elif meta.get("health"):
+        # Imported data removed: back to our sensor's own credit.
+        credited = max(0, credited - int(meta["health"].get("applied_extra", 0) or 0))
+        meta.pop("health", None)
+        record.steps = credited
+
     result = compute_tiers(
         credited=credited,
         grandfathered=int(p1b.get("grandfathered", 0) or 0),
         evidence_source=source,
-        evidence=evidence,
+        evidence=tier_evidence,
         walk_verified=walk_verified,
         walk_gait_fallback=walk_fallback,
         server_vehicle_hours=vehicle_hours,
@@ -428,13 +481,19 @@ def refresh_day(record, *, save: bool = True) -> dict[str, Any]:
             if meta.get("platform") == "web"
             else "app_update_needed"
         ),
+        wearable=wearable,
+        workout_verified=workout,
+        health_app_unverified=health_app_extra,
     )
     tiers = result["tiers"]
     eligible = result["eligible"]
     cutover = cutover_date()
     full_credit = (not money_requires_evidence()) or (cutover is not None and record.date < cutover)
     if full_credit:
-        eligible = credited
+        # Every credited step counts toward challenges, except steps that only another
+        # phone app counted: those were never "our" credit, so they stay goals-only even
+        # while the evidence rule is off.
+        eligible = credited - min(credited, health_app_extra)
 
     hourly = dict(
         HourlyStepRecord.objects.filter(user_id=record.user_id, date=record.date).values_list(
@@ -462,6 +521,7 @@ def refresh_day(record, *, save: bool = True) -> dict[str, Any]:
     record.verification = build_breakdown(record)
     if save and record.pk:
         type(record).objects.filter(pk=record.pk).update(
+            steps=record.steps,
             anticheat=record.anticheat,
             tier_grandfathered=record.tier_grandfathered,
             tier_wearable=record.tier_wearable,

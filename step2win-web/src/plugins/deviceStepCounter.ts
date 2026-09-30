@@ -309,6 +309,48 @@ export interface DeviceStepCounterPlugin {
 
   // ── iOS: CoreMotion history for offline catch-up (the phone keeps ~7 days) ──
   getStepHistory(options: { days: number }): Promise<{ days: StepHistoryDay[] }>;
+
+  // ── Phase 1c: Health Connect (Android) / Apple Health (iOS), opt-in and read-only ──
+  healthSourcesStatus(): Promise<HealthSourcesStatus>;
+  /** Opts in and shows Health Connect's / Apple's own access screen (read only). */
+  healthSourcesConnect(): Promise<HealthSourcesStatus>;
+  /** Reads the last few days now. iOS also returns the payloads for the JS layer to upload. */
+  healthSourcesRead(options?: { force?: boolean }): Promise<HealthSourcesStatus & { days?: Record<string, HealthSourcesPayload> }>;
+  healthSourcesDisconnect(): Promise<HealthSourcesStatus>;
+  /** Android 9-13: opens the Play Store page of the Health Connect app. */
+  healthSourcesInstall(): Promise<{ opened: boolean }>;
+  /** Health Connect's own settings (Android) or the Health app (iOS). */
+  healthSourcesOpenSettings(): Promise<{ opened: boolean }>;
+}
+
+/** Where the phone's health store stands and what we last read from it (per device). */
+export interface HealthSourcesStatus {
+  platform: 'android' | 'ios';
+  provider: 'health_connect' | 'healthkit';
+  /** available | update_required | not_installed (Android 9-13) | unsupported */
+  availability: 'available' | 'update_required' | 'not_installed' | 'unsupported';
+  optedIn: boolean;
+  state: 'off' | 'unavailable' | 'needs_install' | 'needs_update' | 'permission_denied' | 'connected';
+  permissions: { steps: boolean; exercise: boolean; routes: boolean; background: boolean };
+  backgroundSupported: boolean;
+  lastReadAt: string | null;
+  lastUploadAt: string | null;
+  lastStatus: string;
+  /** Apps / devices that wrote steps today (as read on this phone; the server decides what counts). */
+  todayOrigins: Array<{ origin: string; steps: number; manual_steps: number; device: string }>;
+  /** Today's steps from those apps: per hour the max over apps, never the sum. */
+  todaySourceSteps: number;
+  note?: string;
+}
+
+/** One day's summary for POST /api/steps/health-sources/ (see backend/ANTICHEAT.md "Phase 1c"). */
+export interface HealthSourcesPayload {
+  provider: 'health_connect' | 'healthkit';
+  platform: 'android' | 'ios';
+  read_at: string;
+  tz_offset_minutes: number;
+  hours: Array<{ hour: number; origin: string; steps: number; device: string; method: string }>;
+  workouts: Array<Record<string, unknown>>;
 }
 
 /** Android: DeviceStepCounterPlugin.java (sensor + foreground service). iOS: DeviceStepCounterPlugin.swift (CMPedometer). */

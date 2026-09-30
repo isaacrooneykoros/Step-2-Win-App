@@ -687,6 +687,38 @@ export interface DayBreakdown {
   under_review: boolean;
   tiers: VerificationTiers;
   reasons: VerificationReason[];
+  /** Phase 1c: apps / devices from Health Connect or Apple Health (empty without them). */
+  sources?: VerificationSource[];
+}
+
+export interface VerificationSource {
+  label: string;
+  kind: 'wearable' | 'phone_app' | null;
+  status: 'counted' | 'not_counted';
+  /** trusted | manual | untrusted */
+  reason: string;
+  steps: number;
+}
+
+/** GET /api/steps/health-sources/ day: what the server made of a Health Connect / Apple Health upload. */
+export interface HealthSourceDay {
+  date: string;
+  provider: 'health_connect' | 'healthkit';
+  read_at: string | null;
+  received_at: string | null;
+  origins: Array<{
+    label: string;
+    trust: 'trusted' | 'manual' | 'untrusted' | 'ignored';
+    kind: 'wearable' | 'phone_app' | null;
+    steps: number;
+    counted_steps: number;
+  }>;
+  not_counted: { manual: number; untrusted: number };
+  counted_extra_steps: number;
+  wearable_steps: number;
+  corroborated_steps: number;
+  workouts: Array<{ type: string; label: string; verdict: string; reason: string | null; verified_steps: number }>;
+  under_review: boolean;
 }
 
 export interface VerificationResponse {

@@ -1,10 +1,12 @@
 from django.urls import path
 
-from . import security_endpoints, views, walk_views
+from . import health_source_views, security_endpoints, views, walk_views
 
 app_name = "steps"
 
 urlpatterns = [
+    # Phase 1c: Health Connect / Apple Health summaries (opt-in, read-only on the phone)
+    path("health-sources/", health_source_views.health_sources_view, name="health_sources"),
     # Phase 1b: reinstall resume, walks, privacy zone, step-session integrity
     path("resume/", views.resume_day, name="resume_day"),
     path("walks/", walk_views.list_walks, name="walk_list"),

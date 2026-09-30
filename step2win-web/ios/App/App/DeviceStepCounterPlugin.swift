@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import CoreMotion
 import CoreLocation
+import HealthKit
 import Capacitor
 
 /// iOS implementation of the 'DeviceStepCounter' plugin (Android: DeviceStepCounterPlugin.java).
@@ -49,7 +50,14 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
         CAPPluginMethod(name: "stopWalk", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestIntegrityToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getDeviceSignals", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "getSensorCapabilities", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "getSensorCapabilities", returnType: CAPPluginReturnPromise),
+        // Phase 1c: Apple Health (HealthKit), opt-in and read-only.
+        CAPPluginMethod(name: "healthSourcesStatus", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "healthSourcesConnect", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "healthSourcesRead", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "healthSourcesDisconnect", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "healthSourcesInstall", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "healthSourcesOpenSettings", returnType: CAPPluginReturnPromise)
     ]
 
     // Same key names as the Android SharedPreferences file.
@@ -108,6 +116,8 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
             manager.activityType = .fitness
             self.locationManager = manager
         }
+        // Phase 1c: background delivery needs its observer query registered at launch.
+        HealthKitSources.shared.startObserverIfOptedIn()
     }
 
     deinit {
@@ -939,5 +949,513 @@ public class DeviceStepCounterPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMan
     private func isExpiredIso(_ value: String) -> Bool {
         guard let date = parseIso(value) else { return true }
         return date < Date()
+    }
+
+    // MARK: Phase 1c: Apple Health (HealthKit)
+
+    @objc func healthSourcesStatus(_ call: CAPPluginCall) {
+        HealthKitSources.shared.status { call.resolve($0) }
+    }
+
+    /// Opt in and show Apple's own Health access sheet (read only). iOS never tells an app
+    /// whether read access was granted: "connected" means the sheet was answered; days
+    /// without data simply upload nothing.
+    @objc func healthSourcesConnect(_ call: CAPPluginCall) {
+        HealthKitSources.shared.requestAccess { _ in
+            HealthKitSources.shared.readDays(force: true) { _ in
+                HealthKitSources.shared.status { call.resolve($0) }
+            }
+        }
+    }
+
+    /// Reads the last few days (rate-limited unless force) and returns the cached payloads
+    /// for the JS layer to upload (POST /api/steps/health-sources/).
+    @objc func healthSourcesRead(_ call: CAPPluginCall) {
+        let force = call.getBool("force") ?? false
+        HealthKitSources.shared.readDays(force: force) { _ in
+            HealthKitSources.shared.status { status in
+                var result = status
+                result["days"] = HealthKitSources.shared.cachedDays()
+                call.resolve(result)
+            }
+        }
+    }
+
+    /// iOS has no API to revoke Health access: stop reading and forget what was read; the
+    /// user can also turn access off in the Health app (Sharing > Apps > Step2Win).
+    @objc func healthSourcesDisconnect(_ call: CAPPluginCall) {
+        HealthKitSources.shared.disconnect()
+        HealthKitSources.shared.status { call.resolve($0) }
+    }
+
+    @objc func healthSourcesInstall(_ call: CAPPluginCall) {
+        call.resolve(["opened": false]) // Apple Health is built in
+    }
+
+    @objc func healthSourcesOpenSettings(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            // The Health app (Sharing > Apps). Falls back to this app's Settings page.
+            if let health = URL(string: "x-apple-health://"), UIApplication.shared.canOpenURL(health) {
+                UIApplication.shared.open(health, options: [:]) { ok in call.resolve(["opened": ok]) }
+            } else if let settings = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(settings, options: [:]) { ok in call.resolve(["opened": ok]) }
+            } else {
+                call.resolve(["opened": false])
+            }
+        }
+    }
+}
+
+// MARK: - Phase 1c: HealthKit reader
+
+/// Reads steps and workouts other apps and devices wrote to Apple Health, with provenance
+/// (source bundle id, device model, HKMetadataKeyWasUserEntered), for the last few days.
+/// Read-only and opt-in. The server decides what counts (manual entries and unknown apps
+/// never do); nothing here is money logic. Kept in this file so no Xcode project change is
+/// needed for a new source file.
+///
+/// Must be verified in Xcode on a device (not possible on the machine this was written
+/// on): the HealthKit capability (+ "Background Delivery"), NSHealthShareUsageDescription,
+/// the observer query waking the app, and route reading.
+final class HealthKitSources {
+    static let shared = HealthKitSources()
+
+    private static let suite = "step2win_health_sources"
+    private static let keyOptedIn = "opted_in"
+    private static let keyRequested = "auth_requested"
+    private static let keyDays = "days_json"
+    private static let keyLastRead = "last_read_at"
+    private static let keyLastStatus = "last_status"
+    private static let maxDays = 3
+    private static let foregroundMinInterval: TimeInterval = 120
+    private static let maxHourSteps: Double = 14_400
+
+    private let store = HKHealthStore()
+    private let defaults = UserDefaults(suiteName: HealthKitSources.suite) ?? UserDefaults.standard
+    /// Serial: state and the (blocking) day-read orchestration.
+    private let queue = DispatchQueue(label: "com.step2win.app.healthkit")
+    /// Query callbacks must never land on `queue` while it waits for them.
+    private let callbackQueue = DispatchQueue(label: "com.step2win.app.healthkit.callbacks", attributes: .concurrent)
+    private var observer: HKObserverQuery?
+    private var reading = false
+
+    var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
+    var optedIn: Bool { defaults.bool(forKey: HealthKitSources.keyOptedIn) }
+
+    private var stepType: HKQuantityType? { HKObjectType.quantityType(forIdentifier: .stepCount) }
+
+    private var readTypes: Set<HKObjectType> {
+        var types = Set<HKObjectType>()
+        if let steps = stepType { types.insert(steps) }
+        if let distance = HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning) { types.insert(distance) }
+        types.insert(HKObjectType.workoutType())
+        types.insert(HKSeriesType.workoutRoute())
+        return types
+    }
+
+    func requestAccess(completion: @escaping (Bool) -> Void) {
+        guard isAvailable else {
+            defaults.set(true, forKey: HealthKitSources.keyOptedIn)
+            completion(false)
+            return
+        }
+        defaults.set(true, forKey: HealthKitSources.keyOptedIn)
+        store.requestAuthorization(toShare: nil, read: readTypes) { success, _ in
+            self.defaults.set(true, forKey: HealthKitSources.keyRequested)
+            if success { self.enableBackgroundDelivery() }
+            completion(success)
+        }
+    }
+
+    func disconnect() {
+        defaults.set(false, forKey: HealthKitSources.keyOptedIn)
+        defaults.removeObject(forKey: HealthKitSources.keyDays)
+        queue.async {
+            if let q = self.observer {
+                self.store.stop(q)
+                self.observer = nil
+            }
+            if let steps = self.stepType { self.store.disableBackgroundDelivery(for: steps) { _, _ in } }
+        }
+    }
+
+    func startObserverIfOptedIn() {
+        guard optedIn, isAvailable, defaults.bool(forKey: HealthKitSources.keyRequested) else { return }
+        enableBackgroundDelivery()
+    }
+
+    /// HKObserverQuery + background delivery (hourly): a new sample wakes the app, which
+    /// reads and caches the days; the JS layer uploads them on the next open. Needs the
+    /// "com.apple.developer.healthkit.background-delivery" entitlement.
+    private func enableBackgroundDelivery() {
+        guard let steps = stepType else { return }
+        queue.async {
+            if self.observer != nil { return }
+            self.store.enableBackgroundDelivery(for: steps, frequency: .hourly) { _, _ in }
+            let query = HKObserverQuery(sampleType: steps, predicate: nil) { [weak self] _, completionHandler, error in
+                guard let self = self, error == nil, self.optedIn else {
+                    completionHandler()
+                    return
+                }
+                self.readDays(force: false) { _ in completionHandler() }
+            }
+            self.observer = query
+            self.store.execute(query)
+        }
+    }
+
+    func status(completion: @escaping ([String: Any]) -> Void) {
+        var out: [String: Any] = [
+            "platform": "ios",
+            "provider": "healthkit",
+            "optedIn": optedIn,
+            "availability": isAvailable ? "available" : "unsupported",
+            "backgroundSupported": true,
+            "lastStatus": defaults.string(forKey: HealthKitSources.keyLastStatus) ?? "",
+            "lastReadAt": defaults.string(forKey: HealthKitSources.keyLastRead).map { $0 as Any } ?? NSNull(),
+            "lastUploadAt": NSNull()
+        ]
+        let today = HealthKitSources.dayString(Date())
+        let todayPayload = (cachedDays()[today] as? [String: Any]) ?? [:]
+        out["todayOrigins"] = HealthKitSources.originPreview(todayPayload)
+        out["todaySourceSteps"] = HealthKitSources.sourceSteps(todayPayload)
+        guard isAvailable, optedIn else {
+            out["state"] = optedIn ? "unavailable" : "off"
+            out["permissions"] = ["steps": false, "exercise": false, "routes": false, "background": false]
+            completion(out)
+            return
+        }
+        store.getRequestStatusForAuthorization(toShare: [], read: readTypes) { requestStatus, _ in
+            // .unnecessary = the user answered the sheet (iOS hides whether reads were allowed).
+            let answered = requestStatus == .unnecessary
+            out["state"] = answered ? "connected" : "permission_denied"
+            out["permissions"] = ["steps": answered, "exercise": answered, "routes": answered, "background": answered]
+            completion(out)
+        }
+    }
+
+    func cachedDays() -> [String: Any] {
+        guard let raw = defaults.string(forKey: HealthKitSources.keyDays),
+              let data = raw.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return obj
+    }
+
+    private func storeDays(_ days: [String: Any]) {
+        var merged = cachedDays()
+        for (k, v) in days { merged[k] = v }
+        let oldest = HealthKitSources.dayString(Calendar.current.date(byAdding: .day, value: -(HealthKitSources.maxDays + 4), to: Date()) ?? Date())
+        merged = merged.filter { $0.key >= oldest }
+        if let data = try? JSONSerialization.data(withJSONObject: merged), let s = String(data: data, encoding: .utf8) {
+            defaults.set(s, forKey: HealthKitSources.keyDays)
+        }
+    }
+
+    /// Reads today and the previous days (at most every 2 minutes unless forced).
+    func readDays(force: Bool, completion: @escaping (String) -> Void) {
+        queue.async {
+            guard self.optedIn, self.isAvailable, let steps = self.stepType else {
+                completion(self.optedIn ? "unsupported" : "off")
+                return
+            }
+            if let last = self.defaults.string(forKey: HealthKitSources.keyLastRead),
+               let lastDate = ISO8601DateFormatter().date(from: last),
+               !force, Date().timeIntervalSince(lastDate) < HealthKitSources.foregroundMinInterval {
+                completion(self.defaults.string(forKey: HealthKitSources.keyLastStatus) ?? "ok")
+                return
+            }
+            if self.reading {
+                completion("busy")
+                return
+            }
+            self.reading = true
+            let calendar = Calendar.current
+            let todayStart = calendar.startOfDay(for: Date())
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var days: [String: Any] = [:]
+            for offset in 0..<HealthKitSources.maxDays {
+                guard let dayStart = calendar.date(byAdding: .day, value: -offset, to: todayStart),
+                      let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { continue }
+                group.enter()
+                self.readDay(steps: steps, start: dayStart, end: dayEnd) { payload in
+                    lock.lock()
+                    days[HealthKitSources.dayString(dayStart)] = payload
+                    lock.unlock()
+                    group.leave()
+                }
+            }
+            // A slow or stuck Health store never blocks: whatever arrived in 25 s is kept.
+            let finished = group.wait(timeout: .now() + 25) == .success
+            lock.lock()
+            let snapshot = days
+            lock.unlock()
+            self.storeDays(snapshot)
+            let status = finished ? "ok" : "partial"
+            self.defaults.set(status, forKey: HealthKitSources.keyLastStatus)
+            self.defaults.set(ISO8601DateFormatter().string(from: Date()), forKey: HealthKitSources.keyLastRead)
+            self.reading = false
+            completion(status)
+        }
+    }
+
+    private func readDay(steps: HKQuantityType, start: Date, end: Date, completion: @escaping ([String: Any]) -> Void) {
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
+        let inner = DispatchGroup()
+        var hours: [[String: Any]] = []
+        var workouts: [[String: Any]] = []
+
+        inner.enter()
+        readHours(steps: steps, predicate: predicate, start: start, end: end) { result in
+            hours = result
+            inner.leave()
+        }
+        inner.enter()
+        readWorkouts(predicate: predicate) { result in
+            workouts = result
+            inner.leave()
+        }
+        inner.notify(queue: callbackQueue) {
+            completion([
+                "provider": "healthkit",
+                "platform": "ios",
+                "read_at": ISO8601DateFormatter().string(from: Date()),
+                "tz_offset_minutes": TimeZone.current.secondsFromGMT() / 60,
+                "hours": hours,
+                "workouts": workouts
+            ])
+        }
+    }
+
+    /// Per (local hour, source, device) steps. Apple's per-source statistics (which
+    /// de-duplicate one source's overlapping samples) bound the raw sample sums; steps the
+    /// user typed in are a separate "manual" entry.
+    private func readHours(steps: HKQuantityType, predicate: NSPredicate, start: Date, end: Date,
+                           completion: @escaping ([[String: Any]]) -> Void) {
+        let sampleQuery = HKSampleQuery(sampleType: steps, predicate: predicate, limit: HKObjectQueryNoLimit,
+                                        sortDescriptors: nil) { _, samples, _ in
+            // key "hour|source|device|manual" -> steps
+            var raw: [String: Double] = [:]
+            let calendar = Calendar.current
+            for case let sample as HKQuantitySample in samples ?? [] {
+                let origin = sample.sourceRevision.source.bundleIdentifier
+                if origin == "com.step2win.app" { continue }
+                let count = sample.quantity.doubleValue(for: HKUnit.count())
+                let manual = HealthKitSources.wasUserEntered(sample.metadata)
+                let device = HealthKitSources.deviceType(sample.device)
+                // Spread over the hours the sample covers (by time).
+                let s = max(sample.startDate, start)
+                let e = min(max(sample.endDate, sample.startDate), end)
+                let span = sample.endDate.timeIntervalSince(sample.startDate)
+                if span <= 0 || e <= s {
+                    let hour = calendar.component(.hour, from: s)
+                    raw["\(hour)|\(origin)|\(device)|\(manual)", default: 0] += count
+                    continue
+                }
+                var cursor = s
+                while cursor < e {
+                    guard let hourStart = calendar.dateInterval(of: .hour, for: cursor) else { break }
+                    let segEnd = min(e, hourStart.end)
+                    let part = count * segEnd.timeIntervalSince(cursor) / span
+                    let hour = calendar.component(.hour, from: cursor)
+                    raw["\(hour)|\(origin)|\(device)|\(manual)", default: 0] += part
+                    cursor = segEnd
+                }
+            }
+            self.sourceTotals(steps: steps, predicate: predicate, start: start, end: end) { totals in
+                var out: [[String: Any]] = []
+                var manualUsed: [String: Double] = [:]
+                for (key, value) in raw.sorted(by: { $0.key < $1.key }) {
+                    let parts = key.split(separator: "|", maxSplits: 3).map(String.init)
+                    guard parts.count == 4, let hour = Int(parts[0]) else { continue }
+                    let origin = parts[1]
+                    let isManual = parts[3] == "true"
+                    var stepsValue = value
+                    if let total = totals["\(hour)|\(origin)"] {
+                        if isManual {
+                            stepsValue = min(value, total)
+                            manualUsed["\(hour)|\(origin)", default: 0] += stepsValue
+                        } else {
+                            stepsValue = min(value, max(0, total - (raw["\(hour)|\(origin)|\(parts[2])|true"] ?? 0)))
+                        }
+                    }
+                    let rounded = Int(min(HealthKitSources.maxHourSteps, stepsValue.rounded()))
+                    if rounded <= 0 { continue }
+                    out.append([
+                        "hour": hour,
+                        "origin": origin,
+                        "steps": rounded,
+                        "device": parts[2],
+                        "method": isManual ? "manual" : "automatic"
+                    ])
+                }
+                completion(out)
+            }
+        }
+        store.execute(sampleQuery)
+    }
+
+    /// Apple's own per-source hourly sums ("hour|source" -> steps).
+    private func sourceTotals(steps: HKQuantityType, predicate: NSPredicate, start: Date, end: Date,
+                              completion: @escaping ([String: Double]) -> Void) {
+        let query = HKStatisticsCollectionQuery(quantityType: steps, quantitySamplePredicate: predicate,
+                                                options: [.cumulativeSum, .separateBySource],
+                                                anchorDate: start, intervalComponents: DateComponents(hour: 1))
+        query.initialResultsHandler = { _, collection, _ in
+            var totals: [String: Double] = [:]
+            let calendar = Calendar.current
+            collection?.enumerateStatistics(from: start, to: end) { stats, _ in
+                let hour = calendar.component(.hour, from: stats.startDate)
+                for source in stats.sources ?? [] {
+                    if let sum = stats.sumQuantity(for: source)?.doubleValue(for: HKUnit.count()) {
+                        totals["\(hour)|\(source.bundleIdentifier)"] = sum
+                    }
+                }
+            }
+            completion(totals)
+        }
+        store.execute(query)
+    }
+
+    private func readWorkouts(predicate: NSPredicate, completion: @escaping ([[String: Any]]) -> Void) {
+        let query = HKSampleQuery(sampleType: HKObjectType.workoutType(), predicate: predicate, limit: 20,
+                                  sortDescriptors: nil) { _, samples, _ in
+            let workouts = (samples ?? []).compactMap { $0 as? HKWorkout }
+            if workouts.isEmpty {
+                completion([])
+                return
+            }
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var out: [[String: Any]] = []
+            let iso = ISO8601DateFormatter()
+            for workout in workouts {
+                let origin = workout.sourceRevision.source.bundleIdentifier
+                if origin == "com.step2win.app" { continue }
+                group.enter()
+                self.routeSummary(for: workout) { points, distance in
+                    var item: [String: Any] = [
+                        "start": iso.string(from: workout.startDate),
+                        "end": iso.string(from: workout.endDate),
+                        "type": HealthKitSources.workoutType(workout.workoutActivityType),
+                        "origin": origin,
+                        "device": HealthKitSources.deviceType(workout.device),
+                        "method": HealthKitSources.wasUserEntered(workout.metadata) ? "manual" : "active",
+                        "steps": NSNull()
+                    ]
+                    if let meters = workout.totalDistance?.doubleValue(for: HKUnit.meter()) {
+                        item["distance_m"] = (meters * 10).rounded() / 10
+                    } else {
+                        item["distance_m"] = NSNull()
+                    }
+                    if points > 0 {
+                        item["route"] = ["points": points, "distance_m": (distance * 10).rounded() / 10]
+                    } else {
+                        item["route"] = NSNull()
+                    }
+                    lock.lock()
+                    out.append(item)
+                    lock.unlock()
+                    group.leave()
+                }
+            }
+            group.notify(queue: self.callbackQueue) { completion(out) }
+        }
+        store.execute(query)
+    }
+
+    /// Point count and distance of a workout's route. The coordinates never leave the phone.
+    private func routeSummary(for workout: HKWorkout, completion: @escaping (Int, Double) -> Void) {
+        let predicate = HKQuery.predicateForObjects(from: workout)
+        let query = HKSampleQuery(sampleType: HKSeriesType.workoutRoute(), predicate: predicate, limit: 1,
+                                  sortDescriptors: nil) { _, samples, _ in
+            guard let route = samples?.first as? HKWorkoutRoute else {
+                completion(0, 0)
+                return
+            }
+            var count = 0
+            var distance: Double = 0
+            var last: CLLocation?
+            var finished = false
+            let routeQuery = HKWorkoutRouteQuery(route: route) { _, locations, done, error in
+                if finished { return }
+                for location in locations ?? [] {
+                    if let previous = last { distance += location.distance(from: previous) }
+                    last = location
+                    count += 1
+                }
+                if done || error != nil {
+                    finished = true
+                    completion(error == nil ? count : 0, error == nil ? distance : 0)
+                }
+            }
+            self.store.execute(routeQuery)
+        }
+        store.execute(query)
+    }
+
+    // MARK: helpers (mirrors HealthSourceCore.java)
+
+    static func wasUserEntered(_ metadata: [String: Any]?) -> Bool {
+        if let value = metadata?[HKMetadataKeyWasUserEntered] as? Bool { return value }
+        if let value = metadata?[HKMetadataKeyWasUserEntered] as? NSNumber { return value.boolValue }
+        return false
+    }
+
+    static func deviceType(_ device: HKDevice?) -> String {
+        let model = (device?.model ?? device?.name ?? "").lowercased()
+        if model.contains("watch") { return "watch" }
+        if model.contains("iphone") { return "phone" }
+        if model.contains("ring") { return "ring" }
+        if model.contains("band") || model.contains("fitbit") || model.contains("tracker") { return "band" }
+        return "unknown"
+    }
+
+    static func workoutType(_ type: HKWorkoutActivityType) -> String {
+        switch type {
+        case .walking: return "walking"
+        case .running: return "running"
+        case .hiking: return "hiking"
+        case .wheelchairWalkPace, .wheelchairRunPace: return "wheelchair"
+        default: return "other"
+        }
+    }
+
+    static func dayString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    static func originPreview(_ payload: [String: Any]) -> [[String: Any]] {
+        var counted: [String: Int] = [:]
+        var manual: [String: Int] = [:]
+        var devices: [String: String] = [:]
+        for entry in (payload["hours"] as? [[String: Any]]) ?? [] {
+            guard let origin = entry["origin"] as? String else { continue }
+            let steps = (entry["steps"] as? Int) ?? 0
+            if (entry["method"] as? String) == "manual" {
+                manual[origin, default: 0] += steps
+            } else {
+                counted[origin, default: 0] += steps
+            }
+            if devices[origin] == nil || devices[origin] == "phone" { devices[origin] = entry["device"] as? String }
+        }
+        let origins = Set(counted.keys).union(manual.keys).sorted()
+        return origins.map { ["origin": $0, "steps": counted[$0] ?? 0, "manual_steps": manual[$0] ?? 0, "device": devices[$0] ?? "unknown"] }
+    }
+
+    /// Per hour the max over sources (never the sum), summed over the day.
+    static func sourceSteps(_ payload: [String: Any]) -> Int {
+        var perHour: [Int: Int] = [:]
+        for entry in (payload["hours"] as? [[String: Any]]) ?? [] {
+            if (entry["method"] as? String) == "manual" { continue }
+            guard let hour = entry["hour"] as? Int, let steps = entry["steps"] as? Int else { continue }
+            perHour[hour] = max(perHour[hour] ?? 0, steps)
+        }
+        return perHour.values.reduce(0, +)
     }
 }

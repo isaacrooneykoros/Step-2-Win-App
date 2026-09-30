@@ -16,6 +16,7 @@ import {
 } from '../plugins/deviceStepCounter';
 import { adoptNativeInstallId, getInstallId, getInstallIdSync, timeZoneFields } from '../services/deviceIdentity';
 import { openAppSettings } from '../plugins/appSystem';
+import { uploadIosHealthSources } from '../services/healthSources';
 import { hasNativeStepCounter, isAndroidApp, isIOSApp, permissionCopy } from '../utils/platform';
 import type { ChallengeDetail, HourlyStep, LocationWaypoint, StepSyncForm, User } from '../types';
 import {
@@ -691,6 +692,11 @@ export function useHealthSync() {
       }
 
       await flushQueuedSync();
+
+      // Phase 1c (iOS): Apple Health summaries, after our own steps; best effort.
+      if (userId && isIOSApp()) {
+        await uploadIosHealthSources(userId, activeSession, { force: !!options.force }).catch(() => 0);
+      }
 
       if (userId) {
         const remaining = await listOutboxItems(userId);

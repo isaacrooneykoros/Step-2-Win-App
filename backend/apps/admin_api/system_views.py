@@ -64,6 +64,8 @@ ENFORCED_BY = {
     "payout_hold_large_win_kes": "Challenge settlement: payouts at or above this are held when the winner has open medium+ flags in the challenge window",
     # apps/steps/integrity.py + apps/steps/evidence.py
     "device_integrity_policy": "Step sync and walks: with enforce, steps from sessions that failed Play Integrity count for goals only, not toward challenges",
+    # apps/steps/health_sources.py
+    "health_trusted_origins": "Health Connect / Apple Health uploads: only these apps' steps and workouts can count (manual entries never do)",
 }
 
 

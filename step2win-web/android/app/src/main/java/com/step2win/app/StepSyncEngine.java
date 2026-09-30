@@ -277,7 +277,9 @@ public final class StepSyncEngine {
             if (isDirty(day, acked, hourlyDue || day.date.compareTo(today) < 0)) dirty++;
         }
         result.pendingDays = dirty;
-        if (dirty == 0) {
+        // Phase 1c: Health Connect summaries the server doesn't have yet (opt-in only).
+        JSONObject healthPending = HealthSources.pendingUploads(context, userKey);
+        if (dirty == 0 && healthPending.length() == 0) {
             result.status = "nothing";
             return result;
         }
@@ -343,6 +345,17 @@ public final class StepSyncEngine {
                 } else if (!"rejected".equals(outcome)) {
                     return finishWithStop(prefs, result, outcome, anySuccess);
                 }
+            }
+        }
+
+        // 3) Health Connect summaries (Phase 1c), after our own steps: they only confirm.
+        if (healthPending.length() > 0 && requests < MAX_REQUESTS_PER_RUN) {
+            if (requests > 0) pace();
+            String outcome = uploadHealthSources(context, apiBase, userKey, healthPending, options);
+            if ("ok".equals(outcome)) {
+                anySuccess = true;
+            } else if (!"rejected".equals(outcome)) {
+                return finishWithStop(prefs, result, outcome, anySuccess);
             }
         }
 
@@ -423,6 +436,55 @@ public final class StepSyncEngine {
             return outcome;
         }
         return "error";
+    }
+
+    /**
+     * POST /api/steps/health-sources/ for each day whose Health Connect summary changed.
+     * A payload the server rejects (400) is marked as sent: the same data would be
+     * rejected again; a new read with different data is uploaded normally.
+     */
+    private static String uploadHealthSources(Context context, String apiBase, String userKey, JSONObject pending, Options options) {
+        boolean any = false;
+        java.util.Iterator<String> it = pending.keys();
+        int sent = 0;
+        while (it.hasNext() && sent < 4) {
+            String date = it.next();
+            JSONObject payload = pending.optJSONObject(date);
+            if (payload == null) continue;
+            if (sent > 0) pace();
+            sent++;
+            String outcome = "error";
+            for (int attempt = 0; attempt < 2; attempt++) {
+                JSONObject session = ensureSession(context, apiBase, options);
+                if (session == null) return lastSessionOutcome;
+                JSONObject body = new JSONObject();
+                try {
+                    body.put("session_id", session.optString("session_id"));
+                    body.put("session_token", session.optString("session_token"));
+                    body.put("date", date);
+                    body.put("tz_offset_minutes", InstallInfo.tzOffsetMinutes());
+                    body.put("health_sources", payload);
+                } catch (Exception ignored) {
+                    return "error";
+                }
+                HttpResult http = post(context, apiBase + "/api/steps/health-sources/", body.toString(), options);
+                String lower = http.body == null ? "" : http.body.toLowerCase(Locale.ROOT);
+                if (http.code == 403 && lower.contains("session_")) {
+                    clearSession(context); // expired step session: renew once
+                    continue;
+                }
+                outcome = classify(context, http, options);
+                if ("retry_auth".equals(outcome)) continue;
+                break;
+            }
+            if ("ok".equals(outcome) || "rejected".equals(outcome)) {
+                HealthSources.markUploaded(context, userKey, date, payload);
+                any = any || "ok".equals(outcome);
+                continue;
+            }
+            return outcome;
+        }
+        return any ? "ok" : "rejected";
     }
 
     private static String uploadHourly(Context context, String apiBase, StepLedger.Day day, boolean withRoute, Options options) {

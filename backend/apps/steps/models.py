@@ -801,3 +801,41 @@ class WalkPrivacyZone(models.Model):
     cell_hashes = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class HealthSourceDay(models.Model):
+    """Phase 1c: one user-day of steps / workouts read from Health Connect (Android) or
+    Apple Health (iOS), with provenance. Opt-in only; read-only on the phone.
+
+    ``data``    the cleaned upload (apps/steps/health_sources.clean_payload): per hour and
+                origin {hour, origin, device, method, steps}; workouts {start, end, type,
+                origin, device, method, distance_m, steps, route {points, distance_m}}.
+                Route coordinates never leave the phone.
+    ``summary`` the server's decision (trust per origin, what was counted, withheld,
+                verified workouts); the same compact shape is kept on the day as
+                ``HealthRecord.anticheat["health"]``. See ANTICHEAT.md "Phase 1c".
+    Deleted with the account (apps/users/account_deletion.py) and by the user's
+    "Remove imported data" (DELETE /api/steps/health-sources/).
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="health_source_days",
+    )
+    date = models.DateField()
+    platform = models.CharField(max_length=10)
+    provider = models.CharField(max_length=20)
+    data = models.JSONField(default=dict, blank=True)
+    summary = models.JSONField(default=dict, blank=True)
+    uploads = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("user", "date")]
+        indexes = [models.Index(fields=["user", "-date"], name="steps_hsday_user_date_idx")]
+        ordering = ["-date"]
+
+    def __str__(self):
+        return f"{self.user_id} {self.date} {self.provider}"

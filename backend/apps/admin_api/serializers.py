@@ -505,6 +505,10 @@ class SystemSettingsSerializer(serializers.Serializer):
 
     # Device integrity (Play Integrity) policy for step sessions and walks
     device_integrity_policy = serializers.ChoiceField(choices=["shadow", "enforce"])
+    # Phase 1c: trusted Health Connect / Apple Health apps (one per line)
+    health_trusted_origins = serializers.CharField(
+        allow_blank=True, required=False, max_length=4000, trim_whitespace=False
+    )
 
     # Metadata
     updated_at = serializers.DateTimeField(read_only=True)
@@ -540,6 +544,26 @@ class SystemSettingsSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 f"Must not exceed KES {ENTRY_FEE_SERVER_CAP:,} (server limit)"
             )
+        return value
+
+    def validate_health_trusted_origins(self, value):
+        import re
+
+        from apps.steps.health_sources import parse_rules
+
+        lines = [ln for ln in (value or "").splitlines() if ln.split("#", 1)[0].strip()]
+        if len(lines) > 60:
+            raise serializers.ValidationError("Use at most 60 apps")
+        for line in lines:
+            parts = line.split("#", 1)[0].split()
+            if not re.fullmatch(r"[A-Za-z0-9._-]+\*?", parts[0]) or len(parts[0]) < 3:
+                raise serializers.ValidationError(f"Not a package or bundle id: {parts[0][:60]}")
+            extra = {p.lower() for p in parts[1:]}
+            if extra - {"wearable"}:
+                raise serializers.ValidationError(
+                    f"Only the word 'wearable' may follow the app id: {line[:80]}"
+                )
+        parse_rules(value)
         return value
 
     def validate_min_challenge_entry_fee(self, value):

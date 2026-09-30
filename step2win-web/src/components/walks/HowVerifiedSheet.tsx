@@ -1,4 +1,4 @@
-import { CarFront, CheckCircle2, Footprints, Route, Smartphone, type LucideIcon } from 'lucide-react';
+import { CarFront, CheckCircle2, Footprints, Route, Smartphone, Watch, type LucideIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Sheet } from '../ui/Sheet';
 import Button from '../ui/Button';
@@ -48,6 +48,9 @@ export function HowVerifiedSheet({ open, onClose, showBreakdownLink = false }: {
         </Point>
         <Point icon={Route} title="Walks with GPS verify a route">
           When you start a walk in Step2Win, GPS records the route, and those steps count toward challenges.
+        </Point>
+        <Point icon={Watch} title="Your watch can count too">
+          Connect Health Connect or Apple Health in Settings to count steps from a watch or band. Steps typed in by hand never count, and steps are never added twice.
         </Point>
         <Point icon={CarFront} title="Some steps only count for goals">
           Steps counted in a vehicle or from the phone being shaken don’t count toward challenges, but they still count for your goals.

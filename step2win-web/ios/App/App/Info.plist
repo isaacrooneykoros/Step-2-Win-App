@@ -39,6 +39,12 @@
 	<false/>
 	<key>NSMotionUsageDescription</key>
 	<string>Step2Win reads your step count from Motion &amp; Fitness to track your daily steps and your progress in step challenges.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>If you turn on Connected sources, Step2Win reads your steps and walking, running and hiking workouts from Apple Health, including which app or device recorded them, to count steps from your Apple Watch and confirm your challenge progress. Step2Win never writes to Apple Health, and steps you typed in by hand are not counted.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>x-apple-health</string>
+	</array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Use Face ID to unlock Step2Win when you have turned on App Lock, so only you can open your wallet and challenges.</string>
 	<key>NSCameraUsageDescription</key>

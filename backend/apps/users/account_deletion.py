@@ -218,7 +218,7 @@ def _revoke_all_tokens(user) -> int:
 
 def _delete_activity_data(user) -> dict:
     from apps.steps.models import (DailyVerificationSummary, DeviceRegistration,
-                                   HealthRecord, HourlyStepRecord,
+                                   HealthRecord, HealthSourceDay, HourlyStepRecord,
                                    IntervalVerificationResult, LocationWaypoint,
                                    StepSession, StepSyncEvent, WalkPrivacyZone,
                                    WalkSession)
@@ -229,6 +229,8 @@ def _delete_activity_data(user) -> dict:
         # Phase 1b walks (GPS routes) and the home privacy zone.
         ("walks", WalkSession.objects.filter(user=user)),
         ("walk_privacy_zone", WalkPrivacyZone.objects.filter(user=user)),
+        # Phase 1c: steps / workouts imported from Health Connect / Apple Health.
+        ("health_sources", HealthSourceDay.objects.filter(user=user)),
         ("hourly_steps", HourlyStepRecord.objects.filter(user=user)),
         ("health_records", HealthRecord.objects.filter(user=user)),
         ("sync_events", StepSyncEvent.objects.filter(user=user)),
