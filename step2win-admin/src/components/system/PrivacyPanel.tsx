@@ -13,6 +13,7 @@ import { formatDateTime } from '../../lib/format'
 import { errorMessage } from '../../lib/errors'
 import { ApiError } from './http'
 import { systemApi, type PrivacySettings } from './api'
+import { usePermissions } from '../../lib/permissions'
 
 type Key = Exclude<keyof PrivacySettings, 'server' | 'updated_at' | 'updated_by'>
 
@@ -84,6 +85,7 @@ export function PrivacyPanel() {
   const [errors, setErrors] = useState<Partial<Record<Key, string>>>({})
   const [confirm, setConfirm] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const canEdit = usePermissions().can('settings.system')
   const current = form ?? saved
   const changed = useMemo(
     () => (current && saved ? ROWS.filter((r) => String(current[r.key]).trim() !== String(saved[r.key]).trim()) : []),
@@ -199,7 +201,7 @@ export function PrivacyPanel() {
             )}
             <Button size="sm" variant="ghost" leftIcon={<RotateCcw size={13} />} disabled={!changed.length || save.isPending}
               onClick={() => { setForm(null); setErrors({}) }}>Discard</Button>
-            <Button size="sm" variant="primary" leftIcon={<Save size={13} />} disabled={!changed.length} loading={save.isPending}
+            <Button size="sm" variant="primary" leftIcon={<Save size={13} />} disabled={!changed.length || !canEdit} title={canEdit ? undefined : 'Your role can’t change settings'} loading={save.isPending}
               onClick={() => { if (validate()) setConfirm(true) }}>Save privacy settings</Button>
           </div>
         </div>

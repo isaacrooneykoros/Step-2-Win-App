@@ -131,17 +131,14 @@ def label_user_day(request):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("owner.risk_models"))
 def activate_model(request, version: str):
-    """Make a trained model the active one of its kind (superuser; audited).
+    """Make a trained model the active one of its kind (owner.risk_models; audited).
 
     Shadow only: the active model scores user-days for evaluation; nothing is enforced.
     """
-    # ROLE: owner
     from .training import TrainingRefused, _activate
 
-    if not request.user.is_superuser:
-        return Response({"error": "Only a superuser can change the active model."}, status=403)
     reason = str(request.data.get("reason") or "").strip()
     if len(reason) < 5:
         return Response({"error": "A reason of at least 5 characters is required."}, status=400)

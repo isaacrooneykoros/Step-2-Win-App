@@ -11,7 +11,7 @@ import { Button } from '../components/ui/Button'
 import { Select, Textarea } from '../components/ui/Input'
 import { Tabs } from '../components/ui/Tabs'
 import { consoleB, type LinkCluster, type LinkageRun, type RiskModel } from '../components/consoleb/api'
-import { useAdminRole } from '../components/users/utils'
+import { usePermissions } from '../lib/permissions'
 import { formatDateTime, formatNumber, formatRelative } from '../lib/format'
 import { errorMessage } from '../lib/errors'
 
@@ -26,7 +26,8 @@ export function TrustToolsPage() {
   const [tab, setTab] = useState<Tab>('clusters')
   const [minSize, setMinSize] = useState('2')
   const qc = useQueryClient()
-  const role = useAdminRole()
+  const { can } = usePermissions()
+  const role = { isSuperuser: can('owner.risk_models') }
   const clusters = useQuery({ queryKey: ['admin', 'linkage', 'clusters', minSize], queryFn: () => consoleB.clusters(Number(minSize)), enabled: tab === 'clusters' })
   const runs = useQuery({ queryKey: ['admin', 'linkage', 'runs'], queryFn: consoleB.linkageRuns, enabled: tab === 'runs' })
   const models = useQuery({ queryKey: ['admin', 'risk-ml', 'models'], queryFn: consoleB.riskModels, enabled: tab === 'models' })
@@ -108,7 +109,7 @@ export function TrustToolsPage() {
             isLoading={models.isLoading} error={models.error} onRetry={() => void models.refetch()}
             rowActions={(m) => !m.is_active && m.trained_on === 'real' ? (
               <Button size="sm" variant="secondary" leftIcon={<ShieldCheck size={13} />} disabled={!role.isSuperuser}
-                title={role.isSuperuser ? undefined : 'Only a superuser can change the active model'}
+                title={role.isSuperuser ? undefined : 'Only an owner can change the active model'}
                 onClick={(e) => { e.stopPropagation(); setActivate(m) }}>Activate</Button>
             ) : null}
             emptyMessage="No trained models" emptyDescription="Models are trained with the risk_ml management commands." />

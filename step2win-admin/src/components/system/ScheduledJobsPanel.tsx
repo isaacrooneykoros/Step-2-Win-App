@@ -18,6 +18,7 @@ import { useLiveRefetchInterval } from '../../lib/realtime/useAdminRealtime'
 import { http } from './http'
 import { Textarea } from '../ui/Input'
 import { consoleB } from '../consoleb/api'
+import { usePermissions } from '../../lib/permissions'
 
 export interface ScheduledJob {
   name: string
@@ -161,6 +162,7 @@ export function ScheduledJobsPanel() {
   const [confirm, setConfirm] = useState<ScheduledJob | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
   const [pausing, setPausing] = useState<ScheduledJob | null>(null)
+  const canPause = usePermissions().can('settings.system')
   const [pauseReason, setPauseReason] = useState('')
 
   const pause = useMutation({
@@ -273,7 +275,7 @@ export function ScheduledJobsPanel() {
                         {j.due ? <span className="font-medium text-ink-primary">Now</span> : j.next_due_at ? <span title={formatDateTime(j.next_due_at)}>{formatDateTime(j.next_due_at)}</span> : '—'}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right align-top">
-                        <Button
+                        {canPause && <Button
                           size="sm"
                           variant="ghost"
                           className="mr-1"
@@ -282,7 +284,7 @@ export function ScheduledJobsPanel() {
                           onClick={() => (j.paused ? pause.mutate({ job: j, paused: false }) : setPausing(j))}
                         >
                           {j.paused ? 'Resume' : 'Pause'}
-                        </Button>
+                        </Button>}
                         <Button
                           size="sm"
                           variant="secondary"

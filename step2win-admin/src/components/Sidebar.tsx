@@ -23,7 +23,7 @@ const STORAGE_KEY = 'sidebar-collapsed'
 
 function isActivePath(pathname: string, to: string) {
   if (to === '/') return pathname === '/' || pathname === '/dashboard'
-  if (to === '/fraud') return pathname.startsWith('/fraud') || pathname.startsWith('/anti-cheat')
+  if (to === '/fraud') return pathname.startsWith('/fraud') || pathname === '/anti-cheat' || pathname.startsWith('/anti-cheat/')
   return pathname === to || pathname.startsWith(`${to}/`)
 }
 

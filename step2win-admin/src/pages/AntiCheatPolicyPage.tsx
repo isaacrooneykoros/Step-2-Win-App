@@ -11,7 +11,7 @@ import { Button } from '../components/ui/Button'
 import { Input, Textarea } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { consoleB, type AntiCheatPolicy, type PolicyConfig } from '../components/consoleb/api'
-import { useAdminRole } from '../components/users/utils'
+import { usePermissions } from '../lib/permissions'
 import { ApiError } from '../components/system/http'
 import { cn } from '../lib/cn'
 import { formatDateTime, formatRelative } from '../lib/format'
@@ -53,7 +53,8 @@ const humanKey = (k: string) => k.replace(/_/g, ' ').replace(/^\w/, (c) => c.toU
 
 export function AntiCheatPolicyPage() {
   const qc = useQueryClient()
-  const role = useAdminRole()
+  const { can } = usePermissions()
+  const role = { isSuperuser: can('owner.anticheat_policy') }
   const q = useQuery({ queryKey: ['admin', 'anticheat-policies'], queryFn: consoleB.policies })
   const rows = useMemo(() => q.data?.results ?? [], [q.data])
   const active = rows.find((p) => p.is_active) ?? null
@@ -113,7 +114,7 @@ export function AntiCheatPolicyPage() {
         actions={<>
           <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={q.isFetching} onClick={() => void q.refetch()}>Refresh</Button>
           <Button size="sm" variant="primary" leftIcon={<GitBranchPlus size={13} />} disabled={!base || !role.isSuperuser}
-            title={role.isSuperuser ? undefined : 'Only a superuser can create policy versions'} onClick={openEditor}>New version from active</Button>
+            title={role.isSuperuser ? undefined : 'Only an owner can create policy versions'} onClick={openEditor}>New version from active</Button>
         </>}
       />
       {msg && <p role="status" className="rounded-md border border-surface-border bg-surface-card px-3 py-2 text-sm text-ink-primary shadow-card">{msg}</p>}

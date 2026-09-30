@@ -23,6 +23,7 @@ import { CATEGORY_LABEL, DEFAULT_TARGET_HOURS, PRIORITY_LABEL, VIEW_EMPTY, VIEW_
 import { TemplatesManager } from '../components/support/SavedReplies'
 import { useTags } from '../components/support/queries'
 import { BulkTickets, OutboundTicketModal, TagManager } from '../components/support/DeskTools'
+import { usePermissions } from '../lib/permissions'
 import { formatAgeHours, formatNumber } from '../lib/format'
 
 const PAGE_SIZE = 40
@@ -72,6 +73,7 @@ export function SupportPage() {
   const bulkOpen = params.get('panel') === 'bulk'
   const tagsOpen = params.get('panel') === 'tags'
   const [outboundOpen, setOutboundOpen] = useState(false)
+  const canReply = usePermissions().can('support.reply')
   const [deskNotice, setDeskNotice] = useState<string | null>(null)
 
   const rows = useMemo(() => queueQ.data?.results ?? [], [queueQ.data])
@@ -192,15 +194,19 @@ export function SupportPage() {
         description="Answer customer tickets, keep them moving and see who you are talking to."
         actions={
           <>
-            <Button size="sm" variant="primary" leftIcon={<Send size={13} />} onClick={() => setOutboundOpen(true)}>
-              Message a customer
-            </Button>
-            <Button size="sm" variant="secondary" leftIcon={<ListChecks size={13} />} onClick={() => setParam({ panel: 'bulk' })}>
-              Bulk actions
-            </Button>
-            <Button size="sm" variant="secondary" leftIcon={<Tags size={13} />} onClick={() => setParam({ panel: 'tags' })}>
-              Tags
-            </Button>
+            {canReply && (
+              <>
+                <Button size="sm" variant="primary" leftIcon={<Send size={13} />} onClick={() => setOutboundOpen(true)}>
+                  Message a customer
+                </Button>
+                <Button size="sm" variant="secondary" leftIcon={<ListChecks size={13} />} onClick={() => setParam({ panel: 'bulk' })}>
+                  Bulk actions
+                </Button>
+                <Button size="sm" variant="secondary" leftIcon={<Tags size={13} />} onClick={() => setParam({ panel: 'tags' })}>
+                  Tags
+                </Button>
+              </>
+            )}
             <Button size="sm" variant="secondary" leftIcon={<MessageSquareQuote size={13} />} onClick={() => setParam({ panel: 'replies' })}>
               Saved replies
             </Button>
@@ -309,12 +315,12 @@ export function SupportPage() {
         <TemplatesManager />
       </SlideOver>
 
-      <SlideOver open={bulkOpen} onClose={() => setParam({ panel: null })} title="Bulk actions" width={520}
+      <SlideOver open={bulkOpen && canReply} onClose={() => setParam({ panel: null })} title="Bulk actions" width={520}
         subtitle="Assign, close, resolve or reopen several tickets, or merge duplicates from one customer.">
         <BulkTickets rows={rows} admins={admins} onDone={(text) => { setDeskNotice(text); setParam({ panel: null }) }} />
       </SlideOver>
 
-      <SlideOver open={tagsOpen} onClose={() => setParam({ panel: null })} title="Tags" width={440}
+      <SlideOver open={tagsOpen && canReply} onClose={() => setParam({ panel: null })} title="Tags" width={440}
         subtitle="Rename a tag everywhere it is used, or delete it from every ticket.">
         <TagManager />
       </SlideOver>

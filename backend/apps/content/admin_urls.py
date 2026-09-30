@@ -4,7 +4,6 @@ from . import admin_views as v
 
 app_name = "content_admin"
 
-# ROLE: content
 urlpatterns = [
     path("announcements/", v.announcements, name="announcements"),
     path("announcements/<int:announcement_id>/", v.announcement_detail, name="announcement-detail"),

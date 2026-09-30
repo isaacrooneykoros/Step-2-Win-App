@@ -10,7 +10,9 @@ Admin console Part B: ops, anti-cheat policy versions and support desk actions.
   assign / close.
 
 Every write is audited. AuditLog.resource_id is an integer: UUIDs go in `changes`.
-Permissions: IsAdminUser for now; `# ROLE:` markers show the intended staff role.
+Permissions (apps/admin_api/roles.py): jobs pause/resume and the export queue need
+settings.system; anti-cheat policy versions need owner.anticheat_policy to create or
+activate (trust.view to read); support desk actions need support.reply.
 """
 
 from __future__ import annotations
@@ -23,7 +25,6 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiTypes, extend_schema
-from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
@@ -31,10 +32,9 @@ from apps.admin_api import scheduler
 from apps.admin_api.models import (AuditLog, ScheduledJobRun,
                                    ScheduledJobState, SupportTicket,
                                    SupportTicketMessage)
-from apps.admin_api.views import IsAdminUser
+from apps.admin_api.roles import staff
 
 User = get_user_model()
-ADMIN = [permissions.IsAuthenticated, IsAdminUser]
 REASON_MIN = 5
 
 
@@ -43,12 +43,6 @@ def _reason(request, key="reason", required=True):
     if required and len(text) < REASON_MIN:
         return None, Response({"error": f"A reason of at least {REASON_MIN} characters is required."}, status=400)
     return text, None
-
-
-def _superuser_only(request):
-    if not request.user.is_superuser:
-        return Response({"error": "Only a superuser can do this."}, status=403)
-    return None
 
 
 # ── Scheduled jobs ───────────────────────────────────────────────────────────
@@ -61,9 +55,8 @@ def _run_json(r: ScheduledJobRun) -> dict:
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("console.view"))
 def job_runs(request, name):
-    # ROLE: settings
     if scheduler.get_job(name) is None:
         return Response({"detail": "Unknown job."}, status=404)
     rows = ScheduledJobRun.objects.filter(name=name).order_by("-started_at", "-id")[: ScheduledJobRun.RUN_HISTORY_PER_JOB]
@@ -72,9 +65,8 @@ def job_runs(request, name):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("settings.system"))
 def job_pause(request, name):
-    # ROLE: settings
     job = scheduler.get_job(name)
     if job is None:
         return Response({"detail": "Unknown job."}, status=404)
@@ -96,9 +88,8 @@ def job_pause(request, name):
 
 @extend_schema(request=None, responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("settings.system"))
 def job_resume(request, name):
-    # ROLE: settings
     if scheduler.get_job(name) is None:
         return Response({"detail": "Unknown job."}, status=404)
     state = scheduler.get_state(name)
@@ -132,9 +123,8 @@ def _export_json(e) -> dict:
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("settings.system"))
 def export_queue(request):
-    # ROLE: trust
     from apps.privacy.models import DataExportRequest
 
     qs = DataExportRequest.objects.select_related("user").defer("archive").order_by("-requested_at")
@@ -150,9 +140,8 @@ def export_queue(request):
 
 @extend_schema(request=None, responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("settings.system"))
 def export_retry(request, export_id):
-    # ROLE: trust
     from apps.privacy.models import DataExportRequest
 
     e = get_object_or_404(DataExportRequest.objects.select_related("user").defer("archive"), pk=export_id)
@@ -235,9 +224,8 @@ def _policy_json(p, with_config=True) -> dict:
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET", "POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view", write="owner.anticheat_policy"))
 def anticheat_policies(request):
-    # ROLE: trust (read) / owner (create)
     from apps.steps.models import AntiCheatPolicy
 
     if request.method == "GET":
@@ -249,9 +237,6 @@ def anticheat_policies(request):
             "results": [_policy_json(p) for p in rows],
         })
 
-    denied = _superuser_only(request)
-    if denied:
-        return denied
     data = request.data or {}
     version = str(data.get("version") or "").strip()
     if not version or len(version) > POLICY_VERSION_MAX:
@@ -284,14 +269,10 @@ def anticheat_policies(request):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("owner.anticheat_policy"))
 def anticheat_policy_activate(request, policy_id):
-    # ROLE: owner
     from apps.steps.models import AntiCheatPolicy
 
-    denied = _superuser_only(request)
-    if denied:
-        return denied
     reason, err = _reason(request)
     if err:
         return err
@@ -333,14 +314,13 @@ def _ticket_json(t: SupportTicket) -> dict:
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={201: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("support.reply"))
 def support_outbound(request):
     """Open a ticket to a user. Body: {user_id, subject, message, category?, priority?}.
 
     The ticket lands in the user's in-app Support inbox, assigned to the sender and
     waiting on the user's reply (status in_progress).
     """
-    # ROLE: content (support agents)
     data = request.data or {}
     try:
         user = User.objects.get(pk=int(data.get("user_id")))
@@ -386,14 +366,13 @@ def support_outbound(request):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("support.reply"))
 def support_merge(request, ticket_id):
     """Merge duplicates into this ticket. Body: {duplicate_ids: [..]}.
 
     Messages move to this ticket (kept in time order), tags are combined, each
     duplicate is closed with a note pointing here. Same customer only.
     """
-    # ROLE: content (support agents)
     target = get_object_or_404(SupportTicket.objects.select_related("user"), pk=ticket_id)
     raw = (request.data or {}).get("duplicate_ids")
     if not isinstance(raw, list) or not raw:
@@ -449,10 +428,9 @@ BULK_ACTIONS = ("assign", "unassign", "close", "resolve", "reopen")
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("support.reply"))
 def support_bulk(request):
     """Body: {ticket_ids: [..], action: assign|unassign|close|resolve|reopen, assigned_to?}."""
-    # ROLE: content (support agents)
     data = request.data or {}
     action = data.get("action")
     if action not in BULK_ACTIONS:

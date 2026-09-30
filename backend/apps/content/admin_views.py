@@ -13,18 +13,17 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from drf_spectacular.utils import OpenApiTypes, extend_schema
-from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from apps.admin_api.models import AuditLog
-from apps.admin_api.views import IsAdminUser
+from apps.admin_api.roles import staff
 
 from .audience import reach
 from .models import Announcement, HelpArticle, HelpCategory
 
-# ROLE: content (all endpoints in this module)
-ADMIN = [permissions.IsAuthenticated, IsAdminUser]
+# Reads: any staff (console.view); writes: content.announcements (content role).
+ADMIN = staff("console.view", write="content.announcements")
 
 LINK_RE = re.compile(r"^(https://[^\s<>\"']{3,290}|/[A-Za-z0-9/_\-?=&.#]{0,200})$")
 

@@ -214,10 +214,9 @@ def cluster_list(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def linkage_runs(request):
     """Recent linkage recomputes (nightly job): when, how long, ok, counts."""
-    # ROLE: trust
     rows = LinkageRun.objects.order_by("-started_at")[:60]
     return Response({"results": [
         {"id": r.pk, "started_at": r.started_at.isoformat(),

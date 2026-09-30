@@ -1832,6 +1832,7 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
         "update": "content.badges",
         "partial_update": "content.badges",
         "destroy": "content.badges",
+        "retire": "content.badges",
         "award_to_user": "users.xp",
     }
     pagination_class = AdminPageNumberPagination
@@ -1883,7 +1884,6 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def retire(self, request, pk=None):
         """Retire (hide) or bring back a badge. Body: {retired: true|false}. Holders keep it."""
-        # ROLE: content
         badge = self.get_object()
         retired = request.data.get("retired", True)
         if not isinstance(retired, bool):

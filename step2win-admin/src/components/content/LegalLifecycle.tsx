@@ -11,6 +11,7 @@ import { http } from '../system/http'
 import { formatNumber } from '../../lib/format'
 import { errorMessage } from '../../lib/errors'
 import type { LegalDoc } from './api'
+import { usePermissions } from '../../lib/permissions'
 
 interface AckStats {
   current_version: number
@@ -57,8 +58,10 @@ export function LegalLifecycle({ doc, onMessage }: { doc: LegalDoc; onMessage: (
     onError: (e) => { setConfirm(null); onMessage('danger', errorMessage(e) ?? 'Request failed.') },
   })
 
-  const canArchive = doc.status === 'published' && !NEVER_ARCHIVE.has(doc.document_type)
-  const canDelete = doc.status === 'draft' && !doc.published_at && doc.history_count === 0
+  const { can } = usePermissions()
+  const canEdit = can('content.legal')
+  const canArchive = canEdit && doc.status === 'published' && !NEVER_ARCHIVE.has(doc.document_type)
+  const canDelete = canEdit && doc.status === 'draft' && !doc.published_at && doc.history_count === 0
 
   return (
     <>
@@ -68,7 +71,7 @@ export function LegalLifecycle({ doc, onMessage }: { doc: LegalDoc; onMessage: (
         </Button>
       )}
       {canArchive && <Button size="sm" variant="ghost" leftIcon={<Archive size={13} />} onClick={() => setConfirm('archive')}>Archive</Button>}
-      {doc.status === 'archived' && <Button size="sm" variant="ghost" leftIcon={<Upload size={13} />} onClick={() => setConfirm('unarchive')}>Put back online</Button>}
+      {canEdit && doc.status === 'archived' && <Button size="sm" variant="ghost" leftIcon={<Upload size={13} />} onClick={() => setConfirm('unarchive')}>Put back online</Button>}
       {canDelete && <Button size="sm" variant="ghost" leftIcon={<Trash2 size={13} />} onClick={() => setConfirm('delete')}>Delete draft</Button>}
 
       <ConfirmModal open={confirm === 'archive'} onClose={() => setConfirm(null)} onConfirm={() => run.mutate('archive')} loading={run.isPending}

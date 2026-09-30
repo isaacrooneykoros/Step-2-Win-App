@@ -10,6 +10,7 @@ import { ConfirmModal } from '../ConfirmModal'
 import { consoleB, type DataExport, type ExportStatus } from '../consoleb/api'
 import { formatDateTime, formatNumber, formatRelative } from '../../lib/format'
 import { errorMessage } from '../../lib/errors'
+import { usePermissions } from '../../lib/permissions'
 
 type Tab = 'all' | ExportStatus
 const TONE: Record<ExportStatus, 'warning' | 'info' | 'success' | 'danger' | 'neutral'> = {
@@ -27,6 +28,11 @@ function size(bytes: number): string {
  * staff never see or download the archive itself.
  */
 export function ExportQueuePanel() {
+  if (!usePermissions().can('settings.system')) return null
+  return <ExportQueue />
+}
+
+function ExportQueue() {
   const qc = useQueryClient()
   const [tab, setTab] = useState<Tab>('all')
   const q = useQuery({ queryKey: ['admin', 'privacy-exports', tab], queryFn: () => consoleB.exports(tab === 'all' ? undefined : tab) })

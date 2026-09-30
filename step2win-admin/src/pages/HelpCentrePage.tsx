@@ -19,6 +19,7 @@ import { ApiError } from '../components/system/http'
 import { cn } from '../lib/cn'
 import { formatRelative } from '../lib/format'
 import { errorMessage } from '../lib/errors'
+import { usePermissions } from '../lib/permissions'
 
 const move = <T,>(list: T[], i: number, dir: -1 | 1): T[] => {
   const j = i + dir
@@ -30,6 +31,8 @@ const move = <T,>(list: T[], i: number, dir: -1 | 1): T[] => {
 
 export function HelpCentrePage() {
   const qc = useQueryClient()
+  const { can } = usePermissions()
+  const canEdit = can('content.announcements')
   const cats = useQuery({ queryKey: ['admin', 'help', 'categories'], queryFn: consoleB.helpCategories })
   const [selected, setSelected] = useState<number | null>(null)
   const categories = useMemo(() => cats.data?.results ?? [], [cats.data])
@@ -119,7 +122,7 @@ export function HelpCentrePage() {
       <PageHeader
         title="Help centre"
         description="Questions and answers customers see under Profile > Help centre. Group them in categories, order them, and publish when ready."
-        actions={<Button size="sm" variant="primary" leftIcon={<Plus size={13} />} disabled={!categories.length} onClick={() => openArticle('new')}>New article</Button>}
+        actions={canEdit && <Button size="sm" variant="primary" leftIcon={<Plus size={13} />} disabled={!categories.length} onClick={() => openArticle('new')}>New article</Button>}
       />
       {msg && (
         <div role={msg.tone === 'danger' ? 'alert' : 'status'} className={cn('flex items-center gap-3 rounded-md border px-3 py-2 text-sm',
@@ -130,7 +133,7 @@ export function HelpCentrePage() {
       )}
       <div className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <Panel title="Categories" padding="none"
-          actions={<Button size="sm" variant="secondary" leftIcon={<FolderPlus size={13} />} onClick={() => { setCatModal('new'); setCatForm({ title: '', description: '' }); setErrors({}) }}>Add</Button>}>
+          actions={canEdit && <Button size="sm" variant="secondary" leftIcon={<FolderPlus size={13} />} onClick={() => { setCatModal('new'); setCatForm({ title: '', description: '' }); setErrors({}) }}>Add</Button>}>
           {cats.isLoading ? <div className="space-y-2 p-4"><Skeleton height={32} /><Skeleton height={32} /><Skeleton height={32} /></div>
             : cats.error ? <ErrorState size="compact" error={cats.error} onRetry={() => void cats.refetch()} />
               : categories.length === 0 ? <EmptyState size="compact" title="No categories yet" description="Add one, e.g. Wallet and M-Pesa, Steps, Challenges." />
@@ -156,7 +159,7 @@ export function HelpCentrePage() {
         <Panel padding="none"
           title={cat ? cat.title : 'Articles'}
           description={cat ? (cat.description || 'No description.') : undefined}
-          actions={cat && (
+          actions={cat && canEdit && (
             <span className="flex items-center gap-1.5">
               <StatusBadge size="sm" tone={cat.is_published ? 'success' : 'neutral'} label={cat.is_published ? 'Shown' : 'Hidden'} />
               <IconButton size="sm" label={cat.is_published ? 'Hide category' : 'Show category'} onClick={() => toggleCat.mutate(cat)}>{cat.is_published ? <EyeOff size={13} /> : <Eye size={13} />}</IconButton>

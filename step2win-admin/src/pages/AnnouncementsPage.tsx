@@ -18,6 +18,7 @@ import { ApiError } from '../components/system/http'
 import { cn } from '../lib/cn'
 import { formatDateTime, formatNumber, formatRelative } from '../lib/format'
 import { errorMessage } from '../lib/errors'
+import { usePermissions } from '../lib/permissions'
 
 type Tab = 'all' | AnnouncementState
 const STATE_TONE: Record<AnnouncementState, 'success' | 'warning' | 'neutral' | 'info'> = {
@@ -114,6 +115,8 @@ function BannerPreview({ d }: { d: Draft }) {
 
 export function AnnouncementsPage() {
   const qc = useQueryClient()
+  const { can } = usePermissions()
+  const canEdit = can('content.announcements')
   const q = useQuery({ queryKey: ['admin', 'announcements'], queryFn: () => consoleB.announcements() })
   const [tab, setTab] = useState<Tab>('all')
   const [editing, setEditing] = useState<Announcement | 'new' | null>(null)
@@ -130,7 +133,7 @@ export function AnnouncementsPage() {
   }, [rows])
   const visible = tab === 'all' ? rows : rows.filter((r) => r.state === tab)
   const current = editing && editing !== 'new' ? rows.find((r) => r.id === editing.id) ?? editing : null
-  const readOnly = current?.status === 'archived'
+  const readOnly = current?.status === 'archived' || !canEdit
 
   const open = (a: Announcement | 'new') => {
     setEditing(a); setDraft(toDraft(a === 'new' ? undefined : a)); setFieldErrors({})
@@ -201,7 +204,7 @@ export function AnnouncementsPage() {
         actions={
           <>
             <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={q.isFetching} onClick={() => void q.refetch()}>Refresh</Button>
-            <Button size="sm" variant="primary" leftIcon={<Plus size={13} />} onClick={() => open('new')}>New announcement</Button>
+            {canEdit && <Button size="sm" variant="primary" leftIcon={<Plus size={13} />} onClick={() => open('new')}>New announcement</Button>}
           </>
         }
       />
@@ -236,7 +239,7 @@ export function AnnouncementsPage() {
         subtitle={current ? `${audienceLabel(current)} · updated ${formatRelative(current.updated_at)}${current.updated_by ? ` by ${current.updated_by}` : ''}` : 'Saved as a draft first; customers see nothing until you publish.'}
         headerAside={current && <StatusBadge size="sm" tone={STATE_TONE[current.state]} label={current.state.charAt(0).toUpperCase() + current.state.slice(1)} />}
         footer={
-          readOnly ? (
+          !canEdit ? undefined : readOnly ? (
             <Button variant="secondary" leftIcon={<Copy size={13} />} loading={act.isPending} onClick={() => act.mutate('duplicate')}>Copy as new draft</Button>
           ) : (
             <>
@@ -256,7 +259,7 @@ export function AnnouncementsPage() {
         }
       >
         <div className="space-y-4">
-          {readOnly && <p className="rounded-md border border-surface-border bg-surface-base px-3 py-2 text-xs text-ink-secondary">Archived announcements are kept for the record and can’t be edited. Copy it to reuse the text.</p>}
+          {readOnly && canEdit && <p className="rounded-md border border-surface-border bg-surface-base px-3 py-2 text-xs text-ink-secondary">Archived announcements are kept for the record and can’t be edited. Copy it to reuse the text.</p>}
           <fieldset disabled={readOnly} className="space-y-4">
             <Input label="Title" value={draft.title} maxLength={120} onChange={(e) => set('title', e.target.value)} error={fieldErrors.title} required />
             <Textarea label="Message" rows={4} maxLength={1000} value={draft.body} onChange={(e) => set('body', e.target.value)} error={fieldErrors.body}

@@ -215,3 +215,43 @@ class TrustToolTests(_Base):
         LinkageRun.objects.create(finished_at=timezone.now() + timedelta(seconds=3), ok=True, stats={"seconds": 3})
         rows = self.client.get("/api/admin/linkage/runs/").json()["results"]
         self.assertEqual(rows[0]["ok"], True)
+
+
+class PartBRoleTests(_Base):
+    """Part B endpoints follow the staff roles (apps/admin_api/roles.py)."""
+
+    def _as(self, roles):
+        from apps.admin_api.staff_models import StaffProfile
+
+        u = mk(f"b_role_{'_'.join(roles) or 'none'}", is_staff=True)
+        StaffProfile.objects.create(user=u, roles=roles)
+        c = APIClient()
+        c.force_authenticate(u)
+        return c
+
+    def test_role_gates(self):
+        content = self._as(["content"])
+        support = self._as(["support"])
+        trust = self._as(["trust"])
+        settings_staff = self._as(["settings"])
+        # Announcements: content writes, everyone else reads only.
+        body = {"title": "Hi"}
+        self.assertEqual(content.post("/api/admin/content/announcements/", body, format="json").status_code, 201)
+        self.assertEqual(support.post("/api/admin/content/announcements/", body, format="json").status_code, 403)
+        self.assertEqual(support.get("/api/admin/content/announcements/").status_code, 200)
+        # Support desk actions: support only.
+        out = {"user_id": self.user.id, "subject": "Hello", "message": "A question for you"}
+        self.assertEqual(content.post("/api/admin/support/tickets/outbound/", out, format="json").status_code, 403)
+        self.assertEqual(support.post("/api/admin/support/tickets/outbound/", out, format="json").status_code, 201)
+        # Exports queue and job pause: settings.
+        self.assertEqual(trust.get("/api/admin/privacy/exports/").status_code, 403)
+        self.assertEqual(settings_staff.get("/api/admin/privacy/exports/").status_code, 200)
+        # Anti-cheat policy: trust reads, only owners create.
+        self.assertEqual(trust.get("/api/admin/anticheat/policies/").status_code, 200)
+        self.assertEqual(support.get("/api/admin/anticheat/policies/").status_code, 403)
+        cfg = trust.get("/api/admin/anticheat/policies/").json()["default_config"]
+        self.assertEqual(trust.post("/api/admin/anticheat/policies/", {"version": "x", "description": "Trying it", "config": cfg},
+                                    format="json").status_code, 403)
+        owner = self._as(["owner"])
+        self.assertEqual(owner.post("/api/admin/anticheat/policies/", {"version": "x", "description": "Trying it", "config": cfg},
+                                    format="json").status_code, 201)

@@ -296,7 +296,6 @@ def moderate_team(request, team_id):
 
 
 # ── Admin console Part B: hide content, team members, ownership, delete ──────
-# ROLE: trust (every endpoint below)
 
 REASON_MIN = 5
 
@@ -318,7 +317,7 @@ def _feed_row(e: FeedEvent) -> dict:
 
 
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def feed_items(request):
     qs = FeedEvent.objects.select_related("user", "hidden_by").order_by("-id")
     q = (request.query_params.get("q") or "").strip()
@@ -348,7 +347,7 @@ def _set_hidden(obj, request, hide: bool, resource_type: str, label: str, name: 
 
 
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 @social_endpoint
 def feed_item_visibility(request, event_id, verb):
     if verb not in ("hide", "unhide"):
@@ -372,7 +371,7 @@ def _message_row(m) -> dict:
 
 
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def challenge_messages(request):
     from apps.challenges.models import ChallengeMessage
 
@@ -389,7 +388,7 @@ def challenge_messages(request):
 
 
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 @social_endpoint
 def challenge_message_visibility(request, message_id, verb):
     if verb not in ("hide", "unhide"):
@@ -414,7 +413,7 @@ def _members(team: Team) -> list[dict]:
 
 
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def team_members(request, team_id):
     team = Team.objects.filter(id=team_id).first()
     if team is None:
@@ -423,7 +422,7 @@ def team_members(request, team_id):
 
 
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 @social_endpoint
 def team_remove_member(request, team_id, user_id):
     from django.db import transaction
@@ -459,7 +458,7 @@ def team_remove_member(request, team_id, user_id):
 
 
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 @social_endpoint
 def team_transfer_ownership(request, team_id):
     from django.db import transaction
@@ -498,7 +497,7 @@ def team_transfer_ownership(request, team_id):
 
 
 @api_view(["DELETE"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 @social_endpoint
 def team_delete(request, team_id):
     """Only a disabled team with no members and no open reports; otherwise disable it."""

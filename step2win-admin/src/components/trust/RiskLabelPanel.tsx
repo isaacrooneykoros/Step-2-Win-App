@@ -6,6 +6,7 @@ import { Input, Textarea } from '../ui/Input'
 import { consoleB, type RiskLabel } from '../consoleb/api'
 import { cn } from '../../lib/cn'
 import { errorMessage } from '../../lib/errors'
+import { usePermissions } from '../../lib/permissions'
 
 const LABELS: Array<{ value: RiskLabel; label: string; hint: string }> = [
   { value: 'cheat', label: 'Cheating', hint: 'The steps on these days were not real walking.' },
@@ -19,7 +20,12 @@ const today = () => new Date().toISOString().slice(0, 10)
  * Label the case's user-days for the shadow risk model (POST /api/admin/risk-ml/labels/).
  * Labels train and evaluate the model only; they never change steps, trust or payouts.
  */
-export function RiskLabelPanel({ userId, username, date }: { userId: number; username: string; date: string | null }) {
+export function RiskLabelPanel(props: { userId: number; username: string; date: string | null }) {
+  if (!usePermissions().can('trust.act')) return null
+  return <RiskLabelForm {...props} />
+}
+
+function RiskLabelForm({ userId, username, date }: { userId: number; username: string; date: string | null }) {
   const qc = useQueryClient()
   const [label, setLabel] = useState<RiskLabel | null>(null)
   const [start, setStart] = useState(date ?? today())

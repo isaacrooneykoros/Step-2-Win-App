@@ -21,6 +21,7 @@ import { consoleB, type ChatMessage, type FeedItem, type TeamMember } from '../c
 import { formatDateTime, formatRelative } from '../../lib/format'
 import { errorMessage } from '../../lib/errors'
 import type { SocialTeam } from './api'
+import { usePermissions } from '../../lib/permissions'
 
 type Notify = (m: { message: string; tone: 'success' | 'danger' }) => void
 
@@ -36,6 +37,7 @@ export function ContentModerationTab({ onResult }: { onResult: Notify }) {
   const [q, setQ] = useState('')
   const [hiddenOnly, setHiddenOnly] = useState(false)
   const [pending, setPending] = useState<{ kind: 'feed' | 'chat'; id: number; hide: boolean; label: string } | null>(null)
+  const canAct = usePermissions().can('trust.act')
   const [reason, setReason] = useState('')
   const feed = useQuery({ queryKey: ['social-admin', 'feed', q, hiddenOnly], queryFn: () => consoleB.feed(q.trim() || undefined, hiddenOnly), enabled: kind === 'feed' })
   const chat = useQuery({ queryKey: ['social-admin', 'chat', q, hiddenOnly], queryFn: () => consoleB.chatMessages(q.trim() || undefined, hiddenOnly), enabled: kind === 'chat' })
@@ -52,7 +54,7 @@ export function ContentModerationTab({ onResult }: { onResult: Notify }) {
 
   const hiddenBadge = (r: { hidden: boolean; hidden_by: string | null; hidden_reason: string | null }) =>
     r.hidden ? <span title={r.hidden_reason ?? undefined}><StatusBadge size="sm" tone="danger" label={`Hidden${r.hidden_by ? ` by ${r.hidden_by}` : ''}`} /></span> : <StatusBadge size="sm" tone="success" label="Visible" />
-  const toggleBtn = (k: 'feed' | 'chat', id: number, hidden: boolean, label: string) => (
+  const toggleBtn = (k: 'feed' | 'chat', id: number, hidden: boolean, label: string) => !canAct ? null : (
     <Button size="sm" variant={hidden ? 'secondary' : 'danger-soft'} leftIcon={hidden ? <Eye size={13} /> : <EyeOff size={13} />}
       onClick={(e) => { e.stopPropagation(); setReason(''); setPending({ kind: k, id, hide: !hidden, label }) }}>
       {hidden ? 'Restore' : 'Hide'}
@@ -112,6 +114,7 @@ export function TeamMembersDrawer({ team, onClose, onResult }: { team: SocialTea
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['social-admin', 'team-members', team?.id], queryFn: () => consoleB.teamMembers(team!.id), enabled: !!team })
   const [pending, setPending] = useState<{ kind: 'remove' | 'transfer'; m: TeamMember } | 'delete' | null>(null)
+  const canAct = usePermissions().can('trust.act')
   const [reason, setReason] = useState('')
   const act = useMutation({
     mutationFn: async () => {
@@ -138,7 +141,7 @@ export function TeamMembersDrawer({ team, onClose, onResult }: { team: SocialTea
   return (
     <SlideOver open={!!team} onClose={onClose} width={480} title={team?.name ?? ''}
       subtitle={team ? `${team.member_count} member${team.member_count === 1 ? '' : 's'} · ${team.is_disabled ? 'paused' : team.visibility === 'public' ? 'public' : 'invite only'}` : undefined}
-      footer={team && (
+      footer={team && canAct && (
         <Button size="sm" variant="danger-soft" leftIcon={<Trash2 size={13} />} disabled={!canDelete}
           title={canDelete ? undefined : 'Only a paused team with no members can be deleted'} onClick={() => setPending('delete')}>Delete team</Button>
       )}>
@@ -154,10 +157,10 @@ export function TeamMembersDrawer({ team, onClose, onResult }: { team: SocialTea
                     <span className="block text-2xs text-ink-muted">Joined {formatRelative(m.joined_at)}</span>
                   </span>
                   <StatusBadge size="sm" tone={m.role === 'owner' ? 'violet' : 'neutral'} label={m.role === 'owner' ? 'Owner' : m.role === 'admin' ? 'Admin' : 'Member'} />
-                  {m.user && m.role !== 'owner' && (
+                  {canAct && m.user && m.role !== 'owner' && (
                     <Button size="sm" variant="ghost" leftIcon={<Crown size={13} />} onClick={() => { setReason(''); setPending({ kind: 'transfer', m }) }}>Make owner</Button>
                   )}
-                  {m.user && (
+                  {canAct && m.user && (
                     <Button size="sm" variant="ghost" leftIcon={<UserMinus size={13} />} disabled={m.role === 'owner' && members.length > 1}
                       title={m.role === 'owner' && members.length > 1 ? 'Make someone else the owner first' : undefined}
                       onClick={() => { setReason(''); setPending({ kind: 'remove', m }) }}>Remove</Button>

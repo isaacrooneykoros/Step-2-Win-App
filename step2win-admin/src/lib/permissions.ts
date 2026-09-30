@@ -37,6 +37,8 @@ export const ROUTE_PERMS: Record<string, StaffPermission> = {
   '/moderation': 'trust.view',
   '/social': 'trust.view',
   '/support': 'support.view',
+  '/trust-tools': 'trust.view',
+  '/anti-cheat-policy': 'trust.view',
   '/staff': 'owner.staff',
 }
 

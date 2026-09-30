@@ -2,6 +2,7 @@ import { useMemo, useState, type ElementType } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, ArchiveRestore, Award, Crown, Flame, Footprints, Medal, Pencil, Plus, RefreshCw, Trash2, Trophy, UserPlus } from 'lucide-react'
 import { http } from '../components/system/http'
+import { usePermissions } from '../lib/permissions'
 import { PageHeader } from '../components/PageHeader'
 import { StatCard } from '../components/StatCard'
 import { StatusBadge } from '../components/StatusBadge'
@@ -190,6 +191,7 @@ function BadgeDrawer({ badge, onClose, onEdit, onDeleted }: {
     onSuccess: () => { setConfirmDelete(false); onDeleted(badge!.name) },
   })
   const [confirmRetire, setConfirmRetire] = useState(false)
+  const canRetire = usePermissions().can('content.badges')
   const retired = Boolean((badge as RetirableBadge | null)?.is_retired)
   const retire = useMutation({
     mutationFn: () => retireBadge(badge!.id, !retired),
@@ -218,9 +220,11 @@ function BadgeDrawer({ badge, onClose, onEdit, onDeleted }: {
           {badge.users_earned === 0 && (
             <Button size="sm" variant="danger-soft" leftIcon={<Trash2 size={13} />} onClick={() => setConfirmDelete(true)}>Delete</Button>
           )}
-          <Button size="sm" variant="secondary" leftIcon={retired ? <ArchiveRestore size={13} /> : <Archive size={13} />} onClick={() => setConfirmRetire(true)}>
-            {retired ? 'Bring back' : 'Retire'}
-          </Button>
+          {canRetire && (
+            <Button size="sm" variant="secondary" leftIcon={retired ? <ArchiveRestore size={13} /> : <Archive size={13} />} onClick={() => setConfirmRetire(true)}>
+              {retired ? 'Bring back' : 'Retire'}
+            </Button>
+          )}
           <Button size="sm" variant="secondary" leftIcon={<Pencil size={13} />} onClick={() => onEdit(badge)}>Edit</Button>
         </>
       )}>

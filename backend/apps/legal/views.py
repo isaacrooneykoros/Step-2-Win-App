@@ -149,7 +149,6 @@ def list_documents_admin(request):
 @permission_classes(staff("console.view", write="content.legal"))
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def document_detail_admin(request, pk):
-    # ROLE: content
     """
     GET  — fetch single document for editing
     PUT/PATCH — update document content (text or file upload)
@@ -447,10 +446,9 @@ def restore_version(request, pk, version_id):
 
 @extend_schema(request=None, responses={200: LegalDocumentAdminSerializer})
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes(staff("content.legal"))
 def archive_document(request, pk):
     """Unpublish: customers stop seeing the document. History and acceptances stay."""
-    # ROLE: content
     try:
         doc = LegalDocument.objects.get(pk=pk)
     except LegalDocument.DoesNotExist:
@@ -471,10 +469,9 @@ def archive_document(request, pk):
 
 @extend_schema(request=None, responses={200: LegalDocumentAdminSerializer})
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes(staff("content.legal"))
 def unarchive_document(request, pk):
     """Put an archived document back online at the same version (no new version)."""
-    # ROLE: content
     try:
         doc = LegalDocument.objects.get(pk=pk)
     except LegalDocument.DoesNotExist:
@@ -491,10 +488,9 @@ def unarchive_document(request, pk):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes(staff("console.view"))
 def document_acks(request, pk):
     """How many accounts have read each version (UserDocumentAck)."""
-    # ROLE: content
     from django.contrib.auth import get_user_model
     from django.db.models import Count
 
