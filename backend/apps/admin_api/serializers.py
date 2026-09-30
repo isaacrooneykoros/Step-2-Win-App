@@ -287,6 +287,8 @@ class AdminChallengeSerializer(serializers.ModelSerializer):
             "win_condition",
             "payout_structure",
             "net_pool",
+            "is_archived",
+            "archived_at",
             "created_at",
             "updated_at",
         ]

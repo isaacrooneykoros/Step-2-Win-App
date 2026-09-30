@@ -110,6 +110,10 @@ class ChallengeListView(generics.ListAPIView):
         queryset = queryset.exclude(
             Q(status="pending") & ~Q(participants__user=self.request.user)
         )
+        # Archived by staff (finished challenges): only their participants still see them.
+        queryset = queryset.exclude(
+            Q(is_archived=True) & ~Q(participants__user=self.request.user)
+        )
 
         return queryset.order_by("-created_at")
 
@@ -1152,8 +1156,10 @@ def challenge_lobby_card(request, pk):
         )
     except Challenge.DoesNotExist:
         return Response({"error": "Challenge not found"}, status=404)
-    if challenge.status == "pending" and not challenge.participants.filter(user=request.user).exists():
-        return Response({"error": "Challenge not found"}, status=404)  # awaiting approval
+    if (challenge.status == "pending" or challenge.is_archived) and not challenge.participants.filter(
+        user=request.user
+    ).exists():
+        return Response({"error": "Challenge not found"}, status=404)  # awaiting approval / archived
 
     Challenge.objects.filter(pk=pk).update(view_count=F("view_count") + 1)
 
@@ -1186,6 +1192,8 @@ def spectator_leaderboard(request, pk):
     try:
         challenge = Challenge.objects.get(pk=pk, is_public=True, is_private=False)
     except Challenge.DoesNotExist:
+        return Response({"error": "Challenge not found or not public"}, status=404)
+    if challenge.is_archived and not challenge.participants.filter(user=request.user).exists():
         return Response({"error": "Challenge not found or not public"}, status=404)
 
     if challenge.status == "pending":

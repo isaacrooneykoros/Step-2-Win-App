@@ -1211,6 +1211,13 @@ class AdminChallengeViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
             )
         if params.get("featured") == "true":
             qs = qs.filter(is_featured=True)
+        if params.get("platform") == "true":
+            qs = qs.filter(is_platform_challenge=True)
+        archived = params.get("archived")
+        if archived == "true":
+            qs = qs.filter(is_archived=True)
+        elif archived == "false":
+            qs = qs.filter(is_archived=False)
         ordering = params.get("ordering") or "-created_at"
         if ordering.lstrip("-") not in {
             "created_at",
@@ -1459,9 +1466,195 @@ class AdminChallengeViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
         # One by one through the shared service so each challenge's entries are refunded.
         from apps.challenges.services import cancel_challenge as cancel_and_refund
 
-        count = sum(1 for challenge in challenges if cancel_and_refund(challenge, reason="Bulk cancelled by admin"))
+        reason = str(request.data.get("reason") or "").strip()[:500]
+        count = 0
+        for challenge in challenges:
+            old_status = challenge.status
+            if cancel_and_refund(challenge, reason=f"Cancelled by admin: {reason}" if reason else "Bulk cancelled by admin"):
+                count += 1
+                self._audit(
+                    request, challenge, "cancel", f"Bulk cancelled challenge {challenge.name}",
+                    {"status": {"old": old_status, "new": "cancelled"}, **({"reason": reason} if reason else {})},
+                )
 
-        return Response({"status": f"{count} challenge(s) cancelled"})
+        return Response({"status": f"{count} challenge(s) cancelled", "cancelled": count})
+
+    @action(detail=True, methods=["post"])
+    def set_archived(self, request, pk=None):
+        """Hide (or show again) a completed / cancelled challenge in customer lists.
+        Participants keep it in their own history; nothing is deleted."""
+        challenge = self.get_object()
+        archived = bool(request.data.get("archived", True))
+        if archived and challenge.status not in ("completed", "cancelled"):
+            return Response(
+                {"error": "Only completed or cancelled challenges can be archived."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        old = challenge.is_archived
+        challenge.is_archived = archived
+        challenge.archived_at = timezone.now() if archived else None
+        challenge.save(update_fields=["is_archived", "archived_at", "updated_at"])
+        self._audit(
+            request, challenge, "archive", f"{'Archived' if archived else 'Unarchived'} challenge {challenge.name}",
+            {"is_archived": {"old": old, "new": archived}},
+        )
+        return Response(AdminChallengeSerializer(challenge).data)
+
+    @action(detail=False, methods=["post"])
+    def create_platform(self, request):
+        """Create a platform (sponsored) challenge, live now, open to everyone.
+
+        Funding: ``platform_bonus_kes`` is added to the payout pool at settlement
+        (Challenge.net_pool) and recorded then as a negative payments.PlatformRevenue row
+        ("platform_bonus"), i.e. paid out of platform revenue. It is spent only if someone
+        qualifies; if nobody does (entries refunded) or the challenge is cancelled, no
+        bonus leaves the platform. A bonus needs the finance.adjust permission too."""
+        from datetime import date as date_cls
+
+        from apps.admin_api.models import SystemSettings
+        from apps.admin_api.roles import has_perm
+
+        data = request.data
+        errors = {}
+        name = str(data.get("name") or "").strip()[:200]
+        if len(name) < 3:
+            errors["name"] = "Give the challenge a name (3+ characters)."
+        try:
+            milestone = int(data.get("milestone"))
+        except (TypeError, ValueError):
+            milestone = 0
+        settings_obj = SystemSettings.load()
+        if not (settings_obj.min_challenge_milestone <= milestone <= settings_obj.max_challenge_milestone):
+            errors["milestone"] = (
+                f"Between {settings_obj.min_challenge_milestone:,} and {settings_obj.max_challenge_milestone:,} steps."
+            )
+        try:
+            entry_fee = Decimal(str(data.get("entry_fee", "0") or "0")).quantize(Decimal("0.01"))
+            bonus = Decimal(str(data.get("platform_bonus_kes", "0") or "0")).quantize(Decimal("0.01"))
+        except Exception:
+            entry_fee, bonus = Decimal("-1"), Decimal("-1")
+        if entry_fee < 0 or entry_fee > settings_obj.max_challenge_entry_fee:
+            errors["entry_fee"] = f"Between 0 and {settings_obj.max_challenge_entry_fee}."
+        if bonus < 0 or bonus > Decimal("1000000"):
+            errors["platform_bonus_kes"] = "Between 0 and 1,000,000."
+        today = timezone.localdate()
+        try:
+            end_date = date_cls.fromisoformat(str(data.get("end_date") or ""))
+        except ValueError:
+            end_date = None
+        if end_date is None or end_date <= today or (end_date - today).days > 90:
+            errors["end_date"] = "An end date after today, at most 90 days away."
+        try:
+            max_participants = int(data.get("max_participants") or 100)
+        except (TypeError, ValueError):
+            max_participants = 0
+        if not (2 <= max_participants <= 1000):
+            errors["max_participants"] = "Between 2 and 1,000."
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        if bonus > 0 and not has_perm(request.user, "finance.adjust"):
+            return Response(
+                {"error": "A platform bonus spends platform money: it needs the finance role as well."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        challenge = Challenge.objects.create(
+            name=name,
+            description=str(data.get("description") or "").strip()[:2000],
+            creator=request.user,
+            milestone=milestone,
+            entry_fee=entry_fee,
+            max_participants=max_participants,
+            status="active",
+            start_date=today,
+            end_date=end_date,
+            is_private=False,
+            is_public=True,
+            is_featured=bool(data.get("is_featured")),
+            is_platform_challenge=True,
+            platform_bonus_kes=bonus,
+            win_condition="proportional",
+            payout_structure="proportional",
+        )
+        self._audit(
+            request, challenge, "create", f"Created platform challenge {challenge.name}",
+            {"entry_fee": str(entry_fee), "platform_bonus_kes": str(bonus), "milestone": milestone,
+             "end_date": end_date.isoformat(), "max_participants": max_participants},
+        )
+        return Response(AdminChallengeSerializer(challenge).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def remove_participant(self, request, pk=None):
+        """Disqualify / remove a participant from a live challenge.
+
+        mode=refund: the entry fee goes back to their wallet (refund ledger row).
+        mode=forfeit: the entry fee is kept by the platform (PlatformRevenue row
+        "forfeited_entry"); their wallet is not credited. Either way the entry leaves the
+        pool and their locked balance. Audited; the user gets an in-app notice."""
+        from apps.admin_api.notices import notice_to_user
+        from apps.payments.models import PlatformRevenue
+        from apps.wallet.models import WalletTransaction as WT
+
+        mode = request.data.get("mode")
+        reason = str(request.data.get("reason") or "").strip()[:500]
+        if mode not in ("refund", "forfeit"):
+            return Response({"error": "mode must be refund or forfeit"}, status=status.HTTP_400_BAD_REQUEST)
+        if len(reason) < 5:
+            return Response({"error": "A reason of at least 5 characters is required."}, status=status.HTTP_400_BAD_REQUEST)
+        with db_transaction.atomic():
+            challenge = Challenge.objects.select_for_update().get(pk=self.get_object().pk)
+            if challenge.status not in ("pending", "active"):
+                return Response(
+                    {"error": "Participants can only be removed from pending or live challenges."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            participant = (
+                Participant.objects.select_for_update().filter(challenge=challenge, user_id=request.data.get("user_id")).first()
+            )
+            if participant is None:
+                return Response({"error": "That user is not in this challenge."}, status=status.HTTP_404_NOT_FOUND)
+            user = User.objects.select_for_update().get(id=participant.user_id)
+            fee = challenge.entry_fee
+            steps = participant.steps
+            before = user.wallet_balance
+            user.locked_balance = max(Decimal("0.00"), user.locked_balance - fee)
+            ledger = {}
+            if mode == "refund":
+                user.wallet_balance = before + fee
+                user.save(update_fields=["wallet_balance", "locked_balance", "updated_at"])
+                if fee > 0:
+                    t = WT.objects.create(
+                        user=user, type="refund", amount=fee, balance_before=before, balance_after=user.wallet_balance,
+                        description=f"Removed from challenge: {challenge.name} (entry refunded)",
+                        metadata={"challenge_id": challenge.id, "source": "admin_remove_participant", "reason": reason},
+                    )
+                    ledger["wallet_transaction_id"] = t.id
+            else:
+                user.save(update_fields=["locked_balance", "updated_at"])
+                if fee > 0:
+                    rev = PlatformRevenue.objects.create(
+                        challenge=challenge, amount_kes=fee,
+                        narration=f"Forfeited entry: {user.username} removed from {challenge.name}"[:255],
+                        metadata={"kind": "forfeited_entry", "user_id": user.id, "reason": reason},
+                    )
+                    ledger["platform_revenue_id"] = rev.id
+            challenge.total_pool = max(Decimal("0.00"), challenge.total_pool - fee)
+            challenge.save(update_fields=["total_pool", "updated_at"])
+            participant.delete()
+        self._audit(
+            request, challenge, "disqualify",
+            f"Removed {user.username} from {challenge.name} ({'entry refunded' if mode == 'refund' else 'entry forfeited'})",
+            {"user_id": user.id, "username": user.username, "mode": mode, "entry_fee": str(fee), "steps": steps,
+             "reason": reason, **ledger},
+        )
+        notice_to_user(
+            user, request.user, "Challenge entry update",
+            f"You have been removed from the challenge \"{challenge.name}\". "
+            + (f"Your entry fee of KES {fee} is back in your wallet." if mode == "refund" and fee > 0 else "")
+            + (" Your entry fee was not refunded." if mode == "forfeit" and fee > 0 else "")
+            + f" Reason: {reason}",
+            category="challenge", team="support",
+        )
+        return Response({"status": "removed", "mode": mode, **ledger})
 
     @action(detail=False, methods=["post"])
     def bulk_delete(self, request):

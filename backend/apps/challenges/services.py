@@ -234,6 +234,16 @@ def finalize_challenge(challenge):
                 narration=f"Platform fee from challenge: {challenge.name}",
                 metadata={"total_pool": str(challenge.total_pool)},
             )
+            # Platform bonus (platform challenges): paid into the pool out of platform
+            # revenue, recorded as a negative revenue row. Only when someone was paid.
+            bonus = challenge.platform_bonus_kes or Decimal("0.00")
+            if bonus > 0:
+                PlatformRevenue.objects.create(
+                    challenge=challenge,
+                    amount_kes=-bonus,
+                    narration=f"Platform bonus paid into challenge pool: {challenge.name}"[:255],
+                    metadata={"kind": "platform_bonus", "bonus_kes": str(bonus)},
+                )
 
         # ── Mark challenge completed ───────────────────────────────
         challenge.status = "completed"

@@ -79,10 +79,22 @@ class ChallengeAdmin(admin.ModelAdmin):
     activate_challenges.short_description = "Activate selected challenges"
 
     def complete_challenges(self, request, queryset):
-        updated = queryset.filter(status="active").update(status="completed")
-        self.message_user(request, f"{updated} challenge(s) marked as completed")
+        # Settle through the real path (payouts, results, holds, revenue): never a bare
+        # status flip, which would leave entries locked and nobody paid.
+        from apps.challenges.services import finalize_challenge
 
-    complete_challenges.short_description = "Complete selected challenges"
+        from django.utils import timezone
+
+        today = timezone.localdate()
+        ended = queryset.filter(status="active", end_date__lt=today)
+        finalized = sum(1 for challenge in ended if finalize_challenge(challenge))
+        skipped = queryset.filter(status="active").count()
+        self.message_user(
+            request,
+            f"{finalized} ended challenge(s) settled. {skipped} still running (not ended yet) were left alone.",
+        )
+
+    complete_challenges.short_description = "Settle selected ended challenges (payouts)"
 
     def cancel_challenges(self, request, queryset):
         # Only cancel pending (awaiting approval) challenges, refunding entries
@@ -139,6 +151,17 @@ class ParticipantAdmin(admin.ModelAdmin):
         )
 
     progress_bar.short_description = "Progress"
+
+    # Read-only: steps, qualification and payouts are derived by the step sync and the
+    # settlement service. Use the admin console to remove a participant (refund/forfeit).
+    def get_readonly_fields(self, request, obj=None):
+        return [f.name for f in Participant._meta.fields] + ["progress_percentage"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ChallengeMessage)

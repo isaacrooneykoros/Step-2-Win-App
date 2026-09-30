@@ -238,7 +238,9 @@ class Challenge(models.Model):
 
     @property
     def net_pool(self):
-        return self.total_pool - self.platform_fee
+        """What winners share: entries minus the platform fee, plus any platform bonus
+        (platform challenges; funded from platform revenue at settlement)."""
+        return self.total_pool - self.platform_fee + (self.platform_bonus_kes or Decimal("0.00"))
 
 
 class Participant(models.Model):
