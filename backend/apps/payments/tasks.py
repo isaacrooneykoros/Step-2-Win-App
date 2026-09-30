@@ -299,16 +299,8 @@ def reconcile_financial_integrity_task():
     """
     Runs periodic financial integrity checks and emits alerts when thresholds are breached.
     """
-    thresholds = ReconciliationThresholds(
-        max_stuck_processing=int(getattr(settings, "RECON_MAX_STUCK_PROCESSING", 10)),
-        max_unprocessed_callbacks=int(
-            getattr(settings, "RECON_MAX_UNPROCESSED_CALLBACKS", 5)
-        ),
-        max_negative_balance_users=int(
-            getattr(settings, "RECON_MAX_NEGATIVE_BALANCE_USERS", 0)
-        ),
-        max_callback_failure_rate_pct=float(
-            getattr(settings, "RECON_MAX_CALLBACK_FAILURE_RATE_PCT", 5.0)
-        ),
-    )
+    # Settings > Advanced > Monitoring thresholds (console), else the server values.
+    from apps.admin_api.business_rules import reconciliation_thresholds
+
+    thresholds = reconciliation_thresholds()
     return run_financial_reconciliation(thresholds=thresholds, send_alerts=True)

@@ -412,10 +412,14 @@ class AdminBadgeSerializer(serializers.ModelSerializer):
             "criteria_type",
             "criteria_value",
             "users_earned",
+            "is_retired",
+            "retired_at",
             "created_at",
         ]
         read_only_fields = [
             "id",
+            "is_retired",
+            "retired_at",
             "created_at",
         ]
 
@@ -515,9 +519,52 @@ class SystemSettingsSerializer(serializers.Serializer):
         allow_blank=True, required=False, max_length=4000, trim_whitespace=False
     )
 
+    # Business switches moved from the environment (business_rules.py). null = use the
+    # server value; checked against the server's hard limits in validate().
+    rank_payouts_enabled = serializers.BooleanField(allow_null=True, required=False)
+    step_money_requires_evidence = serializers.BooleanField(allow_null=True, required=False)
+    step_evidence_cutover_date = serializers.DateField(allow_null=True, required=False)
+    play_integrity_accept_basic = serializers.BooleanField(allow_null=True, required=False)
+    min_deposit_kes = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True, required=False)
+    max_deposit_kes = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True, required=False)
+    max_withdrawal_kes = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True, required=False)
+    max_daily_withdrawal_kes = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True, required=False)
+    max_withdrawals_per_day = serializers.IntegerField(allow_null=True, required=False)
+    max_withdrawals_per_hour = serializers.IntegerField(allow_null=True, required=False)
+    min_seconds_between_withdrawals = serializers.IntegerField(allow_null=True, required=False)
+    paid_challenge_min_trust_score = serializers.IntegerField(allow_null=True, required=False)
+    paid_challenge_min_joined = serializers.IntegerField(allow_null=True, required=False)
+    max_locked_balance_percent = serializers.IntegerField(allow_null=True, required=False)
+    risk_ml_hold_threshold = serializers.FloatField(allow_null=True, required=False)
+    recon_max_stuck_processing = serializers.IntegerField(allow_null=True, required=False)
+    recon_max_unprocessed_callbacks = serializers.IntegerField(allow_null=True, required=False)
+    recon_max_negative_balance_users = serializers.IntegerField(allow_null=True, required=False)
+    recon_max_callback_failure_rate_pct = serializers.FloatField(allow_null=True, required=False)
+    drift_lookback_hours = serializers.IntegerField(allow_null=True, required=False)
+    drift_min_samples = serializers.IntegerField(allow_null=True, required=False)
+    drift_per_sample_alert_pct = serializers.FloatField(allow_null=True, required=False)
+    drift_max_avg_abs_delta_pct = serializers.FloatField(allow_null=True, required=False)
+    drift_max_high_drift_ratio_pct = serializers.FloatField(allow_null=True, required=False)
+    drift_max_review_mismatch_ratio_pct = serializers.FloatField(allow_null=True, required=False)
+
     # Metadata
     updated_at = serializers.DateTimeField(read_only=True)
     updated_by = serializers.SerializerMethodField()
+
+    def validate(self, attrs):
+        from apps.admin_api.business_rules import RULES, validate_console_value
+
+        errors = {}
+        for field in RULES:
+            if field in attrs:
+                clean, error = validate_console_value(field, attrs[field])
+                if error:
+                    errors[field] = error
+                else:
+                    attrs[field] = clean
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs
 
     def get_updated_by(self, obj) -> str | None:
         """Get username of user who last updated settings"""

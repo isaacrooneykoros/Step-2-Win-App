@@ -1,6 +1,8 @@
 import { useMemo, useState, type ElementType } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Award, Crown, Flame, Footprints, Medal, Pencil, Plus, RefreshCw, Trash2, Trophy, UserPlus } from 'lucide-react'
+import { Archive, ArchiveRestore, Award, Crown, Flame, Footprints, Medal, Pencil, Plus, RefreshCw, Trash2, Trophy, UserPlus } from 'lucide-react'
+import { http } from '../components/system/http'
+import { usePermissions } from '../lib/permissions'
 import { PageHeader } from '../components/PageHeader'
 import { StatCard } from '../components/StatCard'
 import { StatusBadge } from '../components/StatusBadge'
@@ -20,6 +22,10 @@ import { ApiError, consoleApi } from '../components/users/api'
 import type { BadgeDef, ConsoleUser } from '../components/users/types'
 import { ActionNotice, SectionTitle, Timestamp, UserCell } from '../components/users/shared'
 import { humanize, useDebounced } from '../components/users/utils'
+
+/** Retired badges: kept by holders, never awarded again, not offered as "to earn". */
+type RetirableBadge = BadgeDef & { is_retired?: boolean; retired_at?: string | null }
+const retireBadge = (id: number, retired: boolean) => http<RetirableBadge>(`/api/admin/badges/${id}/retire/`, { body: { retired } })
 
 /** badge.icon holds an emoji in the database; the console never renders it. Type decides the icon. */
 const TYPE_ICON: Record<string, ElementType> = {
@@ -82,7 +88,7 @@ export function BadgesPage() {
         <span className="flex min-w-0 items-center gap-2.5">
           <BadgeIcon type={b.badge_type} />
           <span className="min-w-0">
-            <span className="block truncate font-medium text-ink-primary">{b.name}</span>
+            <span className="flex items-center gap-1.5 truncate font-medium text-ink-primary">{b.name}{(b as RetirableBadge).is_retired && <StatusBadge size="sm" tone="neutral" label="Retired" />}</span>
             <span className="block truncate text-xs text-ink-muted">{b.description}</span>
           </span>
         </span>
@@ -184,6 +190,18 @@ function BadgeDrawer({ badge, onClose, onEdit, onDeleted }: {
     mutationFn: () => consoleApi.deleteBadge(badge!.id),
     onSuccess: () => { setConfirmDelete(false); onDeleted(badge!.name) },
   })
+  const [confirmRetire, setConfirmRetire] = useState(false)
+  const canRetire = usePermissions().can('content.badges')
+  const retired = Boolean((badge as RetirableBadge | null)?.is_retired)
+  const retire = useMutation({
+    mutationFn: () => retireBadge(badge!.id, !retired),
+    onSuccess: () => {
+      setConfirmRetire(false)
+      setNotice({ tone: 'success', text: retired ? 'Badge brought back: it can be earned again.' : 'Badge retired: holders keep it, nobody new earns it.' })
+      void qc.invalidateQueries({ queryKey: ['admin', 'badges'] })
+    },
+    onError: (e) => { setConfirmRetire(false); setNotice({ tone: 'danger', text: e instanceof Error ? e.message : 'Request failed' }) },
+  })
   const give = useMutation({
     mutationFn: (u: ConsoleUser) => consoleApi.awardBadge(badge!.id, u.id),
     onSuccess: (res) => {
@@ -199,7 +217,14 @@ function BadgeDrawer({ badge, onClose, onEdit, onDeleted }: {
     <SlideOver open={!!badge} onClose={onClose} width={520} title={badge?.name ?? ''} subtitle={badge ? humanize(badge.badge_type) : undefined}
       footer={badge && (
         <>
-          <Button size="sm" variant="danger-soft" leftIcon={<Trash2 size={13} />} onClick={() => setConfirmDelete(true)}>Delete</Button>
+          {badge.users_earned === 0 && (
+            <Button size="sm" variant="danger-soft" leftIcon={<Trash2 size={13} />} onClick={() => setConfirmDelete(true)}>Delete</Button>
+          )}
+          {canRetire && (
+            <Button size="sm" variant="secondary" leftIcon={retired ? <ArchiveRestore size={13} /> : <Archive size={13} />} onClick={() => setConfirmRetire(true)}>
+              {retired ? 'Bring back' : 'Retire'}
+            </Button>
+          )}
           <Button size="sm" variant="secondary" leftIcon={<Pencil size={13} />} onClick={() => onEdit(badge)}>Edit</Button>
         </>
       )}>
@@ -212,6 +237,7 @@ function BadgeDrawer({ badge, onClose, onEdit, onDeleted }: {
           <div>
             <DetailRow label="Awarded when" value={criteriaText(badge)} />
             <DetailRow label="Earned by" value={`${formatNumber(badge.users_earned)} users`} />
+            <DetailRow label="Status" value={retired ? 'Retired: kept by holders, not awarded any more' : 'Active'} />
             <DetailRow label="Slug" value={badge.slug} mono />
             <DetailRow label="Created" value={<Timestamp value={badge.created_at} exact />} />
           </div>
@@ -242,12 +268,20 @@ function BadgeDrawer({ badge, onClose, onEdit, onDeleted }: {
 
       {badge && (
         <ConfirmModal open={confirmDelete} onClose={() => setConfirmDelete(false)} onConfirm={() => del.mutate()} loading={del.isPending}
-          variant="danger" title="Delete badge" confirmLabel="Delete badge" confirmText={badge.users_earned ? badge.slug : undefined}
-          message={badge.users_earned ? `The badge disappears from the profiles of ${formatNumber(badge.users_earned)} users who earned it.` : 'Nobody has earned this badge yet.'}
+          variant="danger" title="Delete badge" confirmLabel="Delete badge"
+          message="Nobody has earned this badge yet, so no profile changes. Badges people hold can only be retired." 
           details={[{ label: 'Badge', value: badge.name }, { label: 'Earned by', value: formatNumber(badge.users_earned) }]}
           consequence="This cannot be undone.">
           {del.error && <p role="alert" className="text-sm text-danger">{del.error.message}</p>}
         </ConfirmModal>
+      )}
+      {badge && (
+        <ConfirmModal open={confirmRetire} onClose={() => setConfirmRetire(false)} onConfirm={() => retire.mutate()} loading={retire.isPending}
+          variant={retired ? 'info' : 'warning'} title={retired ? 'Bring this badge back?' : 'Retire this badge?'} confirmLabel={retired ? 'Bring back' : 'Retire badge'}
+          message={retired
+            ? 'The badge can be earned again and shows in customers’ “to earn” lists.'
+            : `The ${formatNumber(badge.users_earned)} people who hold it keep it. Nobody new earns it and it no longer shows as a badge to earn.${badge.users_earned ? ' A badge people hold can’t be deleted.' : ''}`}
+          details={[{ label: 'Badge', value: badge.name }, { label: 'Held by', value: formatNumber(badge.users_earned) }]} />
       )}
       {badge && award && (
         <ConfirmModal open onClose={() => setAward(null)} onConfirm={() => give.mutate(award)} loading={give.isPending} variant="info"

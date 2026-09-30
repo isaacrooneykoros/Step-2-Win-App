@@ -50,6 +50,7 @@ class LegalDocumentAdminSerializer(serializers.ModelSerializer):
     last_edited_by_username = serializers.SerializerMethodField()
     history_count = serializers.SerializerMethodField()
     has_unpublished_changes = serializers.SerializerMethodField()
+    acknowledged_current = serializers.SerializerMethodField()
 
     class Meta:
         model = LegalDocument
@@ -74,9 +75,12 @@ class LegalDocumentAdminSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "history_count",
+            "acknowledged_current",
         ]
         read_only_fields = [
-            # Live content only changes through publish.
+            # Live content only changes through publish; status only through the
+            # publish / archive / unarchive endpoints (audited).
+            "status",
             "content_html",
             "version",
             "version_label",
@@ -88,6 +92,10 @@ class LegalDocumentAdminSerializer(serializers.ModelSerializer):
 
     def get_last_edited_by_username(self, obj) -> str | None:
         return obj.last_edited_by.username if obj.last_edited_by else None
+
+    def get_acknowledged_current(self, obj) -> int:
+        """Accounts that have read (acknowledged) the current version."""
+        return obj.user_acks.filter(version_seen__gte=obj.version).count()
 
     def get_history_count(self, obj) -> int:
         return obj.history.count()

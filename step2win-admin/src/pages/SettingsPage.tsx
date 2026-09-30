@@ -21,11 +21,14 @@ import {
 } from '../components/system/fields'
 import { SettingField, type StaffOption } from '../components/system/SettingField'
 import { ProfileSection } from '../components/system/ProfileSection'
+import { PrivacyPanel } from '../components/system/PrivacyPanel'
 
 const MAIN_SECTIONS = SECTIONS.filter((s) => !s.advanced)
 const ADVANCED_SECTIONS = SECTIONS.filter((s) => s.advanced)
 const ADVANCED_IDS = new Set<SectionId>(ADVANCED_SECTIONS.map((s) => s.id))
 const ADVANCED_ANCHORS = new Set(['advanced', 'server-limits', 'anti-cheat', 'staff', ...ADVANCED_SECTIONS.map((s) => `section-${s.id}`)])
+/** Privacy is saved on its own (separate backend) and sits after this section. */
+const PRIVACY_AFTER: SectionId = 'anticheat'
 
 function consequence(f: FieldDef, after: FormValue, ctx?: SettingsContext): string | null {
   const active = ctx?.impact.active_challenges
@@ -59,6 +62,25 @@ function consequence(f: FieldDef, after: FormValue, ctx?: SettingsContext): stri
         : 'The customer app becomes available again.'
     case 'support_auto_assign_mode':
       return 'Applies to tickets opened from now on.'
+    case 'rank_payouts_enabled':
+      return after === 'on'
+        ? 'Customers can pick winner-takes-all when creating a challenge. Existing challenges keep their rule.'
+        : 'New challenges use a proportional split. Existing rank-payout challenges keep their rule.'
+    case 'step_money_requires_evidence':
+      return after === 'on'
+        ? 'From now on only evidence-backed steps count toward challenge money. Customers on old app builds stop earning challenge credit for new steps.'
+        : null
+    case 'min_deposit_kes':
+    case 'max_deposit_kes':
+    case 'max_withdrawal_kes':
+    case 'max_daily_withdrawal_kes':
+    case 'max_withdrawals_per_day':
+    case 'max_withdrawals_per_hour':
+    case 'min_seconds_between_withdrawals':
+      return 'Applies to requests made from now on. Blank uses the server value; the server’s hard limit always applies.'
+    case 'paid_challenge_min_trust_score':
+    case 'paid_challenge_min_joined':
+      return 'Applies to paid challenges created from now on.'
     default:
       return null
   }
@@ -193,6 +215,7 @@ export function SettingsPage() {
               changed={!sameValue(f, current[f.key], saved[f.key])}
               error={visibleErrors[f.key]}
               enforcedBy={ctx?.enforced_by[f.key]}
+              rule={ctx?.rules?.[f.key]}
               staff={staff}
               onChange={(v) => update(f.key, v)}
             />
@@ -203,7 +226,10 @@ export function SettingsPage() {
   }
 
   const navItems = [
-    ...MAIN_SECTIONS.map((x) => ({ id: `section-${x.id}`, title: x.title, count: changes.filter((f) => f.section === x.id).length })),
+    ...MAIN_SECTIONS.flatMap((x) => {
+      const item = { id: `section-${x.id}`, title: x.title, count: changes.filter((f) => f.section === x.id).length }
+      return x.id === PRIVACY_AFTER ? [item, { id: 'section-privacy', title: 'Privacy', count: 0 }] : [item]
+    }),
     { id: 'advanced', title: 'Advanced', count: advancedChanges },
     { id: 'history', title: 'Change history', count: 0 },
     { id: 'profile', title: 'My profile', count: 0 },
@@ -213,7 +239,7 @@ export function SettingsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Settings"
-        description="Customer access, challenge and withdrawal rules, the support desk, and your own admin profile."
+        description="Money, challenges, anti-cheat and verification, privacy, customer access and the support desk. Business switches live here, not in the server configuration."
         meta={s?.updated_at ? <>Last saved {formatDateTime(s.updated_at)} ({formatRelative(s.updated_at)}){s.updated_by ? ` by ${s.updated_by}` : ''}</> : undefined}
         actions={
           <Button size="sm" variant="secondary" leftIcon={<RefreshCw size={13} />} loading={settingsQ.isFetching || ctxQ.isFetching}
@@ -258,7 +284,7 @@ export function SettingsPage() {
           ) : settingsQ.error || !current || !saved ? (
             <Panel><ErrorState title="Could not load settings" error={settingsQ.error} onRetry={() => void settingsQ.refetch()} retrying={settingsQ.isFetching} /></Panel>
           ) : (
-            MAIN_SECTIONS.map(renderSection)
+            MAIN_SECTIONS.flatMap((sec) => (sec.id === PRIVACY_AFTER ? [renderSection(sec), <PrivacyPanel key="privacy" />] : [renderSection(sec)]))
           )}
 
           <section id="advanced" className="scroll-mt-20 rounded-lg border border-surface-border bg-surface-card shadow-card">
@@ -436,8 +462,8 @@ function ServerLimits(props: CtxPanelProps) {
   const risk = (k: string) => (ac?.[k] === null || ac?.[k] === undefined ? '—' : formatNumber(ac[k]))
   return (
     <>
-      <Panel id="server-limits" className="scroll-mt-20" padding="none" title="Server limits"
-        description="Fixed in the backend configuration and enforced on every request. Changing them needs a deployment, not this page.">
+      <Panel id="server-limits" className="scroll-mt-20" padding="none" title="Server hard limits"
+        description="From the server configuration. The Money and Challenges settings above can be stricter than these, never looser. Changing a hard limit needs a deployment.">
         {ctxState(props) ?? (
           <dl className="grid sm:grid-cols-2">
             {LIMIT_ROWS.map((r) => {

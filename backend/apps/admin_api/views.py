@@ -1832,6 +1832,7 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
         "update": "content.badges",
         "partial_update": "content.badges",
         "destroy": "content.badges",
+        "retire": "content.badges",
         "award_to_user": "users.xp",
     }
     pagination_class = AdminPageNumberPagination
@@ -1863,9 +1864,39 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
             {k: str(v) for k, v in serializer.validated_data.items()},
         )
 
-    def perform_destroy(self, instance):
-        self._audit(instance, "delete", f"Deleted badge {instance.name}")
-        instance.delete()
+    def destroy(self, request, *args, **kwargs):
+        # Delete only a badge nobody holds (and no level reward uses); otherwise retire.
+        badge = self.get_object()
+        holders = UserBadge.objects.filter(badge=badge).count()
+        from apps.gamification.models import LevelMilestone
+
+        rewards = LevelMilestone.objects.filter(reward_badge=badge).count()
+        if holders or rewards:
+            return Response(
+                {"error": f"{holders} people hold this badge. Retire it instead: they keep it, nobody new earns it.",
+                 "holders": holders, "level_rewards": rewards},
+                status=status.HTTP_409_CONFLICT,
+            )
+        self._audit(badge, "delete", f"Deleted badge {badge.name}")
+        badge.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"])
+    def retire(self, request, pk=None):
+        """Retire (hide) or bring back a badge. Body: {retired: true|false}. Holders keep it."""
+        badge = self.get_object()
+        retired = request.data.get("retired", True)
+        if not isinstance(retired, bool):
+            return Response({"error": "retired must be true or false"}, status=status.HTTP_400_BAD_REQUEST)
+        if badge.is_retired != retired:
+            badge.is_retired = retired
+            badge.retired_at = timezone.now() if retired else None
+            badge.save(update_fields=["is_retired", "retired_at", "updated_at"])
+            self._audit(badge, "retire" if retired else "restore",
+                        f"{'Retired' if retired else 'Brought back'} badge {badge.name}",
+                        {"is_retired": {"old": not retired, "new": retired},
+                         "holders": UserBadge.objects.filter(badge=badge).count()})
+        return Response(self.get_serializer(badge).data)
 
     @action(detail=True, methods=["post"])
     def award_to_user(self, request, pk=None):
@@ -2326,6 +2357,31 @@ def update_system_settings(request):
                     f"All milestone options must be between {min_milestone:,} and {max_milestone:,} steps"
                 )
             },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Money limits must still make sense together once merged with what is stored
+    # (blank = the server value).
+    from apps.admin_api.business_rules import server_value
+
+    def _merged(key):
+        if key in serializer.validated_data:
+            v = serializer.validated_data[key]
+        else:
+            v = getattr(settings, key, None)
+        return v if v is not None else server_value(key)
+
+    lo_dep, hi_dep = _merged("min_deposit_kes"), _merged("max_deposit_kes")
+    if lo_dep is not None and hi_dep is not None and Decimal(str(lo_dep)) > Decimal(str(hi_dep)):
+        return Response(
+            {"max_deposit_kes": "Must be at least the smallest deposit"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    min_wd = serializer.validated_data.get("minimum_withdrawal_amount", settings.minimum_withdrawal_amount)
+    max_wd = _merged("max_withdrawal_kes")
+    if max_wd is not None and Decimal(str(min_wd)) > Decimal(str(max_wd)):
+        return Response(
+            {"max_withdrawal_kes": "Must be at least the minimum withdrawal"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -3370,24 +3426,12 @@ def ops_monitoring_dashboard(request):
     Aggregated operational monitoring metrics for admin dashboards.
     Includes fraud load, withdrawal queue age, callback failures, and duplicate-request rejections.
     """
-    financial = run_financial_reconciliation(send_alerts=False)
+    from apps.admin_api.business_rules import (drift_thresholds,
+                                               reconciliation_thresholds)
+
+    financial = run_financial_reconciliation(thresholds=reconciliation_thresholds(), send_alerts=False)
     drift = run_anticheat_shadow_drift_monitor(
-        thresholds=AntiCheatDriftThresholds(
-            lookback_hours=int(getattr(settings, "ANTICHEAT_DRIFT_LOOKBACK_HOURS", 24)),
-            min_samples=int(getattr(settings, "ANTICHEAT_DRIFT_MIN_SAMPLES", 50)),
-            per_sample_alert_pct=float(
-                getattr(settings, "ANTICHEAT_DRIFT_PER_SAMPLE_ALERT_PCT", 35.0)
-            ),
-            max_avg_abs_delta_pct=float(
-                getattr(settings, "ANTICHEAT_DRIFT_MAX_AVG_ABS_DELTA_PCT", 20.0)
-            ),
-            max_high_drift_ratio_pct=float(
-                getattr(settings, "ANTICHEAT_DRIFT_MAX_HIGH_DRIFT_RATIO_PCT", 25.0)
-            ),
-            max_review_mismatch_ratio_pct=float(
-                getattr(settings, "ANTICHEAT_DRIFT_MAX_REVIEW_MISMATCH_RATIO_PCT", 10.0)
-            ),
-        ),
+        thresholds=drift_thresholds(),
         send_alerts=False,
     )
 

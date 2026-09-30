@@ -141,6 +141,8 @@ def _badge(slug: str, name: str, description: str):
 
 
 def _award(user_id: int, badge) -> None:
+    if getattr(badge, "is_retired", False):  # retired in the admin console: no new awards
+        return
     from apps.gamification.models import UserBadge
 
     UserBadge.objects.get_or_create(user_id=user_id, badge=badge)

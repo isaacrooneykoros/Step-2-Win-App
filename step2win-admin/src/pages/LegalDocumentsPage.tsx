@@ -14,6 +14,7 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { ErrorState } from '../components/ui/ErrorState'
 import { Skeleton } from '../components/ui/Skeleton'
 import { LegalEditor } from '../components/content/LegalEditor'
+import { LegalLifecycle } from '../components/content/LegalLifecycle'
 import { DOC_TYPE_LABEL, DOC_TYPOGRAPHY, legalApi, nextVersionLabel, type LegalDoc, type LegalDocType, type LegalVersion } from '../components/content/api'
 import { sanitizeHtml, stripHtml } from '../utils/sanitize'
 import { cn } from '../lib/cn'
@@ -196,6 +197,7 @@ function DocWorkspace({ doc, onDirtyChange }: { doc: LegalDoc; onDirtyChange: (d
           <div className="flex flex-wrap items-center gap-2">
             <input ref={fileRef} type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="sr-only"
               aria-label="Upload a DOCX or PDF" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setUploadFile(f) }} />
+            <LegalLifecycle doc={doc} onMessage={(tone, text) => setBanner({ tone, text })} />
             <Button size="sm" variant="ghost" leftIcon={<FileUp size={13} />} onClick={() => fileRef.current?.click()} loading={upload.isPending} loadingText="Converting…">Import DOCX/PDF</Button>
             {hasDraft && !dirty && doc.status === 'published' && (
               <Button size="sm" variant="ghost" leftIcon={<Trash2 size={13} />} onClick={() => setDiscardOpen(true)}>Discard draft</Button>

@@ -23,6 +23,7 @@ import { WeekStepsCard } from '../components/home/WeekStepsCard';
 import { DailyGoalSheet } from '../components/home/DailyGoalSheet';
 import { ResultsSheet, resultOutcome } from '../components/home/ResultsSheet';
 import { fetchMyBadges } from '../components/home/fetchMyBadges';
+import { AnnouncementBanner } from '../components/content/AnnouncementBanner';
 import type { ChallengeDetail } from '../types';
 import { usePollInterval } from '../hooks/useDataSaver';
 
@@ -202,6 +203,9 @@ export default function HomeScreen() {
             </>
           )}
         </section>
+
+        {/* Staff announcements (below the hero so the step ring never shifts) */}
+        <AnnouncementBanner />
 
         {/* Walks: the simplest way to make steps count toward challenges */}
         <StartWalkCard />

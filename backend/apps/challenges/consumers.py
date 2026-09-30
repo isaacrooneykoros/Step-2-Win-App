@@ -212,7 +212,7 @@ class ChallengeChatConsumer(AsyncWebsocketConsumer):
         from .models import ChallengeMessage
 
         msgs = (
-            ChallengeMessage.objects.filter(challenge_id=self.challenge_id)
+            ChallengeMessage.objects.filter(challenge_id=self.challenge_id, hidden_at__isnull=True)
             .select_related("user")
             .order_by("-created_at")[:100]
         )

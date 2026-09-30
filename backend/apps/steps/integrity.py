@@ -233,7 +233,9 @@ def evaluate_payload(
         if not (allowed_certs and certs and certs <= allowed_certs):
             reasons.append("app_not_recognized")
 
-    accept_basic = bool(getattr(settings, "PLAY_INTEGRITY_ACCEPT_BASIC", False))
+    from apps.admin_api.business_rules import play_integrity_accept_basic
+
+    accept_basic = play_integrity_accept_basic()
     good_device = "MEETS_DEVICE_INTEGRITY" in device_verdicts or "MEETS_STRONG_INTEGRITY" in device_verdicts
     if not good_device and not (accept_basic and "MEETS_BASIC_INTEGRITY" in device_verdicts):
         reasons.append("device_not_recognized")

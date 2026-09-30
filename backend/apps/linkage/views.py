@@ -212,6 +212,19 @@ def cluster_list(request):
     })
 
 
+@extend_schema(responses={200: OpenApiTypes.OBJECT})
+@api_view(["GET"])
+@permission_classes(staff("trust.view"))
+def linkage_runs(request):
+    """Recent linkage recomputes (nightly job): when, how long, ok, counts."""
+    rows = LinkageRun.objects.order_by("-started_at")[:60]
+    return Response({"results": [
+        {"id": r.pk, "started_at": r.started_at.isoformat(),
+         "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+         "ok": r.ok, "stats": r.stats or {}} for r in rows
+    ]})
+
+
 def _clean_note(raw):
     note = str(raw or "").strip()
     if len(note) < NOTE_MIN:

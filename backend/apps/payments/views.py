@@ -36,10 +36,6 @@ from .services import verify_intasend_signature
 
 logger = logging.getLogger(__name__)
 
-# Minimum and maximum deposit limits
-MIN_DEPOSIT = Decimal(str(settings.MIN_DEPOSIT_KES))
-MAX_DEPOSIT = Decimal(str(settings.MAX_DEPOSIT_KES))
-
 
 # ── Deposit ───────────────────────────────────────────────────────────────────
 
@@ -381,9 +377,6 @@ def _notify_user(user, event: str, admin=None, **kwargs):
 # WITHDRAWALS
 # ────────────────────────────────────────────────────────────────────────────
 
-MIN_WITHDRAWAL = Decimal(str(settings.MIN_WITHDRAWAL_KES))
-MAX_WITHDRAWAL = Decimal(str(settings.MAX_WITHDRAWAL_KES))
-MAX_DAILY = Decimal(str(settings.MAX_DAILY_WITHDRAWAL))
 
 
 @extend_schema(

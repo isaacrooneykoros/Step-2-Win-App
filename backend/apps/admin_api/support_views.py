@@ -279,6 +279,8 @@ def support_tags(request):
         if not name:
             return Response({"name": "Enter a tag name."}, status=400)
         tag, created = SupportTag.objects.get_or_create(name=name)
+        if created:
+            _audit_tag(request, "create", tag, f"Created support tag '{tag.name}'")
         return Response({"id": tag.id, "name": tag.name}, status=201 if created else 200)
     tags = SupportTag.objects.annotate(
         open_count=Count("tickets", filter=Q(tickets__status__in=ACTIVE), distinct=True),
@@ -294,11 +296,34 @@ def support_tags(request):
     )
 
 
-@extend_schema(responses={204: None})
-@api_view(["DELETE"])
+def _audit_tag(request, action, tag, description, changes=None):
+    AuditLog.log_action(
+        admin=request.user, action=action, resource_type="support_tag", resource_id=tag.id,
+        resource_name=tag.name, description=description, changes=changes, request=request,
+    )
+
+
+@extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT, 204: None})
+@api_view(["PATCH", "DELETE"])
 @permission_classes(staff("support.reply"))
 def support_tag_delete(request, tag_id):
+    """PATCH {name}: rename (every ticket keeps the tag). DELETE: remove from all tickets."""
     tag = get_object_or_404(SupportTag, pk=tag_id)
+    if request.method == "PATCH":
+        name = _clean_tag(request.data.get("name"))
+        if not name:
+            return Response({"name": "Enter a tag name."}, status=400)
+        if SupportTag.objects.filter(name=name).exclude(pk=tag.pk).exists():
+            return Response({"name": "Another tag already has that name."}, status=409)
+        old = tag.name
+        if old != name:
+            tag.name = name
+            tag.save(update_fields=["name"])
+            _audit_tag(request, "update", tag, f"Renamed support tag '{old}' to '{name}'",
+                       {"name": {"old": old, "new": name}})
+        return Response({"id": tag.id, "name": tag.name})
+    tickets = tag.tickets.count()
+    _audit_tag(request, "delete", tag, f"Deleted support tag '{tag.name}'", {"tickets": tickets})
     tag.delete()
     return Response(status=204)
 
@@ -389,6 +414,7 @@ def support_templates(request):
         if errors:
             return Response(errors, status=400)
         t = SupportReplyTemplate.objects.create(created_by=request.user, **data)
+        _audit_template(request, "create", t, f"Created saved reply '{t.title}'")
         return Response(_template_json(t), status=201)
     qs = SupportReplyTemplate.objects.select_related("created_by").order_by("-usage_count", "title")
     return Response({"results": [_template_json(t) for t in qs]})
@@ -400,15 +426,29 @@ def support_templates(request):
 def support_template_detail(request, template_id):
     t = get_object_or_404(SupportReplyTemplate, pk=template_id)
     if request.method == "DELETE":
+        _audit_template(request, "delete", t, f"Deleted saved reply '{t.title}'")
         t.delete()
         return Response(status=204)
     data, errors = _template_input(request.data, partial=True)
     if errors:
         return Response(errors, status=400)
+    before = {k: getattr(t, k) for k in data}
     for k, v in data.items():
         setattr(t, k, v)
     t.save()
+    changes = {k: {"old": before[k], "new": v} for k, v in data.items() if before[k] != v}
+    if "body" in changes:
+        changes["body"] = {"old": f"{len(before['body'])} chars", "new": f"{len(t.body)} chars"}
+    if changes:
+        _audit_template(request, "update", t, f"Edited saved reply '{t.title}'", changes)
     return Response(_template_json(t))
+
+
+def _audit_template(request, action, t, description, changes=None):
+    AuditLog.log_action(
+        admin=request.user, action=action, resource_type="support_template", resource_id=t.id,
+        resource_name=t.title, description=description, changes=changes, request=request,
+    )
 
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})

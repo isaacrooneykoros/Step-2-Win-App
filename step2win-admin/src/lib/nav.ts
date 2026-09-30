@@ -1,8 +1,8 @@
 import type { ElementType } from 'react'
 import {
   Activity, ArrowLeftRight, Award, Banknote, BarChart3, FileBarChart, FileText, Footprints,
-  Gauge, HeadphonesIcon, LayoutDashboard, Scale, Settings, ShieldAlert, ShieldCheck, Trophy, Users, UsersRound,
-  UserCog, Wallet,
+  Gauge, HeadphonesIcon, LayoutDashboard, LifeBuoy, Megaphone, Network, Scale, Settings, ShieldAlert, ShieldCheck,
+  SlidersHorizontal, Trophy, UserCog, Users, UsersRound, Wallet,
 } from 'lucide-react'
 
 /** Keys the layout fills with live counts (queues that need an operator). */
@@ -61,7 +61,9 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/fraud', label: 'Anti-cheat', icon: ShieldAlert, badgeKey: 'openFraudFlags', keywords: 'fraud flags trust score' },
       { to: '/moderation', label: 'Moderation', icon: ShieldCheck, keywords: 'review suspicious' },
-      { to: '/social', label: 'Social', icon: UsersRound, keywords: 'friends teams reports rankings community block' },
+      { to: '/social', label: 'Social', icon: UsersRound, keywords: 'friends teams reports rankings community block hide feed chat' },
+      { to: '/trust-tools', label: 'Trust tools', icon: Network, keywords: 'linkage clusters linked accounts risk model machine learning' },
+      { to: '/anti-cheat-policy', label: 'Anti-cheat policy', icon: SlidersHorizontal, keywords: 'policy version thresholds rollback activate' },
     ],
   },
   {
@@ -73,7 +75,9 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Content',
     items: [
-      { to: '/legal', label: 'Legal documents', icon: FileText, keywords: 'terms privacy policy publish' },
+      { to: '/announcements', label: 'Announcements', icon: Megaphone, keywords: 'banner notice broadcast home message' },
+      { to: '/help-centre', label: 'Help centre', icon: LifeBuoy, keywords: 'faq help articles questions' },
+      { to: '/legal', label: 'Legal documents', icon: FileText, keywords: 'terms privacy policy publish archive' },
     ],
   },
   {
@@ -92,7 +96,7 @@ export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
 export function routeLabel(pathname: string): string {
   if (pathname === '/' || pathname === '/dashboard') return 'Dashboard'
   const match = NAV_ITEMS.filter((i) => i.to !== '/' && pathname.startsWith(i.to)).sort((a, b) => b.to.length - a.to.length)[0]
-  if (pathname.startsWith('/anti-cheat')) return 'Anti-cheat'
+  if (pathname === '/anti-cheat' || pathname.startsWith('/anti-cheat/')) return 'Anti-cheat'
   return match?.label ?? 'Admin'
 }
 

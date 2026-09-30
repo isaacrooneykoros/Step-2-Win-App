@@ -10,6 +10,8 @@ import { Button } from '../components/ui/Button'
 import { Input, Textarea } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { Tabs } from '../components/ui/Tabs'
+import { ContentModerationTab, ReportFollowUp, TeamMembersDrawer, type FollowUp } from '../components/social/ModerationTools'
+import { consoleB } from '../components/consoleb/api'
 import { ErrorState } from '../components/ui/ErrorState'
 import { Skeleton } from '../components/ui/Skeleton'
 import { formatDateTime, formatNumber } from '../lib/format'
@@ -17,7 +19,7 @@ import {
   SocialApiError, socialAdminApi, type ReportStatus, type SocialReport, type SocialSettings, type SocialTeam,
 } from '../components/social/api'
 
-type Tab = 'reports' | 'teams' | 'settings'
+type Tab = 'reports' | 'content' | 'teams' | 'settings'
 
 function describe(err: unknown): string {
   if (err instanceof SocialApiError) return err.message
@@ -40,13 +42,18 @@ function ReportsTab({ onResult }: { onResult: (m: { message: string; tone: 'succ
   const [targetType, setTargetType] = useState<'all' | 'user' | 'team'>('all')
   const [open, setOpen] = useState<SocialReport | null>(null)
   const [note, setNote] = useState('')
+  const [followUp, setFollowUp] = useState<FollowUp>('')
+  const [feedEventId, setFeedEventId] = useState<number | null>(null)
   const query = useQuery({
     queryKey: ['social-admin', 'reports', status, targetType],
     queryFn: () => socialAdminApi.reports(status, targetType === 'all' ? undefined : targetType),
     refetchInterval: 60_000,
   })
   const resolve = useMutation({
-    mutationFn: ({ id, next }: { id: number; next: 'actioned' | 'dismissed' }) => socialAdminApi.resolve(id, next, note),
+    mutationFn: async ({ id, next }: { id: number; next: 'actioned' | 'dismissed' }): Promise<{ status: string }> =>
+      next === 'actioned' && followUp
+        ? consoleB.resolveReport(id, { status: next, note, action: followUp, feed_event_id: feedEventId ?? undefined }).then(() => ({ status: next }))
+        : socialAdminApi.resolve(id, next, note),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['social-admin'] })
       setOpen(null)
@@ -79,7 +86,7 @@ function ReportsTab({ onResult }: { onResult: (m: { message: string; tone: 'succ
         error={query.error}
         onRetry={() => query.refetch()}
         rowKey={(r) => r.id}
-        onRowClick={(r) => { setOpen(r); setNote(r.resolution_note ?? '') }}
+        onRowClick={(r) => { setOpen(r); setNote(r.resolution_note ?? ''); setFollowUp(''); setFeedEventId(null) }}
         emptyMessage={status === 'open' ? 'No open reports' : 'No reports here'}
         emptyDescription="Reports from the app's Friends and Teams screens appear here."
         toolbar={
@@ -107,7 +114,9 @@ function ReportsTab({ onResult }: { onResult: (m: { message: string; tone: 'succ
         footer={open?.status === 'open' ? (
           <>
             <Button variant="secondary" onClick={() => resolve.mutate({ id: open.id, next: 'dismissed' })} loading={resolve.isPending} leftIcon={<XCircle size={14} />}>Dismiss</Button>
-            <Button onClick={() => resolve.mutate({ id: open.id, next: 'actioned' })} loading={resolve.isPending} leftIcon={<CheckCircle2 size={14} />}>Mark actioned</Button>
+            <Button onClick={() => resolve.mutate({ id: open.id, next: 'actioned' })} loading={resolve.isPending} leftIcon={<CheckCircle2 size={14} />}
+              disabled={!!followUp && (note.trim().length < 5 || (followUp === 'hide_feed_event' && !feedEventId))}
+              title={followUp && note.trim().length < 5 ? 'Add a note of at least 5 characters' : undefined}>Mark actioned</Button>
           </>
         ) : undefined}
       >
@@ -122,8 +131,12 @@ function ReportsTab({ onResult }: { onResult: (m: { message: string; tone: 'succ
             </dl>
             {open.target_type === 'team' && <p className="text-xs text-ink-muted">To rename or pause the team, use the Teams tab. Then mark this report actioned.</p>}
             {open.target_type === 'user' && <p className="text-xs text-ink-muted">To restrict the account, open the user in Users or Moderation. Reports for suspected cheating feed the anti-cheat review; social never changes money.</p>}
+            {open.status === 'open' && (
+              <ReportFollowUp targetType={open.target_type} userId={open.target_user?.id ?? null} value={followUp} onChange={setFollowUp}
+                feedEventId={feedEventId} onFeedEvent={setFeedEventId} />
+            )}
             {open.status === 'open' ? (
-              <Textarea label="Resolution note (internal)" value={note} maxLength={500} rows={2} onChange={(e) => setNote(e.target.value)} />
+              <Textarea label={followUp ? 'Resolution note (required; shown to team members when pausing)' : 'Resolution note (internal)'} value={note} maxLength={500} rows={2} onChange={(e) => setNote(e.target.value)} />
             ) : open.resolution_note ? (
               <p className="rounded-md bg-surface-elevated p-2 text-xs">{open.resolution_note}</p>
             ) : null}
@@ -145,6 +158,7 @@ function TeamsTab({ onResult }: { onResult: (m: { message: string; tone: 'succes
   const [action, setAction] = useState<TeamAction>(null)
   const [name, setName] = useState('')
   const [reason, setReason] = useState('')
+  const [membersOf, setMembersOf] = useState<SocialTeam | null>(null)
   const query = useQuery({
     queryKey: ['social-admin', 'teams', q, filter],
     queryFn: () => socialAdminApi.teams(q, filter === 'all' ? undefined : filter),
@@ -177,6 +191,8 @@ function TeamsTab({ onResult }: { onResult: (m: { message: string; tone: 'succes
         error={query.error}
         onRetry={() => query.refetch()}
         rowKey={(t) => t.id}
+        onRowClick={setMembersOf}
+        isRowActive={(t) => t.id === membersOf?.id}
         searchValue={q}
         onSearchChange={setQ}
         searchPlaceholder="Team name or code"
@@ -189,11 +205,11 @@ function TeamsTab({ onResult }: { onResult: (m: { message: string; tone: 'succes
         }
         rowActions={(t) => (
           <div className="flex justify-end gap-1">
-            <Button size="sm" variant="ghost" leftIcon={<Pencil size={13} />} onClick={() => { setName(t.name); setReason(''); setAction({ kind: 'rename', team: t }) }}>Rename</Button>
+            <Button size="sm" variant="ghost" leftIcon={<Pencil size={13} />} onClick={(e) => { e.stopPropagation(); setName(t.name); setReason(''); setAction({ kind: 'rename', team: t }) }}>Rename</Button>
             {t.is_disabled ? (
-              <Button size="sm" variant="secondary" leftIcon={<PlayCircle size={13} />} onClick={() => { setReason(''); setAction({ kind: 'enable', team: t }) }}>Enable</Button>
+              <Button size="sm" variant="secondary" leftIcon={<PlayCircle size={13} />} onClick={(e) => { e.stopPropagation(); setReason(''); setAction({ kind: 'enable', team: t }) }}>Enable</Button>
             ) : (
-              <Button size="sm" variant="danger-soft" leftIcon={<Ban size={13} />} onClick={() => { setReason(''); setAction({ kind: 'disable', team: t }) }}>Pause</Button>
+              <Button size="sm" variant="danger-soft" leftIcon={<Ban size={13} />} onClick={(e) => { e.stopPropagation(); setReason(''); setAction({ kind: 'disable', team: t }) }}>Pause</Button>
             )}
           </div>
         )}
@@ -237,6 +253,7 @@ function TeamsTab({ onResult }: { onResult: (m: { message: string; tone: 'succes
           )}
         </div>
       </Modal>
+      <TeamMembersDrawer team={membersOf} onClose={() => setMembersOf(null)} onResult={onResult} />
     </>
   )
 }
@@ -337,7 +354,7 @@ export default function SocialModerationPage() {
     <div>
       <PageHeader
         title="Social"
-        description="Friends, teams and weekly rankings: reports queue, team moderation and settings. No money is attached to social."
+        description="Friends, teams, weekly rankings and challenge chat: reports queue, hiding content, team moderation and settings. No money is attached to social."
         actions={<Button variant="secondary" size="sm" leftIcon={<RefreshCw size={13} />} onClick={() => overview.refetch()}>Refresh</Button>}
       />
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -354,11 +371,13 @@ export default function SocialModerationPage() {
         className="mb-4"
         items={[
           { value: 'reports', label: 'Reports', count: o?.open_reports },
+          { value: 'content', label: 'Chat and feed' },
           { value: 'teams', label: 'Teams' },
           { value: 'settings', label: 'Settings' },
         ]}
       />
       {tab === 'reports' && <ReportsTab onResult={setResult} />}
+      {tab === 'content' && <ContentModerationTab onResult={setResult} />}
       {tab === 'teams' && <TeamsTab onResult={setResult} />}
       {tab === 'settings' && <SettingsTab onResult={setResult} />}
     </div>

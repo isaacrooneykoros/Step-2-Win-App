@@ -1,7 +1,10 @@
 from decimal import Decimal
 
-from django.conf import settings
 from rest_framework import serializers
+
+
+def _fmt_kes(value: Decimal) -> str:
+    return f"{value:,.0f}" if value == value.to_integral_value() else f"{value:,.2f}"
 
 
 class InitiateDepositSerializer(serializers.Serializer):
@@ -9,12 +12,14 @@ class InitiateDepositSerializer(serializers.Serializer):
     phone_number = serializers.CharField()
 
     def validate_amount(self, value):
-        min_deposit = Decimal(str(settings.MIN_DEPOSIT_KES))
-        max_deposit = Decimal(str(settings.MAX_DEPOSIT_KES))
+        # Console limits (Settings > Money), inside the server's hard limits.
+        from apps.admin_api.business_rules import deposit_limits
+
+        min_deposit, max_deposit = deposit_limits()
         if value < min_deposit:
-            raise serializers.ValidationError(f"Minimum deposit is KES {min_deposit}")
+            raise serializers.ValidationError(f"Minimum deposit is KES {_fmt_kes(min_deposit)}")
         if value > max_deposit:
-            raise serializers.ValidationError(f"Maximum deposit is KES {max_deposit}")
+            raise serializers.ValidationError(f"Maximum deposit is KES {_fmt_kes(max_deposit)}")
         return value
 
 
@@ -28,15 +33,21 @@ class WithdrawalRequestInputSerializer(serializers.Serializer):
     is_paybill = serializers.BooleanField(required=False, default=True)
 
     def validate_amount(self, value):
-        min_withdrawal = Decimal(str(settings.MIN_WITHDRAWAL_KES))
-        max_withdrawal = Decimal(str(settings.MAX_WITHDRAWAL_KES))
+        from django.conf import settings
+
+        from apps.admin_api.business_rules import withdrawal_limits
+
+        # The console minimum is checked (with its own message) by the withdrawal
+        # service; here only the server floor and the effective maximum.
+        min_withdrawal = Decimal(str(getattr(settings, "MIN_WITHDRAWAL_KES", 0) or 0))
+        max_withdrawal = Decimal(str(withdrawal_limits()["max_kes"]))
         if value < min_withdrawal:
             raise serializers.ValidationError(
-                f"Minimum withdrawal is KES {min_withdrawal}"
+                f"Minimum withdrawal is KES {_fmt_kes(min_withdrawal)}"
             )
         if value > max_withdrawal:
             raise serializers.ValidationError(
-                f"Maximum single withdrawal is KES {max_withdrawal}"
+                f"Maximum single withdrawal is KES {_fmt_kes(max_withdrawal)}"
             )
         return value
 

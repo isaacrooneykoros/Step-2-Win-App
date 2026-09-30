@@ -24,6 +24,10 @@ import { useAuthStore } from './store/authStore';
 
 import { AdminFraudPage } from './pages/AdminFraudPage';
 import SocialModerationPage from './pages/SocialModerationPage';
+import { AnnouncementsPage } from './pages/AnnouncementsPage';
+import { HelpCentrePage } from './pages/HelpCentrePage';
+import { AntiCheatPolicyPage } from './pages/AntiCheatPolicyPage';
+import { TrustToolsPage } from './pages/TrustToolsPage';
 import { DepositsPage } from './pages/DepositsPage';
 import { StaffPage } from './pages/StaffPage';
 
@@ -63,6 +67,10 @@ function App() {
           <Route path="support" element={<SupportPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="legal" element={<LegalDocumentsPage />} />
+          <Route path="announcements" element={<AnnouncementsPage />} />
+          <Route path="help-centre" element={<HelpCentrePage />} />
+          <Route path="anti-cheat-policy" element={<AntiCheatPolicyPage />} />
+          <Route path="trust-tools" element={<TrustToolsPage />} />
           <Route path="deposits" element={<DepositsPage />} />
           <Route path="staff" element={<StaffPage />} />
         </Route>

@@ -1,10 +1,9 @@
 """Rank-based payouts are paused, and the chosen rule is the rule that's paid."""
 from datetime import date, timedelta
 from decimal import Decimal
-from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from apps.challenges.models import Challenge
@@ -52,7 +51,7 @@ class PayoutPolicyTests(TestCase):
         challenge = Challenge.objects.get(name="Office walkers")
         self.assertEqual(challenge.payout_structure, "proportional")
 
-    @mock.patch.dict("os.environ", {"RANK_PAYOUTS_ENABLED": "true"})
+    @override_settings(RANK_PAYOUTS_ENABLED=True)
     def test_when_enabled_winner_takes_all_is_actually_paid_that_way(self):
         response = self._create_private("winner_takes_all")
         self.assertIn(response.status_code, (200, 201), response.content)

@@ -25,6 +25,8 @@ export interface LegalDoc {
   created_at: string
   updated_at: string
   history_count: number
+  /** Accounts that have read the current version (UserDocumentAck). */
+  acknowledged_current?: number
 }
 
 export interface LegalVersion {

@@ -156,5 +156,7 @@ urlpatterns = [
     path("finance/deposits/<uuid:txn_id>/verify/", money_views.deposit_verify, name="finance-deposit-verify"),
     path("finance/withdrawals/<uuid:withdrawal_id>/resolve/", money_views.withdrawal_resolve, name="finance-withdrawal-resolve"),
     path("finance/withdrawals/<uuid:withdrawal_id>/history/", money_views.withdrawal_history, name="finance-withdrawal-history"),
+    # Admin console Part B (ops, anti-cheat policy, support desk actions)
+    path("", include("apps.admin_api.console_b_urls")),
     path("", include(router.urls)),
 ]

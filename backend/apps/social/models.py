@@ -290,6 +290,12 @@ class FeedEvent(models.Model):
     # routes, money, or anything from anti-cheat.
     data = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Hidden by a moderator (admin console): excluded from every customer view.
+    hidden_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    hidden_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    hidden_reason = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         constraints = [

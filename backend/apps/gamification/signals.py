@@ -35,7 +35,7 @@ def check_level_up_badges(sender, instance, **kwargs):
             try:
                 from apps.gamification.models import Badge
 
-                badge = Badge.objects.get(slug=badge_slug)
+                badge = Badge.objects.get(slug=badge_slug, is_retired=False)
                 UserBadge.objects.get_or_create(user=instance.user, badge=badge)
             except Badge.DoesNotExist:
                 pass
@@ -82,7 +82,7 @@ def check_milestone_badges(xp_profile):
     for xp_threshold, badge_slug in milestone_badges.items():
         if xp_profile.total_xp >= xp_threshold:
             try:
-                badge = Badge.objects.get(slug=badge_slug)
+                badge = Badge.objects.get(slug=badge_slug, is_retired=False)
                 UserBadge.objects.get_or_create(user=xp_profile.user, badge=badge)
             except Badge.DoesNotExist:
                 pass

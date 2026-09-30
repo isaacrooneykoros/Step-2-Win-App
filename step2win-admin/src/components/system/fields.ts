@@ -3,7 +3,13 @@ import type { SettingKey, SystemSettings } from './api'
 export type FieldKind =
   | 'percent' | 'money' | 'int' | 'decimal' | 'bool' | 'email' | 'text' | 'milestones'
   | 'select' | 'staff' | 'categoryMap'
-export type SectionId = 'access' | 'challenges' | 'withdrawals' | 'payouts' | 'support' | 'gamification' | 'notifications'
+  /** Console switch with a server fallback: Server default / On / Off (null / true / false). */
+  | 'triBool'
+  /** Number that may be blank = use the server value (see settings context `rules`). */
+  | 'optNumber'
+  /** YYYY-MM-DD or blank = server value. */
+  | 'date'
+export type SectionId = 'access' | 'money' | 'challenges' | 'anticheat' | 'support' | 'gamification' | 'notifications' | 'monitoring'
 
 export interface FieldDef {
   key: SettingKey
@@ -11,6 +17,10 @@ export interface FieldDef {
   kind: FieldKind
   section: SectionId
   hint?: string
+  /** Shown as a caution callout, e.g. "turn on only after the new app ships". */
+  warning?: string
+  /** For 'optNumber': how to parse and format. */
+  numKind?: 'int' | 'money' | 'decimal'
   /** Unit suffix shown in the input. */
   unit?: string
   /** Changes that move money or lock users out get a stronger confirmation. */
@@ -31,14 +41,18 @@ export interface SectionDef {
 
 /** Ordered by how often staff reach for them. */
 export const SECTIONS: SectionDef[] = [
+  { id: 'money', title: 'Money', description: 'The platform fee, deposit and withdrawal limits, and the review time customers are told. Blank limits use the server value; the server’s hard limits can never be loosened here.' },
+  { id: 'challenges', title: 'Challenges', description: 'Rules for new challenges: milestones, entry fees, size, approval, payout rules and who may create paid challenges.' },
+  { id: 'anticheat', title: 'Anti-cheat and verification', description: 'Payout review holds, device integrity, which steps count toward money, and trusted health apps.' },
   { id: 'access', title: 'Customer access', description: 'Maintenance mode and the switches that pause whole features for customers. Takes effect within seconds.' },
-  { id: 'challenges', title: 'Challenges and fees', description: 'The platform fee and the rules for new challenges.' },
-  { id: 'withdrawals', title: 'Withdrawals', description: 'The smallest amount customers can cash out and the review time they are told.' },
-  { id: 'payouts', title: 'Payout review', description: 'When a challenge winner’s payout is held for a second look under Finance > Payout reviews instead of being paid instantly.' },
   { id: 'support', title: 'Support desk', description: 'Response targets, who gets new tickets, and what happens when a ticket waits too long.' },
   { id: 'gamification', title: 'XP and rewards', description: 'How experience points are earned from synced steps.', advanced: true },
   { id: 'notifications', title: 'Contacts and email', description: 'Where operational email goes, and whether it is sent.', advanced: true },
+  { id: 'monitoring', title: 'Monitoring thresholds', description: 'When the reconciliation and anti-cheat drift jobs raise an alert in Ops monitoring. Blank = the server value.', advanced: true },
 ]
+
+const OLD_APPS =
+  'Apps already on people’s phones can’t send walking evidence. Turn this on only after the updated app has shipped and most customers have installed it, or their new steps stop counting toward challenges.'
 
 export const TICKET_CATEGORIES: Array<{ value: string; label: string }> = [
   { value: 'payment', label: 'Payment' },
@@ -61,7 +75,7 @@ export const FIELDS: FieldDef[] = [
   { key: 'registrations_enabled', label: 'New sign-ups', kind: 'bool', section: 'access', risky: true,
     hint: 'Off refuses new accounts (email and Google). Existing customers can still sign in.' },
 
-  { key: 'platform_fee_percentage', label: 'Platform fee', kind: 'percent', section: 'challenges', unit: '%', min: 0, max: 50, risky: true,
+  { key: 'platform_fee_percentage', label: 'Platform fee', kind: 'percent', section: 'money', unit: '%', min: 0, max: 50, risky: true,
     hint: 'Taken from the total pool when a challenge settles.' },
   { key: 'challenge_milestones', label: 'Milestone options', kind: 'milestones', section: 'challenges', risky: true,
     hint: 'Step targets a creator can pick. Each must sit between the lowest and highest milestone.' },
@@ -76,25 +90,73 @@ export const FIELDS: FieldDef[] = [
   { key: 'challenge_approval_required', label: 'New public challenges need approval', kind: 'bool', section: 'challenges',
     hint: 'On: new public challenges and rematches wait under Challenges > Awaiting approval, hidden from the lobby. Rejecting refunds the entries. Private challenges never wait.' },
 
-  { key: 'minimum_withdrawal_amount', label: 'Minimum withdrawal', kind: 'money', section: 'withdrawals', unit: 'KSh', min: 0, max: 70_000, risky: true,
+  { key: 'minimum_withdrawal_amount', label: 'Minimum withdrawal', kind: 'money', section: 'money', unit: 'KSh', min: 0, max: 70_000, risky: true,
     hint: 'Requests below this are refused. Never lower than the server floor shown under Advanced > Server limits.' },
-  { key: 'withdrawal_processing_time', label: 'Review time customers are told', kind: 'int', section: 'withdrawals', unit: 'hours', min: 1, max: 720,
+  { key: 'withdrawal_processing_time', label: 'Review time customers are told', kind: 'int', section: 'money', unit: 'hours', min: 1, max: 720,
     hint: 'Shown on the withdraw form and in the message after a request is sent.' },
 
-  { key: 'payout_holds_enabled', label: 'Hold risky payouts for review', kind: 'bool', section: 'payouts', risky: true,
+  { key: 'payout_holds_enabled', label: 'Hold risky payouts for review', kind: 'bool', section: 'anticheat', risky: true,
     hint: 'On: a winner with low trust, open high flags, suspicious days, or a large win with open flags in the challenge window is held instead of paid. Banned and closed accounts are always held.' },
-  { key: 'payout_hold_trust_score_max', label: 'Hold at trust score', kind: 'int', section: 'payouts', unit: 'or below', min: 0, max: 100, risky: true,
+  { key: 'payout_hold_trust_score_max', label: 'Hold at trust score', kind: 'int', section: 'anticheat', unit: 'or below', min: 0, max: 100, risky: true,
     hint: '60 holds REVIEW, RESTRICT and SUSPEND accounts. Lower it to hold fewer payouts.' },
-  { key: 'payout_hold_large_win_kes', label: 'Large win', kind: 'money', section: 'payouts', unit: 'KSh', min: 1, max: 1_000_000, risky: true,
+  { key: 'payout_hold_large_win_kes', label: 'Large win', kind: 'money', section: 'anticheat', unit: 'KSh', min: 1, max: 1_000_000, risky: true,
     hint: 'Payouts at or above this are held when the winner has any open medium or higher flag in the challenge window.' },
-  { key: 'device_integrity_policy', label: 'Device integrity (Play Integrity)', kind: 'select', section: 'payouts', risky: true,
+  { key: 'device_integrity_policy', label: 'Device integrity (Play Integrity)', kind: 'select', section: 'anticheat', risky: true,
     options: [
       { value: 'shadow', label: 'Shadow: record verdicts only' },
       { value: 'enforce', label: 'Enforce: failed devices count for goals only' },
     ],
     hint: 'Enforce only after the Play Integrity service account is configured and the shadow verdicts look right. Enforced, steps from sessions that fail the check stop counting toward challenges; goals and streaks are unaffected.' },
-  { key: 'health_trusted_origins', label: 'Trusted health apps (Health Connect / Apple Health)', kind: 'text', section: 'payouts', risky: true, max: 4000,
+  { key: 'health_trusted_origins', label: 'Trusted health apps (Health Connect / Apple Health)', kind: 'text', section: 'anticheat', risky: true, max: 4000,
     hint: 'One app per line: its package or bundle id, a trailing * for a prefix, then "wearable" if the app only records watches or bands, then # and a label. Watch and band steps from these apps count toward challenges; phone-app steps only confirm. Steps typed in by hand never count. Leave empty to use the built-in list.' },
+
+  // Money limits (blank = server value; never looser than the server's hard limit)
+  { key: 'min_deposit_kes', label: 'Smallest deposit', kind: 'optNumber', numKind: 'money', section: 'money', unit: 'KSh', min: 1, max: 1_000_000, risky: true,
+    hint: 'Deposits below this are refused. Can’t go below the server floor.' },
+  { key: 'max_deposit_kes', label: 'Largest deposit', kind: 'optNumber', numKind: 'money', section: 'money', unit: 'KSh', min: 1, max: 1_000_000, risky: true,
+    hint: 'Deposits above this are refused. Can’t go above the server ceiling.' },
+  { key: 'max_withdrawal_kes', label: 'Largest single withdrawal', kind: 'optNumber', numKind: 'money', section: 'money', unit: 'KSh', min: 1, max: 1_000_000, risky: true,
+    hint: 'One request can’t be larger than this.' },
+  { key: 'max_daily_withdrawal_kes', label: 'Withdrawals per customer per day', kind: 'optNumber', numKind: 'money', section: 'money', unit: 'KSh', min: 1, max: 10_000_000, risky: true,
+    hint: 'Total a customer can request in one day.' },
+  { key: 'max_withdrawals_per_day', label: 'Withdrawal requests per day', kind: 'optNumber', numKind: 'int', section: 'money', unit: 'requests', min: 1, max: 100, risky: true,
+    hint: 'Per customer, in any 24 hours. Failed and rejected requests don’t count.' },
+  { key: 'max_withdrawals_per_hour', label: 'Withdrawal requests per hour', kind: 'optNumber', numKind: 'int', section: 'money', unit: 'requests', min: 1, max: 100, risky: true },
+  { key: 'min_seconds_between_withdrawals', label: 'Gap between withdrawal requests', kind: 'optNumber', numKind: 'int', section: 'money', unit: 'seconds', min: 0, max: 86_400, risky: true,
+    hint: 'Can be made longer than the server value, never shorter.' },
+
+  // Challenges
+  { key: 'rank_payouts_enabled', label: 'Winner-takes-all and top-3 challenges', kind: 'triBool', section: 'challenges', risky: true,
+    hint: 'Rank payouts reward whoever posts the biggest number, the strongest reason to cheat. Existing challenges keep their rule either way.',
+    warning: 'Turn on only after payout holds and verified steps are enforced in production.' },
+  { key: 'paid_challenge_min_trust_score', label: 'Trust score to create paid challenges', kind: 'optNumber', numKind: 'int', section: 'challenges', unit: 'or more', min: 0, max: 100, risky: true,
+    hint: 'Creators below this can still create free challenges. The server sets a floor this can’t go below.' },
+  { key: 'paid_challenge_min_joined', label: 'Challenges joined before creating a paid one', kind: 'optNumber', numKind: 'int', section: 'challenges', unit: 'challenges', min: 0, max: 50, risky: true },
+  { key: 'max_locked_balance_percent', label: 'Most of a wallet that entries can lock', kind: 'optNumber', numKind: 'int', section: 'challenges', unit: '%', min: 10, max: 100, risky: true,
+    hint: 'Stops a customer putting all their money into entries at once.' },
+
+  // Anti-cheat and verification
+  { key: 'step_money_requires_evidence', label: 'Only evidence-backed steps count toward challenge money', kind: 'triBool', section: 'anticheat', risky: true,
+    hint: 'Goals, streaks and XP always use every credited step. This only changes what counts toward challenge standings and payouts.',
+    warning: OLD_APPS },
+  { key: 'step_evidence_cutover_date', label: 'Evidence cut-over date', kind: 'date', section: 'anticheat', risky: true,
+    hint: 'Days before this date keep full challenge credit. Set it to the day the updated app was released. Blank = the server value.' },
+  { key: 'play_integrity_accept_basic', label: 'Accept basic-integrity phones', kind: 'triBool', section: 'anticheat', risky: true,
+    hint: 'On: phones that only pass Play Integrity’s basic check (many uncertified budget phones and custom ROMs) count as verified. Off: they need device integrity.' },
+  { key: 'risk_ml_hold_threshold', label: 'Risk model threshold (shadow)', kind: 'optNumber', numKind: 'decimal', section: 'anticheat', min: 0.05, max: 0.99,
+    hint: 'Used only to report how the shadow model would perform (precision and recall at this score). Nothing is held automatically.' },
+
+  // Monitoring thresholds (advanced)
+  { key: 'recon_max_stuck_processing', label: 'Stuck payouts before an alert', kind: 'optNumber', numKind: 'int', section: 'monitoring', min: 0, max: 10_000 },
+  { key: 'recon_max_unprocessed_callbacks', label: 'Unprocessed M-Pesa callbacks before an alert', kind: 'optNumber', numKind: 'int', section: 'monitoring', min: 0, max: 10_000 },
+  { key: 'recon_max_negative_balance_users', label: 'Negative balances before an alert', kind: 'optNumber', numKind: 'int', section: 'monitoring', min: 0, max: 10_000 },
+  { key: 'recon_max_callback_failure_rate_pct', label: 'Callback failure rate before an alert', kind: 'optNumber', numKind: 'decimal', section: 'monitoring', unit: '%', min: 0, max: 100 },
+  { key: 'drift_lookback_hours', label: 'Drift monitor window', kind: 'optNumber', numKind: 'int', section: 'monitoring', unit: 'hours', min: 1, max: 336 },
+  { key: 'drift_min_samples', label: 'Drift monitor minimum samples', kind: 'optNumber', numKind: 'int', section: 'monitoring', min: 1, max: 100_000 },
+  { key: 'drift_per_sample_alert_pct', label: 'Per-sample drift alert', kind: 'optNumber', numKind: 'decimal', section: 'monitoring', unit: '%', min: 0, max: 1000 },
+  { key: 'drift_max_avg_abs_delta_pct', label: 'Average drift alert', kind: 'optNumber', numKind: 'decimal', section: 'monitoring', unit: '%', min: 0, max: 1000 },
+  { key: 'drift_max_high_drift_ratio_pct', label: 'High-drift share alert', kind: 'optNumber', numKind: 'decimal', section: 'monitoring', unit: '%', min: 0, max: 100 },
+  { key: 'drift_max_review_mismatch_ratio_pct', label: 'Review mismatch alert', kind: 'optNumber', numKind: 'decimal', section: 'monitoring', unit: '%', min: 0, max: 100 },
 
   { key: 'support_sla_urgent_hours', label: 'Reply target: urgent', kind: 'int', section: 'support', unit: 'hours', min: 1, max: 720 },
   { key: 'support_sla_high_hours', label: 'Reply target: high', kind: 'int', section: 'support', unit: 'hours', min: 1, max: 720 },
@@ -138,6 +200,7 @@ export function toForm(s: SystemSettings): FormState {
   for (const f of FIELDS) {
     const v = s[f.key]
     if (f.kind === 'bool') out[f.key] = Boolean(v)
+    else if (f.kind === 'triBool') out[f.key] = v === true ? 'on' : v === false ? 'off' : 'inherit'
     else if (f.kind === 'milestones' || f.kind === 'staff') out[f.key] = [...((v as number[]) ?? [])].sort((a, b) => a - b)
     else if (f.kind === 'categoryMap') out[f.key] = { ...((v as CategoryMap) ?? {}) }
     else out[f.key] = v === null || v === undefined ? '' : String(v)
@@ -159,7 +222,7 @@ export function sameValue(f: FieldDef, a: FormValue, b: FormValue): boolean {
     const keys = new Set([...Object.keys(x), ...Object.keys(y)])
     return [...keys].every((k) => (x[k] ?? null) === (y[k] ?? null))
   }
-  if (numeric(f.kind)) {
+  if (numeric(f.kind) || f.kind === 'optNumber') {
     const emptyA = String(a).trim() === ''
     const emptyB = String(b).trim() === ''
     return emptyA === emptyB && (emptyA || Number(a) === Number(b))
@@ -170,6 +233,15 @@ export function sameValue(f: FieldDef, a: FormValue, b: FormValue): boolean {
 
 /** Payload value for the API. */
 export function toPayload(f: FieldDef, v: FormValue): unknown {
+  if (f.kind === 'triBool') return v === 'on' ? true : v === 'off' ? false : null
+  if (f.kind === 'date') return String(v).trim() || null
+  if (f.kind === 'optNumber') {
+    const s = String(v).trim()
+    if (!s) return null
+    if (f.numKind === 'int') return Number.parseInt(s, 10)
+    if (f.numKind === 'money') return Number(s).toFixed(2)
+    return Number(s)
+  }
   if (f.kind === 'int') return Number.parseInt(String(v), 10)
   if (f.kind === 'percent' || f.kind === 'money' || f.kind === 'decimal') return Number(v).toFixed(2)
   if (typeof v === 'string') return v.trim()
@@ -195,6 +267,30 @@ export function validate(form: FormState): Partial<Record<SettingKey, string>> {
       if (f.max !== undefined && n > f.max) { errors[f.key] = `Must be at most ${f.max.toLocaleString('en-KE')}.`; continue }
     }
     if (f.kind === 'email' && !EMAIL.test(String(v).trim())) errors[f.key] = 'Enter a valid email address.'
+    if (f.kind === 'optNumber') {
+      const s = String(v).trim()
+      if (!s) continue
+      const n = Number(s)
+      if (!Number.isFinite(n)) { errors[f.key] = 'Enter a number, or leave blank for the server value.'; continue }
+      if (f.numKind === 'int' && !Number.isInteger(n)) { errors[f.key] = 'Use a whole number.'; continue }
+      if (f.numKind === 'money' && !/^\d+(\.\d{1,2})?$/.test(s)) { errors[f.key] = 'Use at most 2 decimal places, no sign.'; continue }
+      if (f.min !== undefined && n < f.min) { errors[f.key] = `Must be at least ${f.min.toLocaleString('en-KE')}.`; continue }
+      if (f.max !== undefined && n > f.max) { errors[f.key] = `Must be at most ${f.max.toLocaleString('en-KE')}.`; continue }
+    }
+    if (f.kind === 'date') {
+      const s = String(v).trim()
+      if (s && !/^\d{4}-\d{2}-\d{2}$/.test(s)) errors[f.key] = 'Use a date (YYYY-MM-DD), or leave blank.'
+    }
+  }
+  const optNum = (k: SettingKey) => (String(form[k] ?? '').trim() === '' ? null : Number(form[k]))
+  const minDep = optNum('min_deposit_kes')
+  const maxDep = optNum('max_deposit_kes')
+  if (minDep !== null && maxDep !== null && !errors.max_deposit_kes && minDep > maxDep) {
+    errors.max_deposit_kes = 'Must be at least the smallest deposit.'
+  }
+  const maxWd = optNum('max_withdrawal_kes')
+  if (maxWd !== null && !errors.max_withdrawal_kes && Number(form.minimum_withdrawal_amount) > maxWd) {
+    errors.max_withdrawal_kes = 'Must be at least the minimum withdrawal.'
   }
   const minM = Number(form.min_challenge_milestone)
   const maxM = Number(form.max_challenge_milestone)
@@ -236,6 +332,13 @@ export function validate(form: FormState): Partial<Record<SettingKey, string>> {
 
 /** Human value for before → after lists. `staffName` resolves user ids. */
 export function display(f: FieldDef, v: FormValue | null | undefined, staffName: (id: number) => string = (id) => `#${id}`): string {
+  if (f.kind === 'triBool') return v === 'on' ? 'On' : v === 'off' ? 'Off' : 'Server default'
+  if ((f.kind === 'optNumber' || f.kind === 'date') && (v === null || v === undefined || v === '')) return 'Server value'
+  if (f.kind === 'optNumber') {
+    const n = Number(v)
+    if (f.numKind === 'money') return `KSh ${n.toLocaleString('en-KE', { maximumFractionDigits: 2 })}`
+    return `${n.toLocaleString('en-KE', { maximumFractionDigits: 2 })}${f.unit ? ` ${f.unit}` : ''}`
+  }
   if (v === null || v === undefined || v === '') return '—'
   if (f.kind === 'bool') return v ? 'On' : 'Off'
   if (f.kind === 'milestones') return (v as number[]).map((m) => m.toLocaleString('en-KE')).join(', ')
@@ -255,6 +358,8 @@ export function display(f: FieldDef, v: FormValue | null | undefined, staffName:
 
 /** Audit-log values are Python str() of the stored value; turn them back into form values. */
 export function parseHistoryValue(f: FieldDef, raw: string): FormValue | null {
+  if (f.kind === 'triBool') return raw === 'True' ? 'on' : raw === 'False' ? 'off' : 'inherit'
+  if (f.kind === 'optNumber' || f.kind === 'date') return raw === 'None' ? '' : raw
   if (f.kind === 'bool') return raw === 'True' ? true : raw === 'False' ? false : null
   if (f.kind === 'milestones' || f.kind === 'staff') return (raw.match(/\d+/g) ?? []).map(Number)
   if (f.kind === 'categoryMap') {

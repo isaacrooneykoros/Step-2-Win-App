@@ -11,4 +11,4 @@ urlpatterns = [
     path("households/", views.mark_household, name="households"),
     path("households/<int:mark_id>/revoke/", views.revoke_household, name="household-revoke"),
     path("settings/", views.linkage_settings, name="settings"),
-]
+    path("runs/", views.linkage_runs, name="runs"),]

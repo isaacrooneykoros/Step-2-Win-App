@@ -284,6 +284,27 @@ def _short(value: Any, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
+def is_paused(name: str) -> bool:
+    """Staff paused the job (Ops monitoring > Scheduled jobs): no runner starts it."""
+    return _model().objects.filter(name=name, paused=True).exists()
+
+
+def _record_run(name, started_at, status, duration_ms, error, result, trigger) -> None:
+    """Keep the last N runs per job for the console's run history."""
+    from apps.admin_api.models import ScheduledJobRun
+
+    ScheduledJobRun.objects.create(
+        name=name, trigger=trigger[:20], started_at=started_at, finished_at=timezone.now(),
+        status=status, duration_ms=duration_ms, error=error, result=result,
+    )
+    keep = ScheduledJobRun.RUN_HISTORY_PER_JOB
+    old = list(
+        ScheduledJobRun.objects.filter(name=name).order_by("-started_at", "-id").values_list("id", flat=True)[keep:keep + 500]
+    )
+    if old:
+        ScheduledJobRun.objects.filter(id__in=old).delete()
+
+
 def _finish(name: str, started_at: datetime, status: str, duration_ms: int, error: str = "", result: str = "") -> None:
     Model = _model()
     Model.objects.filter(name=name, last_started_at=started_at).update(
@@ -328,6 +349,10 @@ def execute(job: Job, started_at: datetime, trigger: str) -> dict:
         _finish(job.name, started_at, status, duration_ms, error, result)
     except Exception:  # noqa: BLE001 - the lease then simply expires
         logger.exception("scheduled_job name=%s could not record its result", job.name)
+    try:
+        _record_run(job.name, started_at, status, duration_ms, error, result, trigger)
+    except Exception:  # noqa: BLE001 - history is best effort
+        logger.exception("scheduled_job name=%s could not record its run history", job.name)
     logger.info(
         "scheduled_job name=%s trigger=%s status=%s duration_ms=%d result=%s",
         job.name, trigger, status, duration_ms, result[:120],
@@ -343,6 +368,8 @@ def run_job(job: Job, *, force: bool = False, trigger: str = "manual", now: date
     """
     now = now or timezone.now()
     state = get_state(job.name)
+    if state.paused and not force:
+        return {"name": job.name, "status": "paused"}
     if not force and not is_due(job.schedule, state.last_started_at, now):
         return {"name": job.name, "status": "not_due"}
     started = acquire_lease(
@@ -372,6 +399,9 @@ def run_due_jobs(budget_seconds: float = 45.0, *, trigger: str = "ticker", jobs:
             tidy_connections()
             state = get_state(job.name)
             now = timezone.now()
+            if state.paused:
+                summary.setdefault("paused", []).append(job.name)
+                continue
             if not is_due(job.schedule, state.last_started_at, now):
                 continue
             if time.monotonic() - t0 >= budget_seconds:
@@ -384,7 +414,7 @@ def run_due_jobs(budget_seconds: float = 45.0, *, trigger: str = "ticker", jobs:
             continue
         if outcome["status"] == "busy":
             summary["busy"].append(job.name)
-        elif outcome["status"] != "not_due":
+        elif outcome["status"] not in ("not_due", "paused"):
             summary["ran"].append({"name": job.name, "status": outcome["status"]})
     summary["elapsed_ms"] = int((time.monotonic() - t0) * 1000)
     if summary["ran"] or summary["deferred"] or summary["failed_checks"]:
@@ -426,6 +456,10 @@ def job_rows(now: datetime | None = None) -> list[dict]:
                 "last_error": (s.last_error if s else "") or None,
                 "last_result": (s.last_result if s else "") or None,
                 "run_count": s.run_count if s else 0,
+                "paused": bool(s and s.paused),
+                "paused_at": s.paused_at if s else None,
+                "paused_by": (s.paused_by if s else "") or None,
+                "pause_reason": (s.pause_reason if s else "") or None,
                 "running": running,
                 "next_due_at": next_run_at(job.schedule, last, now),
                 "due": is_due(job.schedule, last, now),
@@ -442,6 +476,8 @@ def run_scheduled_job(name: str) -> dict:
     handling) is skipped instead of run twice."""
     if job_runner() == RUNNER_OFF:
         return {"name": name, "status": "skipped"}
+    if is_paused(name):
+        return {"name": name, "status": "paused"}
     job = get_job(name)
     if job is None:
         return {"name": name, "status": "unknown"}

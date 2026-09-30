@@ -6,7 +6,7 @@
  */
 import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, CircleSlash, Clock, Loader2, Play, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, CircleSlash, Clock, Loader2, Pause, Play, XCircle } from 'lucide-react'
 import { Panel } from '../ui/Card'
 import { Button } from '../ui/Button'
 import { ErrorState } from '../ui/ErrorState'
@@ -16,6 +16,9 @@ import { cn } from '../../lib/cn'
 import { formatDateTime, formatRelative } from '../../lib/format'
 import { useLiveRefetchInterval } from '../../lib/realtime/useAdminRealtime'
 import { http } from './http'
+import { Textarea } from '../ui/Input'
+import { consoleB } from '../consoleb/api'
+import { usePermissions } from '../../lib/permissions'
 
 export interface ScheduledJob {
   name: string
@@ -35,6 +38,10 @@ export interface ScheduledJob {
   next_due_at: string | null
   due: boolean
   overdue: boolean
+  paused?: boolean
+  paused_at?: string | null
+  paused_by?: string | null
+  pause_reason?: string | null
 }
 
 export interface ScheduledJobsResponse {
@@ -71,6 +78,46 @@ function StatusPill({ job }: { job: ScheduledJob }) {
       <Icon size={12} aria-hidden strokeWidth={2.25} className={job.running ? 'animate-spin' : undefined} />
       {s.label}
     </span>
+  )
+}
+
+function PausedPill({ job }: { job: ScheduledJob }) {
+  return (
+    <span title={job.pause_reason ? `Paused by ${job.paused_by ?? 'staff'}: ${job.pause_reason}` : undefined}
+      className="inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded bg-warning-soft px-2 text-xs font-medium text-warning">
+      <Pause size={12} aria-hidden strokeWidth={2.25} />
+      Paused
+    </span>
+  )
+}
+
+/** Last runs of one job (GET /api/admin/monitoring/jobs/<name>/runs/). */
+function JobHistory({ name }: { name: string }) {
+  const q = useQuery({ queryKey: ['admin', 'scheduled-jobs', 'runs', name], queryFn: () => consoleB.jobRuns(name) })
+  if (q.isLoading) return <Skeleton height={48} />
+  if (q.error) return <ErrorState size="compact" error={q.error} onRetry={() => void q.refetch()} />
+  const rows = q.data?.results ?? []
+  if (!rows.length) return <p className="text-xs text-ink-muted">No runs recorded yet (history starts with this release).</p>
+  return (
+    <table className="w-full text-xs">
+      <caption className="sr-only">Recent runs of {name}</caption>
+      <thead className="text-ink-muted">
+        <tr><th scope="col" className="py-1 pr-3 text-left font-medium">Started</th><th scope="col" className="py-1 pr-3 text-left font-medium">Trigger</th>
+          <th scope="col" className="py-1 pr-3 text-left font-medium">Result</th><th scope="col" className="py-1 pr-3 text-right font-medium">Duration</th>
+          <th scope="col" className="py-1 text-left font-medium">Detail</th></tr>
+      </thead>
+      <tbody className="divide-y divide-[var(--border)]">
+        {rows.slice(0, 15).map((r) => (
+          <tr key={r.id}>
+            <td className="py-1 pr-3 text-ink-secondary" title={formatDateTime(r.started_at)}>{formatRelative(r.started_at)}</td>
+            <td className="py-1 pr-3 text-ink-secondary">{r.trigger || '—'}</td>
+            <td className={cn('py-1 pr-3 font-medium', r.status === 'error' ? 'text-danger' : 'text-success')}>{r.status === 'error' ? 'Failed' : 'OK'}</td>
+            <td className="num py-1 pr-3 text-right text-ink-secondary">{formatDuration(r.duration_ms)}</td>
+            <td className="mono max-w-[28rem] truncate py-1 text-2xs text-ink-muted" title={r.error ?? r.result ?? ''}>{r.error ?? r.result ?? '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }
 
@@ -114,6 +161,16 @@ export function ScheduledJobsPanel() {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [confirm, setConfirm] = useState<ScheduledJob | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
+  const [pausing, setPausing] = useState<ScheduledJob | null>(null)
+  const canPause = usePermissions().can('settings.system')
+  const [pauseReason, setPauseReason] = useState('')
+
+  const pause = useMutation({
+    mutationFn: ({ job, paused }: { job: ScheduledJob; paused: boolean }) =>
+      paused ? consoleB.pauseJob(job.name, pauseReason.trim()) : consoleB.resumeJob(job.name),
+    onSuccess: () => { setPausing(null); setPauseReason(''); setRunError(null); void qc.invalidateQueries({ queryKey: JOBS_QUERY_KEY }) },
+    onError: (err: Error) => { setPausing(null); setRunError(err.message) },
+  })
 
   const run = useMutation({
     mutationFn: (name: string) => jobsApi.run(name),
@@ -178,7 +235,7 @@ export function ScheduledJobsPanel() {
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
               {jobs.map((j) => {
-                const expandable = Boolean(j.last_error || j.last_result)
+                const expandable = true
                 const isOpen = Boolean(open[j.name])
                 return (
                   <Fragment key={j.name}>
@@ -203,7 +260,8 @@ export function ScheduledJobsPanel() {
                       <td className="px-4 py-2.5 align-top">
                         <div className="flex flex-wrap gap-1">
                           <StatusPill job={j} />
-                          {j.overdue && !j.running && <OverduePill />}
+                          {j.paused && <PausedPill job={j} />}
+                          {j.overdue && !j.running && !j.paused && <OverduePill />}
                         </div>
                       </td>
                       <td className="px-4 py-2.5 align-top text-ink-secondary">
@@ -216,7 +274,17 @@ export function ScheduledJobsPanel() {
                       <td className="px-4 py-2.5 align-top text-ink-secondary">
                         {j.due ? <span className="font-medium text-ink-primary">Now</span> : j.next_due_at ? <span title={formatDateTime(j.next_due_at)}>{formatDateTime(j.next_due_at)}</span> : '—'}
                       </td>
-                      <td className="px-4 py-2.5 text-right align-top">
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right align-top">
+                        {canPause && <Button
+                          size="sm"
+                          variant="ghost"
+                          className="mr-1"
+                          leftIcon={j.paused ? <Play size={12} aria-hidden /> : <Pause size={12} aria-hidden />}
+                          disabled={pause.isPending}
+                          onClick={() => (j.paused ? pause.mutate({ job: j, paused: false }) : setPausing(j))}
+                        >
+                          {j.paused ? 'Resume' : 'Pause'}
+                        </Button>}
                         <Button
                           size="sm"
                           variant="secondary"
@@ -242,6 +310,13 @@ export function ScheduledJobsPanel() {
                               Last result: <span className="mono text-ink-secondary">{j.last_result}</span>
                             </p>
                           )}
+                          {j.paused && (
+                            <p className="mt-1 text-xs text-warning">
+                              Paused {j.paused_at ? formatRelative(j.paused_at) : ''} by {j.paused_by ?? 'staff'}{j.pause_reason ? `: ${j.pause_reason}` : ''}. No runner starts it until it is resumed; Run now still works.
+                            </p>
+                          )}
+                          <p className="mb-1 mt-2 text-xs font-medium text-ink-secondary">Recent runs</p>
+                          <JobHistory name={j.name} />
                         </td>
                       </tr>
                     )}
@@ -268,6 +343,20 @@ export function ScheduledJobsPanel() {
         ] : undefined}
         confirmLabel="Run now"
       />
+      <ConfirmModal
+        open={pausing !== null}
+        onClose={() => setPausing(null)}
+        onConfirm={() => pausing && pause.mutate({ job: pausing, paused: true })}
+        loading={pause.isPending}
+        variant="warning"
+        title="Pause this job?"
+        message="Every runner (built-in ticker, GitHub trigger and Celery) skips the job until you resume it. Pausing money jobs delays settlement and payouts."
+        details={pausing ? [{ label: 'Job', value: humanName(pausing.name) }, { label: 'Schedule', value: <span className="mono text-xs">{pausing.schedule}</span> }] : undefined}
+        confirmLabel="Pause job"
+        confirmDisabled={pauseReason.trim().length < 5}
+      >
+        <Textarea label="Reason (kept in the audit log)" rows={2} value={pauseReason} onChange={(e) => setPauseReason(e.target.value)} />
+      </ConfirmModal>
     </Panel>
   )
 }
