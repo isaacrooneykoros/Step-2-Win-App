@@ -15,6 +15,7 @@ import { consoleApi } from '../components/users/api'
 import type { RoleInfo, StaffInviteRow, StaffRow } from '../components/users/partATypes'
 import { ActionNotice, Timestamp, UserCell } from '../components/users/shared'
 import { usePermissions } from '../lib/permissions'
+import { formatDateTime } from '../lib/format'
 
 const ROLE_ORDER = ['owner', 'finance', 'support', 'trust', 'content', 'settings']
 
@@ -120,7 +121,7 @@ export function StaffPage() {
     { key: 'roles', label: 'Roles', render: (i) => <RoleChips roles={i.roles} labels={labels} /> },
     { key: 'status', label: 'Status', render: (i) => <StatusBadge size="sm" tone={i.status === 'pending' ? 'warning' : i.status === 'accepted' ? 'success' : 'neutral'} label={i.status === 'accepted' && i.accepted_username ? `Joined as ${i.accepted_username}` : i.status[0].toUpperCase() + i.status.slice(1)} /> },
     { key: 'code', label: 'Code ends', hideBelow: 'md', render: (i) => <span className="mono text-xs">…{i.code_hint}</span> },
-    { key: 'expires', label: 'Expires', hideBelow: 'lg', render: (i) => <Timestamp value={i.expires_at} className="text-ink-secondary" /> },
+    { key: 'expires', label: 'Expires', hideBelow: 'lg', render: (i) => <span className="whitespace-nowrap text-ink-secondary">{formatDateTime(i.expires_at)}</span> },
   ]
   const me = perms.data?.user_id
 

@@ -653,7 +653,7 @@ function RecordsTab({ userId, can, onAction }: { userId: number; can: Can; onAct
   if (q.error || !q.data) return <ErrorState size="compact" error={q.error} onRetry={() => void q.refetch()} />
   const r: UserRecords = q.data
   const pairs = (changes: Record<string, unknown> | null) =>
-    Object.fromEntries(Object.entries(changes ?? {}).map(([k, v]) => [k, Array.isArray(v) ? { old: v[0], new: v[1] } : v]))
+    Object.fromEntries(Object.entries(changes ?? {}).map(([k, v]) => [k, Array.isArray(v) ? { old: v[0] === 'None' ? null : v[0], new: v[1] === 'None' ? null : v[1] } : v]))
   return (
     <div>
       {r.lockout.locked && (

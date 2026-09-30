@@ -148,7 +148,7 @@ export function DepositsPage() {
                 {d.history.map((h) => (
                   <li key={`h${h.id}`} className="text-xs">
                     <p className="text-ink-muted">{h.action} by {h.actor ?? 'system'} · <Timestamp value={h.timestamp} /></p>
-                    <ChangeList changes={Object.fromEntries(Object.entries(h.changes ?? {}).map(([k, v]) => [k, Array.isArray(v) ? { old: v[0], new: v[1] } : v]))} />
+                    <ChangeList changes={Object.fromEntries(Object.entries(h.changes ?? {}).map(([k, v]) => [k, Array.isArray(v) ? { old: v[0] === 'None' ? null : v[0], new: v[1] === 'None' ? null : v[1] } : v]))} />
                   </li>
                 ))}
               </ul>

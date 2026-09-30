@@ -117,11 +117,14 @@ class UserActionAuditTests(ConsoleTestBase):
     def test_staff_changes_require_superuser(self):
         self.client.force_authenticate(self.staff)
         # Staff access is granted through the owner-only Staff & roles endpoints.
-        body = {"identifier": self.bob.username, "roles": ["support"]}
+        body = {"identifier": self.alice.username, "roles": ["support"]}
         self.assertEqual(self.client.post("/api/admin/staff/invite/", body, format="json").status_code, 403)
         self.client.force_authenticate(self.superuser)
+        # A banned account can't be given staff access.
+        banned = {"identifier": self.bob.username, "roles": ["support"]}
+        self.assertEqual(self.client.post("/api/admin/staff/invite/", banned, format="json").status_code, 409)
         self.assertEqual(self.client.post("/api/admin/staff/invite/", body, format="json").status_code, 200)
-        self.assertTrue(AuditLog.objects.filter(action="promote", resource_id=self.bob.id).exists())
+        self.assertTrue(AuditLog.objects.filter(action="promote", resource_id=self.alice.id).exists())
 
     def test_delete_refuses_accounts_holding_money(self):
         res = self.client.delete(f"/api/admin/users/{self.alice.id}/delete_user/")
