@@ -115,6 +115,7 @@ const StepsDayDetailScreen = lazy(() => import('./screens/StepsDayDetailScreen')
 const WalkScreen = lazy(() => import('./screens/WalkScreen'));
 const WalkSummaryScreen = lazy(() => import('./screens/WalkSummaryScreen'));
 const SupportScreen = lazy(() => import('./screens/SupportScreen'));
+const HelpCentreScreen = lazy(() => import('./screens/HelpCentreScreen'));
 const ActiveSessionsScreen = lazy(() => import('./screens/ActiveSessionsScreen'));
 const LegalDocumentScreen = lazy(() => import('./screens/LegalDocumentScreen'));
 const PrivacyScreen = lazy(() => import('./screens/PrivacyScreen'));
@@ -371,6 +372,7 @@ export default function App() {
               <Route path="/settings/connected-sources" element={withSuspense(<ConnectedSourcesScreen />)} />
               <Route path="/profile/sessions" element={withSuspense(<ActiveSessionsScreen />)} />
               <Route path="/support" element={withSuspense(<SupportScreen />)} />
+              <Route path="/help" element={withSuspense(<HelpCentreScreen />)} />
               <Route path="/legal/:slug" element={withSuspense(<LegalDocumentScreen />)} />
               {socialRoutes}
             </Route>

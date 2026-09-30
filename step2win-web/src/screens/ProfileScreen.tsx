@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import {
+  BookOpen,
   ChevronRight,
   FileText,
   LifeBuoy,
@@ -189,6 +190,7 @@ export default function ProfileScreen() {
         </ListGroup>
 
         <ListGroup title="Help">
+          <ListRow to="/help" leading={<IconTile icon={BookOpen} tone="neutral" size="sm" />} title="Help centre" subtitle="Answers to common questions" />
           <ListRow to="/support" leading={<IconTile icon={LifeBuoy} tone="neutral" size="sm" />} title="Support" subtitle="Get help with your account or payments" />
           {LEGAL_DOCS.map((doc) => (
             <ListRow key={doc.slug} to={`/legal/${doc.slug}`} leading={<IconTile icon={doc.icon} tone="neutral" size="sm" />} title={doc.title} />
