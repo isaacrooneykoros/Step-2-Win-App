@@ -37,7 +37,6 @@ export default function SocialScreen() {
     <div className="pb-nav">
       <ScreenHeader
         title="Friends & teams"
-        back="/profile"
         actions={
           <>
             <IconButton label={unread ? `Updates, ${unread} unread` : 'Updates'} onClick={() => navigate('/social/inbox')}>

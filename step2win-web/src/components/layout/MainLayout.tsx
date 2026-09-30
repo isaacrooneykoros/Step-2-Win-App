@@ -3,9 +3,11 @@ import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
-import { Home, Trophy, Wallet, User, Footprints, Bell, Activity } from 'lucide-react';
+import { Home, Trophy, Users, Wallet, User, Footprints, Bell, Activity } from 'lucide-react';
 import { useStepsWebSocket } from '../../hooks/useStepsWebSocket';
 import { SocialNotifier } from '../social/SocialNotifier';
+import { socialKeys } from '../social/socialUtils';
+import { socialService } from '../../services/api/social';
 import { useHealthSync, useSmartStepSync } from '../../hooks/useHealthSync';
 import { usePermissionStatus } from '../../hooks/usePermissionStatus';
 import { authService } from '../../services/api';
@@ -29,6 +31,7 @@ const PERMISSIONS_BOOTSTRAP_DONE_KEY = 'permissions_bootstrap_done_v1';
 const navItems = [
   { to: '/', icon: Home, label: 'Home', match: (p: string) => p === '/' || p.startsWith('/steps') || p.startsWith('/walk') },
   { to: '/challenges', icon: Trophy, label: 'Challenges', match: (p: string) => p.startsWith('/challenges') },
+  { to: '/social', icon: Users, label: 'Friends', match: (p: string) => p.startsWith('/social') },
   { to: '/wallet', icon: Wallet, label: 'Wallet', match: (p: string) => p.startsWith('/wallet') },
   {
     to: '/profile',
@@ -55,6 +58,17 @@ function readNotificationPreferences() {
 
 export default function MainLayout() {
   const location = useLocation();
+
+  // Friends tab: badge from the same small social summary SocialNotifier already polls (shared
+  // query cache, no extra requests). Hidden when an admin switches social off.
+  const socialSummary = useQuery({
+    queryKey: socialKeys.summary,
+    queryFn: socialService.notificationSummary,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const friendsBadge = socialSummary.data?.unread ?? 0;
+  const visibleNavItems = socialSummary.data?.enabled === false ? navItems.filter((item) => item.to !== '/social') : navItems;
   useStepsWebSocket();
   const { syncHealthSilent, syncHealthNow, requestSync, connectDevice, isConnectingDevice, permissionStatus } = useHealthSync();
   const queryClient = useQueryClient();
@@ -304,9 +318,10 @@ export default function MainLayout() {
         aria-label="Primary"
         className="app-bottom-nav fixed inset-x-0 bottom-0 z-50 border-t border-border-light bg-bg-elevated/95 backdrop-blur-md safe-bottom"
       >
-        <ul className="mx-auto grid h-[var(--nav-height)] max-w-md grid-cols-4">
-          {navItems.map(({ to, icon: Icon, label, match }) => {
+        <ul className={`mx-auto grid h-[var(--nav-height)] max-w-md ${visibleNavItems.length === 5 ? 'grid-cols-5' : 'grid-cols-4'}`}>
+          {visibleNavItems.map(({ to, icon: Icon, label, match }) => {
             const active = match(location.pathname);
+            const badge = to === '/social' ? friendsBadge : 0;
             return (
               <li key={to} className="flex">
                 <NavLink
@@ -321,8 +336,16 @@ export default function MainLayout() {
                     aria-hidden
                     className={`absolute top-0 h-[3px] w-8 rounded-b-full bg-brand transition-opacity duration-normal ${active ? 'opacity-100' : 'opacity-0'}`}
                   />
-                  <Icon size={22} strokeWidth={active ? 2.3 : 1.8} aria-hidden />
+                  <span className="relative">
+                    <Icon size={22} strokeWidth={active ? 2.3 : 1.8} aria-hidden />
+                    {badge > 0 && (
+                      <span className="absolute -right-2 -top-1.5 min-w-[16px] rounded-full bg-danger px-1 text-center text-[10px] font-semibold leading-4 text-white">
+                        {badge > 9 ? '9+' : badge}
+                      </span>
+                    )}
+                  </span>
                   <span className={`text-micro ${active ? 'font-semibold' : 'font-medium'}`}>{label}</span>
+                  {badge > 0 && <span className="sr-only">, {badge} new</span>}
                 </NavLink>
               </li>
             );
