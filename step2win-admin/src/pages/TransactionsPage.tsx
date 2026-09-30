@@ -3,7 +3,7 @@ import { useIsFlashing } from '../lib/realtime/store'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Download, ReceiptText, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Coins, Download, ReceiptText, RefreshCw } from 'lucide-react'
 import { PageHeader } from '../components/PageHeader'
 import { AdminTable, type Column } from '../components/AdminTable'
 import { SlideOver } from '../components/SlideOver'
@@ -22,6 +22,9 @@ import { financeApi } from '../components/finance/api'
 import { useDebounced } from '../components/finance/hooks'
 import type { LedgerFilters, LedgerRow, LedgerType } from '../components/finance/types'
 import { LEDGER_TYPE_LABEL, Money, Reference, Section, SignedMoney, When, toNum } from '../components/finance/ui'
+import { AdjustBalanceModal, CorrectionsPanel, REVERSIBLE, ReverseIcon, ReverseModal } from '../components/finance/Corrections'
+import { ActionNotice } from '../components/users/shared'
+import { usePermissions } from '../lib/permissions'
 
 const PAGE_SIZE = 50
 const TYPES = Object.keys(LEDGER_TYPE_LABEL) as LedgerType[]
@@ -59,6 +62,11 @@ export function TransactionsPage() {
   const [filters, setFilters] = useState<LedgerFilters>(() => ({ ...EMPTY, user: params.get('user') ?? '' }))
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<LedgerRow | null>(null)
+  const [adjustOpen, setAdjustOpen] = useState(false)
+  const [reversing, setReversing] = useState<LedgerRow | null>(null)
+  const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const { can } = usePermissions()
+  const onNotice = (tone: 'success' | 'danger', text: string) => setNotice({ tone, text })
 
   const debouncedUser = useDebounced(filters.user)
   const debouncedQ = useDebounced(filters.q)
@@ -124,6 +132,9 @@ export function TransactionsPage() {
         description="Every wallet ledger entry, newest first. Totals and the CSV export follow the filters."
         actions={
           <>
+            {can('finance.adjust') && (
+              <Button size="sm" variant="primary" leftIcon={<Coins size={13} />} onClick={() => setAdjustOpen(true)}>Adjust balance</Button>
+            )}
             <Button
               size="sm"
               variant="secondary"
@@ -140,6 +151,9 @@ export function TransactionsPage() {
           </>
         }
       />
+
+      {notice && <ActionNotice tone={notice.tone} onDismiss={() => setNotice(null)}>{notice.text}</ActionNotice>}
+      <CorrectionsPanel onNotice={onNotice} />
 
       {exportCsv.error && (
         <ErrorState variant="inline" title="Export failed" error={exportCsv.error} onRetry={() => exportCsv.mutate()} retrying={exportCsv.isPending} />
@@ -240,6 +254,9 @@ export function TransactionsPage() {
         title={selected ? LEDGER_TYPE_LABEL[selected.type] ?? selected.type : ''}
         subtitle={selected ? `Ledger entry #${selected.id}` : undefined}
         headerAside={selected && !selected.arithmetic_ok ? <StatusBadge size="sm" tone="danger" label="Mismatch" /> : undefined}
+        footer={selected && can('finance.adjust') && REVERSIBLE.has(selected.type) && selected.user ? (
+          <Button variant="danger-soft" leftIcon={<ReverseIcon size={13} />} onClick={() => setReversing(selected)}>Reverse entry</Button>
+        ) : undefined}
       >
         {selected && (
           <div className="space-y-5">
@@ -276,6 +293,8 @@ export function TransactionsPage() {
           </div>
         )}
       </SlideOver>
+      <AdjustBalanceModal open={adjustOpen} onClose={() => setAdjustOpen(false)} onNotice={onNotice} />
+      <ReverseModal key={reversing?.id ?? 'none'} row={reversing} onClose={() => { setReversing(null); setSelected(null) }} onNotice={onNotice} />
     </div>
   )
 }

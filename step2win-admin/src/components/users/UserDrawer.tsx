@@ -5,8 +5,8 @@ import {
   Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import {
-  Ban, Footprints, KeyRound, LifeBuoy, MonitorSmartphone, Pencil, ShieldAlert, ShieldCheck, Trophy, UserCheck,
-  Wallet, History,
+  Ban, Coins, Footprints, KeyRound, LifeBuoy, LogOut, MessageSquare, MonitorSmartphone, Pencil, ScrollText, ShieldAlert,
+  ShieldCheck, Sparkles, Trophy, Undo2, Unlock, UserCheck, Wallet, History,
 } from 'lucide-react'
 import { SlideOver } from '../SlideOver'
 import { StatusBadge } from '../StatusBadge'
@@ -28,8 +28,11 @@ import { RiskModelPanel } from './RiskModelPanel'
 import { LinkedAccountsPanel } from './LinkedAccountsPanel'
 import { EvidenceTimeline } from './EvidenceTimeline'
 import { formatDay, humanize, TRUST_LABEL, useAdminRole } from './utils'
+import { usePermissions, type StaffPermission } from '../../lib/permissions'
+import type { UserRecords } from './partATypes'
 
-type Tab = 'account' | 'activity' | 'challenges' | 'financial' | 'security' | 'evidence' | 'support' | 'audit'
+type Tab = 'account' | 'activity' | 'challenges' | 'financial' | 'security' | 'evidence' | 'support' | 'records' | 'audit'
+type Can = (perm: StaffPermission) => boolean
 
 interface Props {
   userId: number | null
@@ -42,6 +45,7 @@ export function UserDrawer({ userId, onClose }: Props) {
   const [action, setAction] = useState<UserAction | null>(null)
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const role = useAdminRole()
+  const { can } = usePermissions()
   const qc = useQueryClient()
   const q = useQuery({
     queryKey: ['admin', 'user-overview', userId],
@@ -73,6 +77,7 @@ export function UserDrawer({ userId, onClose }: Props) {
     { value: 'security' as const, label: 'Security', count: d ? openFlags : undefined },
     { value: 'evidence' as const, label: 'Evidence' },
     { value: 'support' as const, label: 'Support', count: d?.tickets.length },
+    { value: 'records' as const, label: 'Records' },
     { value: 'audit' as const, label: 'Audit', count: d?.audit.length },
   ]
 
@@ -94,9 +99,10 @@ export function UserDrawer({ userId, onClose }: Props) {
       footer={
         u && !u.is_deleted && (
           <>
-            <Button size="sm" variant="secondary" leftIcon={<Pencil size={13} />} onClick={() => setAction({ kind: 'edit' })}>Edit details</Button>
-            <Button size="sm" variant="secondary" leftIcon={<KeyRound size={13} />} onClick={() => setAction({ kind: 'reset-password' })}>Reset password</Button>
-            {u.is_active ? (
+            {can('users.edit') && <Button size="sm" variant="secondary" leftIcon={<MessageSquare size={13} />} onClick={() => setAction({ kind: 'message' })}>Message</Button>}
+            {can('users.edit') && <Button size="sm" variant="secondary" leftIcon={<Pencil size={13} />} onClick={() => setAction({ kind: 'edit' })}>Edit details</Button>}
+            {can('users.edit') && <Button size="sm" variant="secondary" leftIcon={<KeyRound size={13} />} onClick={() => setAction({ kind: 'reset-password' })}>Reset password</Button>}
+            {!can('users.ban') ? null : u.is_active ? (
               <Button size="sm" variant="danger-soft" leftIcon={<Ban size={13} />} disabled={isSelf} title={isSelf ? 'You cannot ban your own account' : undefined} onClick={() => setAction({ kind: 'ban' })}>Ban user</Button>
             ) : (
               <Button size="sm" variant="primary" leftIcon={<UserCheck size={13} />} onClick={() => setAction({ kind: 'unban' })}>Unban user</Button>
@@ -128,11 +134,11 @@ export function UserDrawer({ userId, onClose }: Props) {
           <Tabs label="User record sections" items={tabs} value={tab} onChange={setTab} idPrefix="user-drawer" size="sm" />
 
           <div role="tabpanel" id={`user-drawer-panel-${tab}`} aria-labelledby={`user-drawer-tab-${tab}`}>
-            {tab === 'account' && <AccountTab d={d} isSuperuser={role.isSuperuser} isSelf={isSelf} onAction={setAction} />}
-            {tab === 'activity' && <ActivityTab d={d} />}
+            {tab === 'account' && <AccountTab d={d} can={can} isSelf={isSelf} onAction={setAction} />}
+            {tab === 'activity' && <ActivityTab d={d} can={can} onAction={setAction} />}
             {tab === 'challenges' && <ChallengesTab d={d} />}
-            {tab === 'financial' && <FinancialTab d={d} />}
-            {tab === 'security' && <SecurityTab d={d} onAction={setAction} />}
+            {tab === 'financial' && <FinancialTab d={d} can={can} onAction={setAction} />}
+            {tab === 'security' && <SecurityTab d={d} can={can} onAction={setAction} />}
             {tab === 'evidence' && (
               <div className="space-y-6">
                 <LinkedAccountsPanel userId={d.user.id} />
@@ -140,6 +146,7 @@ export function UserDrawer({ userId, onClose }: Props) {
               </div>
             )}
             {tab === 'support' && <SupportTab d={d} />}
+            {tab === 'records' && <RecordsTab userId={d.user.id} can={can} onAction={setAction} />}
             {tab === 'audit' && <AuditTab d={d} />}
           </div>
         </div>
@@ -171,7 +178,8 @@ function RowList({ children }: { children: ReactNode }) {
 
 // ── Account ─────────────────────────────────────────────────────────────────
 
-function AccountTab({ d, isSuperuser, isSelf, onAction }: { d: UserOverview; isSuperuser: boolean; isSelf: boolean; onAction: (a: UserAction) => void }) {
+function AccountTab({ d, can, isSelf, onAction }: { d: UserOverview; can: Can; isSelf: boolean; onAction: (a: UserAction) => void }) {
+  const navigate = useNavigate()
   const u = d.user
   const hasMoney = Number(u.wallet_balance) !== 0 || Number(u.locked_balance) !== 0
   return (
@@ -227,6 +235,9 @@ function AccountTab({ d, isSuperuser, isSelf, onAction }: { d: UserOverview; isS
               <span className="text-xs text-ink-muted">first seen {formatDay(dv.first_seen_at)}</span>
               <span className="text-xs text-ink-muted">last <Timestamp value={dv.last_seen_at} /></span>
               <StatusBadge size="sm" tone={dv.trust_level === 'trusted' ? 'success' : dv.trust_level === 'low' ? 'warning' : 'neutral'} label={`Device ${humanize(dv.trust_level).toLowerCase()}`} />
+              {dv.is_active === false ? <StatusBadge size="sm" tone="neutral" label="Inactive" /> : can('users.devices') && !isSelf && (
+                <Button size="sm" variant="ghost" onClick={() => onAction({ kind: 'device-reset', registrationId: dv.id, label: `${humanize(dv.platform)} device` })}>Deactivate</Button>
+              )}
             </li>
           ))}
         </RowList>
@@ -234,30 +245,41 @@ function AccountTab({ d, isSuperuser, isSelf, onAction }: { d: UserOverview; isS
 
       <SectionTitle>Access and records</SectionTitle>
       <RowList>
-        <DangerRow
-          title="Reset lifetime step counters"
-          description="Sets total steps and best day on the profile to 0. Daily history is kept."
-          action={<Button size="sm" variant="secondary" leftIcon={<Footprints size={13} />} onClick={() => onAction({ kind: 'reset-steps' })}>Reset counters</Button>}
-        />
-        {isSuperuser ? (
-          <DangerRow
-            title={u.is_staff ? 'Staff access' : 'Grant staff access'}
-            description={u.is_staff ? 'This account can open the admin console.' : 'Allow this account to open the admin console.'}
-            action={
-              u.is_staff ? (
-                <Button size="sm" variant="danger-soft" disabled={isSelf} title={isSelf ? 'You cannot remove your own access' : undefined} onClick={() => onAction({ kind: 'remove-staff' })}>Remove staff access</Button>
-              ) : (
-                <Button size="sm" variant="secondary" leftIcon={<ShieldCheck size={13} />} onClick={() => onAction({ kind: 'grant-staff' })}>Grant staff access</Button>
-              )
-            }
-          />
-        ) : (
-          <DangerRow title="Staff access" description="Only superusers can change staff access or delete accounts." action={<StatusBadge size="sm" tone="neutral" label="Superuser only" />} />
+        {can('users.edit') && (
+          <DangerRow title="Sign out everywhere" description="Revokes every session and refresh token. The user signs in again with their password."
+            action={<Button size="sm" variant="secondary" leftIcon={<LogOut size={13} />} disabled={isSelf} onClick={() => onAction({ kind: 'sign-out' })}>Sign out everywhere</Button>} />
         )}
-        {isSuperuser && (
+        {can('users.edit') && (
+          <DangerRow title="Sign-in lockout" description="Clears failed sign-in attempts if the account was locked after too many tries."
+            action={<Button size="sm" variant="secondary" leftIcon={<Unlock size={13} />} onClick={() => onAction({ kind: 'unlock' })}>Clear lockout</Button>} />
+        )}
+        {can('users.devices') && (
+          <DangerRow title="Device binding" description="Deactivates every step-tracking device and lifts the 24-hour switch wait (lost or replaced phone)."
+            action={<Button size="sm" variant="secondary" leftIcon={<MonitorSmartphone size={13} />} disabled={isSelf} onClick={() => onAction({ kind: 'device-reset' })}>Reset binding</Button>} />
+        )}
+        {can('steps.correct') && (
+          <DangerRow title="Correct a day's steps" description="Set or void one day with a reason; live challenges, totals and rankings are recomputed. Settled challenges are never changed."
+            action={<Button size="sm" variant="secondary" leftIcon={<Footprints size={13} />} onClick={() => onAction({ kind: 'correct-steps' })}>Correct steps</Button>} />
+        )}
+        {can('finance.adjust') && (
+          <DangerRow title="Adjust wallet balance" description="Credit or debit with a reason as a new ledger row. Large amounts need a second finance approver."
+            action={<Button size="sm" variant="secondary" leftIcon={<Coins size={13} />} onClick={() => onAction({ kind: 'adjust-balance' })}>Adjust balance</Button>} />
+        )}
+        {can('users.xp') && (
+          <DangerRow title="Adjust XP" description={`Currently ${formatNumber(u.xp_profile?.total_xp ?? 0)} XP. Recorded as an XP event.`}
+            action={<Button size="sm" variant="secondary" leftIcon={<Sparkles size={13} />} onClick={() => onAction({ kind: 'adjust-xp' })}>Adjust XP</Button>} />
+        )}
+        <DangerRow
+          title="Staff access"
+          description={u.is_staff ? 'This account can open the admin console. Roles are managed on Staff & roles.' : 'Staff are invited and given roles on Staff & roles (owner only).'}
+          action={can('owner.staff')
+            ? <Button size="sm" variant="secondary" leftIcon={<ShieldCheck size={13} />} onClick={() => navigate('/staff')}>Open Staff & roles</Button>
+            : <StatusBadge size="sm" tone="neutral" label="Owner only" />}
+        />
+        {can('owner.delete_users') && (
           <DangerRow
             title="Delete account"
-            description={hasMoney ? `Not available: the account holds ${formatKES(Number(u.wallet_balance) + Number(u.locked_balance))}. Ban it instead.` : 'Permanently removes the account and its records.'}
+            description={hasMoney ? `Not available: the account holds ${formatKES(Number(u.wallet_balance) + Number(u.locked_balance))}. Ban it instead.` : 'Anonymises the account; money records are kept.'}
             action={<Button size="sm" variant="danger-soft" disabled={hasMoney || isSelf} onClick={() => onAction({ kind: 'delete' })}>Delete account</Button>}
           />
         )}
@@ -280,7 +302,7 @@ function DangerRow({ title, description, action }: { title: string; description:
 
 // ── Activity ────────────────────────────────────────────────────────────────
 
-function ActivityTab({ d }: { d: UserOverview }) {
+function ActivityTab({ d, can, onAction }: { d: UserOverview; can: Can; onAction: (a: UserAction) => void }) {
   const a = d.activity
   const days = a.days.map((x) => ({ ...x, label: formatDay(x.date) }))
   const total = days.reduce((s, x) => s + x.steps, 0)
@@ -298,6 +320,11 @@ function ActivityTab({ d }: { d: UserOverview }) {
         <Figure label="Best day" value={formatNumber(a.best_day_steps)} hint="Lifetime" />
       </div>
 
+      {can('steps.correct') && (
+        <div className="mt-3 flex justify-end">
+          <Button size="sm" variant="secondary" leftIcon={<Footprints size={13} />} onClick={() => onAction({ kind: 'correct-steps' })}>Correct a day</Button>
+        </div>
+      )}
       <SectionTitle aside={
         <ChartLegend items={[
           { label: 'Steps', color: SERIES[0] },
@@ -424,7 +451,7 @@ function ChallengesTab({ d }: { d: UserOverview }) {
 
 // ── Financial ───────────────────────────────────────────────────────────────
 
-function FinancialTab({ d }: { d: UserOverview }) {
+function FinancialTab({ d, can, onAction }: { d: UserOverview; can: Can; onAction: (a: UserAction) => void }) {
   const navigate = useNavigate()
   const w = d.wallet
   return (
@@ -437,6 +464,11 @@ function FinancialTab({ d }: { d: UserOverview }) {
         <Figure label="Withdrawn" value={formatKES(w.total_withdrawn)} hint="Wallet debits for withdrawals" />
       </div>
 
+      {can('finance.adjust') && (
+        <div className="mt-3 flex justify-end">
+          <Button size="sm" variant="secondary" leftIcon={<Coins size={13} />} onClick={() => onAction({ kind: 'adjust-balance' })}>Adjust balance</Button>
+        </div>
+      )}
       <SectionTitle aside={<InlineLink onClick={() => navigate('/transactions')}>All transactions</InlineLink>}>Recent wallet transactions</SectionTitle>
       {d.transactions.length === 0 ? (
         <EmptyState size="compact" icon={Wallet} title="No wallet transactions" />
@@ -451,6 +483,7 @@ function FinancialTab({ d }: { d: UserOverview }) {
                 <th scope="col" className="px-3 py-2 text-right font-medium">Amount</th>
                 <th scope="col" className="px-3 py-2 text-right font-medium">Balance after</th>
                 <th scope="col" className="px-3 py-2 text-right font-medium">When</th>
+                {can('finance.adjust') && <th scope="col" className="px-3 py-2"><span className="sr-only">Actions</span></th>}
               </tr>
             </thead>
             <tbody>
@@ -464,6 +497,14 @@ function FinancialTab({ d }: { d: UserOverview }) {
                   <td className="whitespace-nowrap px-3 py-2 text-right text-[13px]"><SignedKES value={t.amount} /></td>
                   <td className="mono whitespace-nowrap px-3 py-2 text-right text-[13px] text-ink-secondary">{formatKES(t.balance_after)}</td>
                   <td className="px-3 py-2 text-right text-xs text-ink-muted"><Timestamp value={t.created_at} /></td>
+                  {can('finance.adjust') && (
+                    <td className="px-2 py-1 text-right">
+                      {['deposit', 'payout', 'refund', 'adjustment'].includes(t.type) && (
+                        <Button size="sm" variant="ghost" leftIcon={<Undo2 size={12} />}
+                          onClick={() => onAction({ kind: 'reverse', txnId: Number(t.id), amount: String(t.amount), type: t.type, description: t.description })}>Reverse</Button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -495,7 +536,7 @@ function FinancialTab({ d }: { d: UserOverview }) {
 
 // ── Security ────────────────────────────────────────────────────────────────
 
-function SecurityTab({ d, onAction }: { d: UserOverview; onAction: (a: UserAction) => void }) {
+function SecurityTab({ d, can, onAction }: { d: UserOverview; can: Can; onAction: (a: UserAction) => void }) {
   const navigate = useNavigate()
   const t = d.trust
   const p = t.profile
@@ -531,7 +572,7 @@ function SecurityTab({ d, onAction }: { d: UserOverview; onAction: (a: UserActio
         </>
       )}
 
-      <SectionTitle aside={<span className="text-xs text-ink-muted">Actions change the trust score and are logged on the flag</span>}>Anti-cheat flags</SectionTitle>
+      <SectionTitle aside={<span className="text-xs text-ink-muted">Decisions need a reason and are recorded in the audit log</span>}>Anti-cheat flags</SectionTitle>
       {d.flags.length === 0 ? (
         <EmptyState size="compact" icon={ShieldCheck} title="No anti-cheat flags" description="Signals raised by step verification will be listed here." />
       ) : (
@@ -559,7 +600,7 @@ function SecurityTab({ d, onAction }: { d: UserOverview; onAction: (a: UserActio
                 </p>
               )}
               {f.admin_note && <p className="mt-1 text-xs text-ink-muted">Note: {f.admin_note}</p>}
-              {!f.reviewed && (
+              {!f.reviewed && can('trust.act') && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   <Button size="sm" variant="secondary" onClick={() => onAction({ kind: 'flag', flag: f, action: 'dismiss' })}>Dismiss</Button>
                   <Button size="sm" variant="secondary" onClick={() => onAction({ kind: 'flag', flag: f, action: 'warn' })}>Warn</Button>
@@ -600,6 +641,89 @@ function SupportTab({ d }: { d: UserOverview }) {
           </li>
         ))}
       </RowList>
+    </div>
+  )
+}
+
+// ── Records ─────────────────────────────────────────────────────────────────
+
+function RecordsTab({ userId, can, onAction }: { userId: number; can: Can; onAction: (a: UserAction) => void }) {
+  const q = useQuery({ queryKey: ['admin', 'user-records', userId], queryFn: () => consoleApi.userRecords(userId) })
+  if (q.isLoading) return <Skeleton height={180} />
+  if (q.error || !q.data) return <ErrorState size="compact" error={q.error} onRetry={() => void q.refetch()} />
+  const r: UserRecords = q.data
+  const pairs = (changes: Record<string, unknown> | null) =>
+    Object.fromEntries(Object.entries(changes ?? {}).map(([k, v]) => [k, Array.isArray(v) ? { old: v[0], new: v[1] } : v]))
+  return (
+    <div>
+      {r.lockout.locked && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning-line bg-warning-soft px-3 py-2 text-sm text-warning">
+          <span>Sign-in is locked after {r.lockout.failures} failed attempts.</span>
+          {can('users.edit') && <Button size="sm" variant="secondary" leftIcon={<Unlock size={13} />} onClick={() => onAction({ kind: 'unlock' })}>Clear lockout</Button>}
+        </div>
+      )}
+      <SectionTitle>Step corrections</SectionTitle>
+      {r.step_corrections.length === 0 ? <p className="text-sm text-ink-muted">No step corrections.</p> : (
+        <RowList>
+          {r.step_corrections.map((c) => (
+            <li key={c.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+              <span className="w-24 shrink-0 font-medium text-ink-primary">{formatDay(c.date)}</span>
+              <StatusBadge size="sm" tone={c.kind === 'set' ? 'info' : c.kind === 'void' ? 'danger' : 'neutral'} label={c.kind === 'set' ? `Set to ${formatNumber(c.steps ?? 0)}` : c.kind === 'void' ? 'Voided' : 'Removed'} />
+              <span className="min-w-0 flex-1 truncate text-xs text-ink-secondary" title={c.reason}>was {formatNumber(c.previous_steps)} · {c.reason}</span>
+              <span className="text-xs text-ink-muted">{c.created_by} · <Timestamp value={c.created_at} /></span>
+            </li>
+          ))}
+        </RowList>
+      )}
+      <SectionTitle>Badges · {formatNumber(r.xp.total_xp)} XP, level {r.xp.level}</SectionTitle>
+      {r.badges.length === 0 ? <p className="text-sm text-ink-muted">No badges earned.</p> : (
+        <RowList>
+          {r.badges.map((b) => (
+            <li key={b.badge_id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+              <span className="font-medium text-ink-primary">{b.name}</span>
+              <span className="flex items-center gap-3 text-xs text-ink-muted">earned <Timestamp value={b.earned_at} />
+                {can('users.xp') && <Button size="sm" variant="ghost" onClick={() => onAction({ kind: 'revoke-badge', badgeId: b.badge_id, badgeName: b.name })}>Revoke</Button>}
+              </span>
+            </li>
+          ))}
+        </RowList>
+      )}
+      <SectionTitle>Consent history (read-only)</SectionTitle>
+      {r.consents.length === 0 ? <p className="text-sm text-ink-muted">No consent records.</p> : (
+        <RowList>
+          {r.consents.map((c) => (
+            <li key={c.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+              <span className="min-w-0 flex-1 font-medium text-ink-primary">{humanize(c.purpose)}</span>
+              <StatusBadge size="sm" tone={c.granted ? 'success' : 'neutral'} label={c.granted ? 'Granted' : 'Withdrawn'} />
+              <span className="mono text-xs text-ink-muted">v{c.version}</span>
+              <span className="text-xs text-ink-muted">{humanize(c.source)} · <Timestamp value={c.created_at} /></span>
+            </li>
+          ))}
+        </RowList>
+      )}
+      <SectionTitle>Legal documents accepted (read-only)</SectionTitle>
+      {r.legal_acks.length === 0 ? <p className="text-sm text-ink-muted">No acceptances recorded.</p> : (
+        <RowList>
+          {r.legal_acks.map((a) => (
+            <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+              <span className="min-w-0 flex-1 font-medium text-ink-primary">{a.document}</span>
+              <StatusBadge size="sm" tone={a.version_seen >= a.current_version ? 'success' : 'warning'} label={`Version ${a.version_seen}${a.version_seen < a.current_version ? ` of ${a.current_version}` : ''}`} />
+              <span className="text-xs text-ink-muted"><Timestamp value={a.acknowledged_at} /></span>
+            </li>
+          ))}
+        </RowList>
+      )}
+      <SectionTitle aside={<ScrollText size={13} className="text-ink-muted" aria-hidden />}>Account change history (read-only)</SectionTitle>
+      {r.change_history.length === 0 ? <p className="text-sm text-ink-muted">No recorded changes.</p> : (
+        <ol className="space-y-3">
+          {r.change_history.map((h) => (
+            <li key={h.id}>
+              <p className="text-xs text-ink-muted">{humanize(h.action)} by <span className="font-medium text-ink-secondary">{h.actor ?? 'the system or the user'}</span> · <Timestamp value={h.timestamp} exact /></p>
+              <div className="mt-1 max-w-lg"><ChangeList changes={pairs(h.changes)} /></div>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   )
 }

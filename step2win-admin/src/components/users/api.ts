@@ -10,6 +10,9 @@ import type {
   StepHourly, StepLogPage, UserOverview, UserRiskScores, UserStats,
 } from './types'
 import type { LinkageSettings, LinkedAccountsResponse, TimelineResponse } from './linkageTypes'
+import type {
+  ChangeEntry, DepositDetail, DepositPage, DepositRow, StaffOverview, StepCorrectionResult, UserRecords, WalletCorrection,
+} from './partATypes'
 
 /** Error with the server message plus per-field messages when the API returned them. */
 export class ApiError extends Error {
@@ -104,17 +107,69 @@ export const consoleApi = {
   userOverview: (id: number) => request<UserOverview>(`/api/admin/users/${id}/overview/`),
   banUser: (id: number, reason: string) => post<{ status: string }>(`/api/admin/users/${id}/ban_user/`, { reason }),
   unbanUser: (id: number, reason: string) => post<{ status: string }>(`/api/admin/users/${id}/unban_user/`, { reason }),
-  makeStaff: (id: number, reason: string) => post<{ status: string }>(`/api/admin/users/${id}/make_staff/`, { reason }),
-  removeStaff: (id: number, reason: string) => post<{ status: string }>(`/api/admin/users/${id}/remove_staff/`, { reason }),
   resetPassword: (id: number, newPassword: string, reason: string) =>
     post<{ status: string }>(`/api/admin/users/${id}/reset_password/`, { new_password: newPassword, reason }),
-  resetSteps: (id: number, reason: string) => post<{ status: string }>(`/api/admin/users/${id}/reset_steps/`, { reason }),
-  updateUser: (id: number, data: { username?: string; email?: string; phone_number?: string }) =>
+  updateUser: (id: number, data: { username?: string; email?: string; phone_number?: string; first_name?: string; last_name?: string; daily_goal?: number }) =>
     request<ConsoleUser>(`/api/admin/users/${id}/update_user/`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteUser: (id: number, reason: string) =>
     request<{ status: string }>(`/api/admin/users/${id}/delete_user/`, { method: 'DELETE', body: JSON.stringify({ reason }) }),
-  actionFlag: (flagId: number, action: string, adminNote: string) =>
-    post<{ status: string }>(`/api/admin/fraud/${flagId}/action/`, { action, admin_note: adminNote || undefined }),
+  /** Audited trust-console decision (reason required; replaces the legacy /fraud/ route). */
+  actionFlag: (flagId: number, action: string, reason: string) =>
+    post<{ status: string }>(`/api/admin/trust/flags/${flagId}/action/`, { action, reason }),
+  signOutEverywhere: (id: number) => post<{ status: string }>(`/api/admin/users/${id}/sign_out_everywhere/`, {}),
+  unlockLogin: (id: number) => post<{ status: string }>(`/api/admin/users/${id}/unlock_login/`, {}),
+  messageUser: (id: number, data: { subject: string; message: string; category?: string }) =>
+    post<{ status: string; ticket_id: number }>(`/api/admin/users/${id}/message/`, data),
+  resetDevice: (id: number, data: { mode: 'reset' | 'deactivate'; registration_id?: string; reason: string }) =>
+    post<{ status: string }>(`/api/admin/users/${id}/reset_device/`, data),
+  adjustXp: (id: number, amount: number, reason: string) =>
+    post<{ total_xp: number; level: number }>(`/api/admin/users/${id}/adjust_xp/`, { amount, reason }),
+  revokeBadge: (id: number, badgeId: number, reason: string) =>
+    post<{ status: string }>(`/api/admin/users/${id}/revoke_badge/`, { badge_id: badgeId, reason }),
+  correctSteps: (id: number, data: { date: string; kind: 'set' | 'void' | 'clear'; steps?: number; reason: string }) =>
+    post<StepCorrectionResult>(`/api/admin/users/${id}/correct_steps/`, data),
+  userRecords: (id: number) => request<UserRecords>(`/api/admin/users/${id}/records/`),
+  exportUsers: async (p: { search?: string; status?: string; trust?: string; ordering?: string }) => {
+    const token = useAuthStore.getState().accessToken
+    const res = await fetch(`${API_BASE}/api/admin/users/export/${qs(p)}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    if (!res.ok) throw parseError(await res.text(), res.status)
+    return res.blob()
+  },
+
+  // Wallet corrections, deposits, stuck withdrawals (finance)
+  adjustBalance: (data: { user_id: number; amount: string; reason: string; reference?: string; idempotency_key: string }) =>
+    post<{ correction: WalletCorrection; created: boolean; wallet_balance: string }>('/api/admin/finance/adjustments/', data),
+  reverseTransaction: (txnId: number, reason: string, idempotencyKey: string) =>
+    post<{ correction: WalletCorrection; created: boolean }>(`/api/admin/finance/transactions/${txnId}/reverse/`, { reason, idempotency_key: idempotencyKey }),
+  corrections: (p: { status?: string; user_id?: number }) =>
+    request<{ results: WalletCorrection[]; pending_count: number; threshold_kes: string }>(`/api/admin/finance/corrections/${qs(p)}`),
+  approveCorrection: (id: number, note?: string) => post<{ correction: WalletCorrection }>(`/api/admin/finance/corrections/${id}/approve/`, { note }),
+  rejectCorrection: (id: number, note: string) => post<{ correction: WalletCorrection }>(`/api/admin/finance/corrections/${id}/reject/`, { note }),
+  financeControls: () => request<{ adjustment_approval_threshold_kes: string; updated_at: string | null; updated_by: string | null }>('/api/admin/finance/controls/'),
+  updateFinanceControls: (threshold: string) =>
+    request<{ adjustment_approval_threshold_kes: string }>('/api/admin/finance/controls/', { method: 'PATCH', body: JSON.stringify({ adjustment_approval_threshold_kes: threshold }) }),
+  deposits: (p: { q?: string; status?: string; page?: number; page_size?: number }) => request<DepositPage>(`/api/admin/finance/deposits/${qs(p)}`),
+  depositDetail: (id: string) => request<DepositDetail>(`/api/admin/finance/deposits/${id}/`),
+  verifyDeposit: (id: string) => post<{ outcome: string; gateway_state?: string; deposit: DepositRow }>(`/api/admin/finance/deposits/${id}/verify/`, {}),
+  resolveWithdrawal: (id: string, data: { outcome: 'paid' | 'failed'; reason: string; mpesa_reference?: string }) =>
+    post<{ status: string }>(`/api/admin/finance/withdrawals/${id}/resolve/`, data),
+  checkWithdrawalStatus: (id: string) => post<{ message: string; result: unknown }>(`/api/admin/withdrawals/${id}/retry/`, {}),
+  withdrawalHistory: (id: string) => request<{ history: ChangeEntry[]; audit: Array<{ id: number; admin_username: string; action: string; description: string; created_at: string }> }>(`/api/admin/finance/withdrawals/${id}/history/`),
+
+  // Challenges (content / trust)
+  createPlatformChallenge: (data: Record<string, unknown>) => post<ChallengeRow>('/api/admin/challenges/create_platform/', data),
+  bulkCancelChallenges: (ids: number[], reason: string) => post<{ status: string; cancelled: number }>('/api/admin/challenges/bulk_cancel/', { challenge_ids: ids, reason }),
+  setArchived: (id: number, archived: boolean) => post<ChallengeRow>(`/api/admin/challenges/${id}/set_archived/`, { archived }),
+  removeParticipant: (id: number, userId: number, mode: 'refund' | 'forfeit', reason: string) =>
+    post<{ status: string }>(`/api/admin/challenges/${id}/remove_participant/`, { user_id: userId, mode, reason }),
+
+  // Staff & roles (owner)
+  staff: () => request<StaffOverview>('/api/admin/staff/'),
+  inviteStaff: (identifier: string, roles: string[], reason: string) =>
+    post<{ status: 'promoted' | 'invited'; code?: string }>('/api/admin/staff/invite/', { identifier, roles, reason }),
+  setStaffRoles: (id: number, roles: string[], reason: string) => post<{ status: string }>(`/api/admin/staff/${id}/roles/`, { roles, reason }),
+  removeStaffAccess: (id: number, reason: string) => post<{ status: string }>(`/api/admin/staff/${id}/remove/`, { reason }),
+  revokeInvite: (id: number) => post<{ status: string }>(`/api/admin/staff/invites/${id}/revoke/`, {}),
 
   // Risk model (shadow, read-only)
   userRiskScores: (id: number, days = 30) =>

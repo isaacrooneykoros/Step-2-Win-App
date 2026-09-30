@@ -12,6 +12,9 @@ export interface ConsoleUser {
   username: string
   email: string
   phone_number: string | null
+  first_name?: string
+  last_name?: string
+  daily_goal?: number
   wallet_balance: string
   available_balance: string
   locked_balance: string
