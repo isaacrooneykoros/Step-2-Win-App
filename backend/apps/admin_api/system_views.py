@@ -66,6 +66,32 @@ ENFORCED_BY = {
     "device_integrity_policy": "Step sync and walks: with enforce, steps from sessions that failed Play Integrity count for goals only, not toward challenges",
     # apps/steps/health_sources.py
     "health_trusted_origins": "Health Connect / Apple Health uploads: only these apps' steps and workouts can count (manual entries never do)",
+    # apps/admin_api/business_rules.py (console value, else the server value)
+    "rank_payouts_enabled": "Create-challenge form and validation: whether winner-takes-all / top-3 can be picked (existing challenges keep their rule)",
+    "paid_challenge_min_trust_score": "Creating a paid challenge: the creator's trust score must be at least this",
+    "paid_challenge_min_joined": "Creating a paid challenge: challenges the creator must have joined first",
+    "max_locked_balance_percent": "Creating and joining challenges: most of a customer's funds that can be locked in entries",
+    "step_money_requires_evidence": "Step sync: only evidence-backed steps count toward challenge money (goals, streaks and XP always use every credited step)",
+    "step_evidence_cutover_date": "Step sync: days before this date keep full challenge credit",
+    "play_integrity_accept_basic": "Play Integrity verdicts: whether basic-integrity phones count as verified",
+    "risk_ml_hold_threshold": "Shadow risk model reports (precision/recall at this score). Nothing is held automatically",
+    "min_deposit_kes": "Deposit endpoints (app wallet and payments API)",
+    "max_deposit_kes": "Deposit endpoints (app wallet and payments API)",
+    "max_withdrawal_kes": "Withdrawal request validation (app and payments API)",
+    "max_daily_withdrawal_kes": "Withdrawal requests: total a customer can request per day",
+    "max_withdrawals_per_day": "Withdrawal requests: count per rolling 24 hours",
+    "max_withdrawals_per_hour": "Withdrawal requests: count per rolling hour",
+    "min_seconds_between_withdrawals": "Withdrawal requests: minimum gap between two requests",
+    "recon_max_stuck_processing": "Financial reconciliation job and Ops monitoring alerts",
+    "recon_max_unprocessed_callbacks": "Financial reconciliation job and Ops monitoring alerts",
+    "recon_max_negative_balance_users": "Financial reconciliation job and Ops monitoring alerts",
+    "recon_max_callback_failure_rate_pct": "Financial reconciliation job and Ops monitoring alerts",
+    "drift_lookback_hours": "Anti-cheat drift monitor job and Ops monitoring alerts",
+    "drift_min_samples": "Anti-cheat drift monitor job and Ops monitoring alerts",
+    "drift_per_sample_alert_pct": "Anti-cheat drift monitor job and Ops monitoring alerts",
+    "drift_max_avg_abs_delta_pct": "Anti-cheat drift monitor job and Ops monitoring alerts",
+    "drift_max_high_drift_ratio_pct": "Anti-cheat drift monitor job and Ops monitoring alerts",
+    "drift_max_review_mismatch_ratio_pct": "Anti-cheat drift monitor job and Ops monitoring alerts",
 }
 
 
@@ -79,9 +105,14 @@ def _setting(name, default=None):
 def settings_context(request):
     history = AuditLog.objects.filter(resource_type="settings").order_by("-created_at")[:25]
     staff = User.objects.filter(is_staff=True).order_by("-is_superuser", "username")
+    from apps.admin_api.business_rules import describe
+
     return Response(
         {
             "enforced_by": ENFORCED_BY,
+            # Per console rule: effective value, source (console/server), server value and
+            # whether the server value is a ceiling (cap) or floor. See business_rules.py.
+            "rules": describe(),
             "impact": {
                 "active_challenges": Challenge.objects.filter(status="active").count(),
                 "pending_challenges": Challenge.objects.filter(status="pending").count(),

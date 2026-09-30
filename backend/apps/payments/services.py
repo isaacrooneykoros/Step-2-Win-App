@@ -56,6 +56,15 @@ def verify_intasend_signature(request, callback_name: str) -> None:
 
 def initiate_deposit(user, amount: Decimal, phone_number: str) -> PaymentTransaction:
     amount = Decimal(str(amount))
+    # Every deposit path (app wallet screen and payments API) meets the same limits.
+    from apps.admin_api.business_rules import deposit_limits
+
+    min_deposit, max_deposit = deposit_limits()
+    if amount < min_deposit or amount > max_deposit:
+        raise PaymentsServiceError(
+            f"Deposits must be between KES {min_deposit:,.0f} and KES {max_deposit:,.0f}.",
+            status_code=400,
+        )
     try:
         phone_number = intasend.format_phone(phone_number)
     except ValueError as exc:
@@ -233,16 +242,24 @@ def request_withdrawal(user, data: dict[str, Any]) -> WithdrawalRequest:
                 "short_code is required for paybill/till", status_code=400
             )
 
-    max_daily = Decimal(str(getattr(settings, "MAX_DAILY_WITHDRAWAL", 0)))
+    # Console limits (Settings > Money), never looser than the server's hard limits
+    # (apps/admin_api/business_rules.py).
+    from apps.admin_api.business_rules import withdrawal_limits
+
+    limits = withdrawal_limits()
+    max_daily = Decimal(str(limits["max_daily_kes"] or 0))
     today = timezone.now().date()
 
-    # Admin-configured minimum (Settings > Withdrawals), never below the server floor.
-    from apps.admin_api.platform import minimum_withdrawal_kes
-
-    min_withdrawal = minimum_withdrawal_kes()
+    min_withdrawal = Decimal(str(limits["min_kes"]))
     if amount < min_withdrawal:
         raise PaymentsServiceError(
             f"The minimum withdrawal is KES {min_withdrawal:,.2f}.",
+            status_code=400,
+        )
+    max_single = Decimal(str(limits["max_kes"] or 0))
+    if max_single and amount > max_single:
+        raise PaymentsServiceError(
+            f"The largest single withdrawal is KES {max_single:,.2f}.",
             status_code=400,
         )
 
@@ -284,6 +301,31 @@ def request_withdrawal(user, data: dict[str, Any]) -> WithdrawalRequest:
                 f"Daily withdrawal limit reached. Remaining today: KES {remaining}",
                 status_code=400,
             )
+
+        # Request-count limits (failed and rejected requests don't count).
+        counted = WithdrawalRequest.objects.filter(user=user).exclude(status__in=["failed", "rejected", "cancelled"])
+        now = timezone.now()
+        per_day = int(limits["max_per_day"] or 0)
+        if per_day and counted.filter(created_at__gte=now - timedelta(hours=24)).count() >= per_day:
+            raise PaymentsServiceError(
+                f"You can make up to {per_day} withdrawal request{'s' if per_day != 1 else ''} a day. Please try again tomorrow.",
+                status_code=429,
+            )
+        per_hour = int(limits["max_per_hour"] or 0)
+        if per_hour and counted.filter(created_at__gte=now - timedelta(hours=1)).count() >= per_hour:
+            raise PaymentsServiceError(
+                f"You can make up to {per_hour} withdrawal request{'s' if per_hour != 1 else ''} an hour. Please try again later.",
+                status_code=429,
+            )
+        gap = int(limits["min_seconds_between"] or 0)
+        if gap:
+            last = counted.order_by("-created_at").values_list("created_at", flat=True).first()
+            if last and (now - last).total_seconds() < gap:
+                minutes = max(1, round(gap / 60))
+                raise PaymentsServiceError(
+                    f"Please wait about {minutes} minute{'s' if minutes != 1 else ''} between withdrawal requests.",
+                    status_code=429,
+                )
 
         balance_before = locked_user.wallet_balance
         locked_user.wallet_balance = locked_user.wallet_balance - amount

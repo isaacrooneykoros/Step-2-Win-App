@@ -182,12 +182,15 @@ def summary(request):
 def admin_settings(request):
     s = PrivacySettings.load()
     if request.method == "GET":
-        return Response(s.as_dict())
+        return Response(_admin_payload(s))
     errors = {}
     updates = {}
     for key, value in (request.data or {}).items():
         if key not in PrivacySettings.EDITABLE:
             errors[key] = "Not editable."
+            continue
+        if key in PrivacySettings.NULLABLE and value in (None, ""):
+            updates[key] = None
             continue
         current = getattr(s, key)
         if isinstance(current, bool):
@@ -202,6 +205,8 @@ def admin_settings(request):
             errors[key] = "Must be a whole number."
             continue
         lo, hi = PrivacySettings.BOUNDS.get(key, (0, 10**6))
+        if key == "walk_raw_points_days":
+            hi = min(hi, PrivacySettings.walk_points_max_days())
         if number == 0 and key in PrivacySettings.ZERO_DISABLES:
             updates[key] = 0
         elif not lo <= number <= hi:
@@ -229,4 +234,20 @@ def admin_settings(request):
         )
     except Exception:  # noqa: BLE001 - audit is best effort here; the change itself is saved
         pass
-    return Response(s.as_dict())
+    return Response(_admin_payload(s))
+
+
+def _admin_payload(s: PrivacySettings) -> dict:
+    """Stored values plus what the server enforces (for the console's explanations)."""
+    from django.conf import settings as dj
+
+    return {
+        **s.as_dict(),
+        "server": {
+            "walk_raw_points_days": int(getattr(dj, "WALK_RAW_POINTS_RETENTION_DAYS", 30)),
+            "walk_raw_points_max_days": PrivacySettings.walk_points_max_days(),
+            "walk_raw_points_effective_days": s.effective_walk_raw_points_days(),
+        },
+        "updated_at": s.updated_at,
+        "updated_by": s.updated_by.username if s.updated_by_id else None,
+    }

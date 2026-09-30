@@ -1802,6 +1802,31 @@ def update_system_settings(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # Money limits must still make sense together once merged with what is stored
+    # (blank = the server value).
+    from apps.admin_api.business_rules import server_value
+
+    def _merged(key):
+        if key in serializer.validated_data:
+            v = serializer.validated_data[key]
+        else:
+            v = getattr(settings, key, None)
+        return v if v is not None else server_value(key)
+
+    lo_dep, hi_dep = _merged("min_deposit_kes"), _merged("max_deposit_kes")
+    if lo_dep is not None and hi_dep is not None and Decimal(str(lo_dep)) > Decimal(str(hi_dep)):
+        return Response(
+            {"max_deposit_kes": "Must be at least the smallest deposit"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    min_wd = serializer.validated_data.get("minimum_withdrawal_amount", settings.minimum_withdrawal_amount)
+    max_wd = _merged("max_withdrawal_kes")
+    if max_wd is not None and Decimal(str(min_wd)) > Decimal(str(max_wd)):
+        return Response(
+            {"max_withdrawal_kes": "Must be at least the minimum withdrawal"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     # Capture changes for audit log
     changes = {}
     for key, value in serializer.validated_data.items():
@@ -3220,24 +3245,12 @@ def ops_monitoring_dashboard(request):
     Aggregated operational monitoring metrics for admin dashboards.
     Includes fraud load, withdrawal queue age, callback failures, and duplicate-request rejections.
     """
-    financial = run_financial_reconciliation(send_alerts=False)
+    from apps.admin_api.business_rules import (drift_thresholds,
+                                               reconciliation_thresholds)
+
+    financial = run_financial_reconciliation(thresholds=reconciliation_thresholds(), send_alerts=False)
     drift = run_anticheat_shadow_drift_monitor(
-        thresholds=AntiCheatDriftThresholds(
-            lookback_hours=int(getattr(settings, "ANTICHEAT_DRIFT_LOOKBACK_HOURS", 24)),
-            min_samples=int(getattr(settings, "ANTICHEAT_DRIFT_MIN_SAMPLES", 50)),
-            per_sample_alert_pct=float(
-                getattr(settings, "ANTICHEAT_DRIFT_PER_SAMPLE_ALERT_PCT", 35.0)
-            ),
-            max_avg_abs_delta_pct=float(
-                getattr(settings, "ANTICHEAT_DRIFT_MAX_AVG_ABS_DELTA_PCT", 20.0)
-            ),
-            max_high_drift_ratio_pct=float(
-                getattr(settings, "ANTICHEAT_DRIFT_MAX_HIGH_DRIFT_RATIO_PCT", 25.0)
-            ),
-            max_review_mismatch_ratio_pct=float(
-                getattr(settings, "ANTICHEAT_DRIFT_MAX_REVIEW_MISMATCH_RATIO_PCT", 10.0)
-            ),
-        ),
+        thresholds=drift_thresholds(),
         send_alerts=False,
     )
 

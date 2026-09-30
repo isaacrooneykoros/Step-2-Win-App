@@ -617,7 +617,11 @@ def purge_old_walk_points(now=None, batch: int = 500) -> int:
     from .models import WalkSession
 
     now = now or timezone.now()
-    days = int(getattr(settings, "WALK_RAW_POINTS_RETENTION_DAYS", 30))
+    # Settings > Privacy (console), else WALK_RAW_POINTS_RETENTION_DAYS, capped by
+    # WALK_RAW_POINTS_MAX_DAYS.
+    from apps.privacy.models import PrivacySettings
+
+    days = PrivacySettings.load().effective_walk_raw_points_days()
     cutoff = now - timedelta(days=days)
     WalkSession.objects.filter(status="active", started_at__lt=now - timedelta(days=1)).update(
         status="abandoned", updated_at=now

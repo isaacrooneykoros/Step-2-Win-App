@@ -106,8 +106,14 @@ class DepositSerializer(serializers.Serializer):
     def validate_amount(self, value):
         if value <= 0:
             raise serializers.ValidationError("Amount must be positive")
-        if value > 10000:
-            raise serializers.ValidationError("Maximum deposit is $10,000.00")
+        # Deposit limits (Settings > Money, inside the server's hard limits).
+        from apps.admin_api.business_rules import deposit_limits
+
+        lo, hi = deposit_limits()
+        if value < lo:
+            raise serializers.ValidationError(f"Minimum deposit is KES {lo:,.0f}")
+        if value > hi:
+            raise serializers.ValidationError(f"Maximum deposit is KES {hi:,.0f}")
         return value
 
 

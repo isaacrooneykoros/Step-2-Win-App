@@ -556,7 +556,10 @@ STEP_MONEY_REQUIRES_EVIDENCE = (
 # (grandfathered). Empty = the cut-over is the deploy: each day keeps the credit it had
 # when Phase 1b first saw it.
 STEP_EVIDENCE_CUTOVER_DATE = os.getenv("STEP_EVIDENCE_CUTOVER_DATE", "").strip()
+# Raw GPS points of walks: kept this many days (fallback for Settings > Privacy), never
+# longer than WALK_RAW_POINTS_MAX_DAYS whatever the console says.
 WALK_RAW_POINTS_RETENTION_DAYS = int(os.getenv("WALK_RAW_POINTS_RETENTION_DAYS", "30"))
+WALK_RAW_POINTS_MAX_DAYS = int(os.getenv("WALK_RAW_POINTS_MAX_DAYS", "90"))
 # Google Play Integrity (apps/steps/integrity.py). Unset = shadow: verdicts are
 # recorded as "unavailable" and nothing is blocked. See ANTICHEAT.md for the setup.
 PLAY_INTEGRITY_PACKAGE_NAME = os.getenv("PLAY_INTEGRITY_PACKAGE_NAME", "").strip()
@@ -738,21 +741,30 @@ INTASEND_WITHDRAWAL_CALLBACK_URL = os.getenv(
     "https://step-2-win-app.onrender.com/api/payments/mpesa/withdrawal-callback/",
 )
 
-# Step2Win business rules
-PLATFORM_FEE_PERCENT = 5
-MIN_DEPOSIT_KES = 10
-MAX_DEPOSIT_KES = 100_000
-MIN_WITHDRAWAL_KES = 10
-MAX_WITHDRAWAL_KES = 70_000
-MAX_DAILY_WITHDRAWAL = 150_000
+# Step2Win business rules.
+# These are the SERVER values: the fallback while the admin console's value is blank,
+# and the hard limit the console can never loosen (apps/admin_api/business_rules.py):
+# maxima are ceilings, minima are floors. The platform fee lives only in the console
+# (SystemSettings.platform_fee_percentage).
+MIN_DEPOSIT_KES = int(os.getenv("MIN_DEPOSIT_KES", "10"))
+MAX_DEPOSIT_KES = int(os.getenv("MAX_DEPOSIT_KES", "100000"))
+MIN_WITHDRAWAL_KES = int(os.getenv("MIN_WITHDRAWAL_KES", "10"))
+MAX_WITHDRAWAL_KES = int(os.getenv("MAX_WITHDRAWAL_KES", "70000"))
+# Not charged anywhere yet (shown read-only in the console).
 WITHDRAWAL_FEE_KES = 0
 WITHDRAWAL_AUTO_APPROVE_LIMIT = 0
 
-# Withdrawal security limits
-MAX_WITHDRAWALS_PER_DAY = 3
-MAX_WITHDRAWALS_PER_HOUR = 1
-MIN_SECONDS_BETWEEN_WITHDRAWALS = 300  # 5 minutes
-MAX_DAILY_WITHDRAWAL_AMOUNT_KES = 100_000
+# Withdrawal security limits (ceilings; the gap between withdrawals is a floor)
+MAX_WITHDRAWALS_PER_DAY = int(os.getenv("MAX_WITHDRAWALS_PER_DAY", "3"))
+MAX_WITHDRAWALS_PER_HOUR = int(os.getenv("MAX_WITHDRAWALS_PER_HOUR", "1"))
+MIN_SECONDS_BETWEEN_WITHDRAWALS = int(os.getenv("MIN_SECONDS_BETWEEN_WITHDRAWALS", "300"))
+MAX_DAILY_WITHDRAWAL_AMOUNT_KES = int(os.getenv("MAX_DAILY_WITHDRAWAL_AMOUNT_KES", "100000"))
+# Old name of the same limit, kept for any external reader.
+MAX_DAILY_WITHDRAWAL = MAX_DAILY_WITHDRAWAL_AMOUNT_KES
+# Winner-takes-all / top-3 challenges. Fallback for Settings > Challenges > Rank payouts.
+RANK_PAYOUTS_ENABLED = os.getenv("RANK_PAYOUTS_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+# The console can't set the trust score needed for paid challenges below this.
+PAID_CHALLENGE_TRUST_FLOOR = int(os.getenv("PAID_CHALLENGE_TRUST_FLOOR", "40"))
 PROFILE_PICTURE_COOLDOWN_MINUTES = int(
     os.getenv("PROFILE_PICTURE_COOLDOWN_MINUTES", "10")
 )

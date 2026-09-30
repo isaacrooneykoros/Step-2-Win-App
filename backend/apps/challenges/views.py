@@ -156,10 +156,12 @@ def create_challenge(request):
 
     # Hardening: require minimum reputation/history for paid challenge creators.
     if entry_fee > 0:
-        min_trust = int(getattr(settings, "MIN_TRUST_SCORE_FOR_PAID_CHALLENGE", 60))
-        min_joined = int(
-            getattr(settings, "MIN_CHALLENGES_JOINED_TO_CREATE_PAID_CHALLENGE", 1)
-        )
+        # Settings > Challenges (console), else the server values; see business_rules.py.
+        from apps.admin_api.business_rules import paid_challenge_rules
+
+        paid_rules = paid_challenge_rules()
+        min_trust = int(paid_rules["min_trust_score"])
+        min_joined = int(paid_rules["min_joined_to_create"])
         trust = getattr(request.user, "trust_score", None)
         trust_score = trust.score if trust else 100
 
@@ -205,7 +207,9 @@ def create_challenge(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        max_locked_pct = Decimal(str(getattr(settings, "MAX_LOCKED_BALANCE_PERCENT", 80)))
+        from apps.admin_api.business_rules import paid_challenge_rules
+
+        max_locked_pct = paid_challenge_rules()["max_locked_percent"]
         # Cap is a share of the user's total funds. wallet_balance already excludes locked entries.
         max_lockable = (user.wallet_balance + user.locked_balance) * (max_locked_pct / Decimal("100"))
         if user.locked_balance + entry_fee > max_lockable:
@@ -317,9 +321,9 @@ def join_challenge(request):
                 )
 
             # Check max locked balance (prevent over-locking) - typically 80% of wallet
-            max_locked_pct = Decimal(
-                str(getattr(settings, "MAX_LOCKED_BALANCE_PERCENT", 80))
-            )
+            from apps.admin_api.business_rules import paid_challenge_rules
+
+            max_locked_pct = paid_challenge_rules()["max_locked_percent"]
             # Cap is a share of the user's total funds. wallet_balance already excludes locked entries.
             max_lockable = (user.wallet_balance + user.locked_balance) * (max_locked_pct / Decimal("100"))
             if user.locked_balance + challenge.entry_fee > max_lockable:

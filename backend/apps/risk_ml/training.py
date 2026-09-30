@@ -49,7 +49,9 @@ def sklearn_available() -> bool:
 
 
 def hold_threshold() -> float:
-    return float(getattr(settings, "RISK_ML_HOLD_THRESHOLD", 0.8))
+    from apps.admin_api.business_rules import risk_ml_hold_threshold
+
+    return risk_ml_hold_threshold()
 
 
 def iter_feature_rows(start: date | None = None, end: date | None = None, page: int = 2000):

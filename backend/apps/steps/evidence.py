@@ -50,7 +50,10 @@ KNOWN_OFFSET_TOLERANCE_HOURS = 0.5
 
 
 def money_requires_evidence() -> bool:
-    return bool(getattr(settings, "STEP_MONEY_REQUIRES_EVIDENCE", False))
+    """Console switch (Settings > Anti-cheat), else STEP_MONEY_REQUIRES_EVIDENCE."""
+    from apps.admin_api.business_rules import money_requires_evidence as required
+
+    return required()
 
 
 def _int(value, lo: int = 0, hi: int = MAX_HOUR_STEPS) -> int:
@@ -377,15 +380,10 @@ VEHICLE_HOUR_MIN_SECONDS = 10 * 60
 
 
 def cutover_date():
-    from datetime import date as date_type
+    """Console date (Settings > Anti-cheat), else STEP_EVIDENCE_CUTOVER_DATE; None = none."""
+    from apps.admin_api.business_rules import evidence_cutover_date
 
-    raw = str(getattr(settings, "STEP_EVIDENCE_CUTOVER_DATE", "") or "").strip()
-    if not raw:
-        return None
-    try:
-        return date_type.fromisoformat(raw)
-    except ValueError:
-        return None
+    return evidence_cutover_date()
 
 
 def _vehicle_seconds_by_hour(meta: dict, walks) -> dict[int, int]:

@@ -2,11 +2,11 @@
 
 Rank-based cash payouts (winner takes all, top 3) reward whoever posts the biggest number,
 which is the strongest incentive to cheat. They stay paused until payout holds and verified
-steps are enforced in production; then set RANK_PAYOUTS_ENABLED=true on the web service.
+steps are enforced in production; then turn on "Rank payouts" in the admin console
+(Settings > Challenges). The server value RANK_PAYOUTS_ENABLED is the fallback used while
+the console value is blank (apps/admin_api/business_rules.py).
 Existing challenges keep the rule they were created with.
 """
-
-import os
 
 RANK_PAYOUT_STRUCTURES = frozenset({"winner_takes_all", "top_3"})
 # Customer-facing rules that decide payouts by rank, or that the payout code doesn't
@@ -19,7 +19,9 @@ PAUSED_MESSAGE = (
 
 
 def rank_payouts_enabled() -> bool:
-    return os.getenv("RANK_PAYOUTS_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    from apps.admin_api.business_rules import rank_payouts_enabled as enabled
+
+    return enabled()
 
 
 def allowed_win_conditions() -> list[str]:

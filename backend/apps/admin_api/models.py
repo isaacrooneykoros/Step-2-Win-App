@@ -175,6 +175,43 @@ class SystemSettings(models.Model):
         help_text="Trusted Health Connect / Apple Health apps, one per line",
     )
 
+    # ── Business switches moved from the environment (apps/admin_api/business_rules.py).
+    # NULL = use the server value (env / settings.py). Numbers are clamped to the
+    # server's hard limits at read time; see business_rules.py for the precedence.
+    rank_payouts_enabled = models.BooleanField(
+        null=True, blank=True, help_text="Winner-takes-all / top-3 challenges (blank = server RANK_PAYOUTS_ENABLED)"
+    )
+    step_money_requires_evidence = models.BooleanField(
+        null=True, blank=True, help_text="Only evidence-backed steps count toward challenge money (blank = server value)"
+    )
+    step_evidence_cutover_date = models.DateField(
+        null=True, blank=True, help_text="Days before this keep full challenge credit (blank = server value)"
+    )
+    play_integrity_accept_basic = models.BooleanField(
+        null=True, blank=True, help_text="Accept MEETS_BASIC_INTEGRITY phones as verified (blank = server value)"
+    )
+    min_deposit_kes = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    max_deposit_kes = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    max_withdrawal_kes = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    max_daily_withdrawal_kes = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    max_withdrawals_per_day = models.PositiveIntegerField(null=True, blank=True)
+    max_withdrawals_per_hour = models.PositiveIntegerField(null=True, blank=True)
+    min_seconds_between_withdrawals = models.PositiveIntegerField(null=True, blank=True)
+    paid_challenge_min_trust_score = models.PositiveIntegerField(null=True, blank=True)
+    paid_challenge_min_joined = models.PositiveIntegerField(null=True, blank=True)
+    max_locked_balance_percent = models.PositiveIntegerField(null=True, blank=True)
+    risk_ml_hold_threshold = models.FloatField(null=True, blank=True)
+    recon_max_stuck_processing = models.PositiveIntegerField(null=True, blank=True)
+    recon_max_unprocessed_callbacks = models.PositiveIntegerField(null=True, blank=True)
+    recon_max_negative_balance_users = models.PositiveIntegerField(null=True, blank=True)
+    recon_max_callback_failure_rate_pct = models.FloatField(null=True, blank=True)
+    drift_lookback_hours = models.PositiveIntegerField(null=True, blank=True)
+    drift_min_samples = models.PositiveIntegerField(null=True, blank=True)
+    drift_per_sample_alert_pct = models.FloatField(null=True, blank=True)
+    drift_max_avg_abs_delta_pct = models.FloatField(null=True, blank=True)
+    drift_max_high_drift_ratio_pct = models.FloatField(null=True, blank=True)
+    drift_max_review_mismatch_ratio_pct = models.FloatField(null=True, blank=True)
+
     # Metadata
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(
@@ -236,6 +273,24 @@ class AuditLog(models.Model):
         ("reset_password", "Reset Password"),
         ("settings_change", "Settings Change"),
         ("account_deleted", "Account Deleted"),
+        # Part B (content, moderation, ops)
+        ("publish", "Publish"),
+        ("unpublish", "Unpublish"),
+        ("archive", "Archive"),
+        ("restore", "Restore"),
+        ("retire", "Retire"),
+        ("activate", "Activate"),
+        ("hide", "Hide"),
+        ("unhide", "Unhide"),
+        ("merge", "Merge"),
+        ("bulk_update", "Bulk update"),
+        ("pause", "Pause"),
+        ("resume", "Resume"),
+        ("retry", "Retry"),
+        ("run_job", "Run job"),
+        ("remove_member", "Remove member"),
+        ("transfer_ownership", "Transfer ownership"),
+        ("reorder", "Reorder"),
     ]
 
     RESOURCE_CHOICES = [
@@ -247,6 +302,22 @@ class AuditLog(models.Model):
         ("settings", "System Settings"),
         ("support", "Support"),
         ("auth", "Authentication"),
+        # Part B (content, moderation, ops)
+        ("system", "System"),
+        ("team", "Team"),
+        ("support_tag", "Support tag"),
+        ("support_template", "Support saved reply"),
+        ("announcement", "Announcement"),
+        ("faq_category", "Help category"),
+        ("faq_article", "Help article"),
+        ("legal_document", "Legal document"),
+        ("anticheat_policy", "Anti-cheat policy"),
+        ("feed_event", "Feed item"),
+        ("challenge_message", "Challenge chat message"),
+        ("social_report", "Social report"),
+        ("risk_model", "Risk model"),
+        ("scheduled_job", "Scheduled job"),
+        ("data_export", "Data export"),
     ]
 
     # Who performed the action

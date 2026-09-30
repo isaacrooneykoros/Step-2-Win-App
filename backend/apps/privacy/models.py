@@ -47,6 +47,13 @@ class PrivacySettings(models.Model):
         help_text="Login attempt / access logs (django-axes: username, IP, user agent) are deleted after this many days.",
     )
     retention_batch_size = models.PositiveIntegerField(default=1000)
+    # Raw GPS points of walks (the simplified route is kept). Blank = the server value
+    # WALK_RAW_POINTS_RETENTION_DAYS; never longer than WALK_RAW_POINTS_MAX_DAYS.
+    walk_raw_points_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Raw GPS points of walks are deleted after this many days (blank = server value).",
+    )
 
     # ── Data export ────────────────────────────────────────────────────────────
     export_link_hours = models.PositiveIntegerField(
@@ -83,6 +90,7 @@ class PrivacySettings(models.Model):
         "password_reset_days",
         "login_log_days",
         "retention_batch_size",
+        "walk_raw_points_days",
         "export_link_hours",
         "export_cooldown_hours",
         "require_consent_at_registration",
@@ -99,6 +107,7 @@ class PrivacySettings(models.Model):
         "password_reset_days": (1, 3650),
         "login_log_days": (7, 3650),
         "retention_batch_size": (100, 10000),
+        "walk_raw_points_days": (1, 3650),  # upper limit also WALK_RAW_POINTS_MAX_DAYS
         "export_link_hours": (1, 24 * 30),
         "export_cooldown_hours": (0, 24 * 30),
         "min_terms_version": (0, 100000),
@@ -126,8 +135,23 @@ class PrivacySettings(models.Model):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
 
+    NULLABLE = ("walk_raw_points_days",)
+
     def as_dict(self) -> dict:
         return {f: getattr(self, f) for f in self.EDITABLE}
+
+    @staticmethod
+    def walk_points_max_days() -> int:
+        from django.conf import settings as dj
+
+        return max(1, int(getattr(dj, "WALK_RAW_POINTS_MAX_DAYS", 90)))
+
+    def effective_walk_raw_points_days(self) -> int:
+        """Console value, else the server value, never above the server maximum."""
+        from django.conf import settings as dj
+
+        days = self.walk_raw_points_days or int(getattr(dj, "WALK_RAW_POINTS_RETENTION_DAYS", 30))
+        return max(1, min(days, self.walk_points_max_days()))
 
     def __str__(self):
         return "Privacy settings"
