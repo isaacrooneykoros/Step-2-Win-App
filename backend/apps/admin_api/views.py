@@ -71,6 +71,7 @@ def _admin_profile(user, request=None):
         "username": user.username,
         "email": user.email,
         "is_staff": user.is_staff,
+        "is_superuser": user.is_superuser,
         "is_active": user.is_active,
         "profile_picture_url": profile_picture_url,
     }
@@ -326,12 +327,21 @@ def admin_login(request):
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def admin_register(request):
-    """Register a new admin account"""
+    """Register a staff account.
+
+    With ``invite_code``: a person invited by the owner (Staff & roles) creates their
+    account; the email must match the invite and the account gets the invite's roles.
+    Without it: first-admin bootstrap only (ADMIN_REGISTRATION_CODE, while no staff
+    account exists); that account is the owner (superuser)."""
     username = request.data.get("username", "").strip()
     email = request.data.get("email", "").strip()
     password = request.data.get("password", "")
     confirm_password = request.data.get("confirm_password", "")
     admin_code = request.data.get("admin_code", "").strip()
+    invite_code = str(request.data.get("invite_code") or "").strip()
+
+    if invite_code:
+        return _register_with_invite(request, username, email, password, confirm_password, invite_code)
 
     required_code = os.getenv("ADMIN_REGISTRATION_CODE")
     if not required_code:
@@ -409,6 +419,73 @@ def admin_register(request):
             )
     finally:
         cache.delete(lock_key)
+
+    refresh = RefreshToken.for_user(user)
+    return Response(
+        {
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": _admin_profile(user, request=request),
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+def _register_with_invite(request, username, email, password, confirm_password, invite_code):
+    import uuid
+
+    from apps.admin_api.models import AuditLog, StaffInvite, StaffProfile
+    from apps.admin_api.roles import OWNER, clean_roles
+    from apps.admin_api.staff_views import accept_invite
+
+    if not username or not email or not password or not confirm_password:
+        return Response(
+            {"error": "Username, email, password and confirm_password are required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if password != confirm_password:
+        return Response({"error": "Passwords do not match"}, status=status.HTTP_400_BAD_REQUEST)
+    invite = accept_invite(invite_code, email)
+    if invite is None:
+        return Response(
+            {"error": "This invite code is not valid for that email, or it has expired. Ask the owner for a new one."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if User.objects.filter(username__iexact=username).exists():
+        return Response({"error": "Username already taken"}, status=status.HTTP_400_BAD_REQUEST)
+    if User.objects.filter(email__iexact=email).exists():
+        return Response(
+            {"error": "Email already registered. Ask the owner to grant staff access to that account instead."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        validate_password(password)
+    except Exception as error:
+        return Response({"error": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+
+    with db_transaction.atomic():
+        locked = StaffInvite.objects.select_for_update().get(id=invite.id)
+        if locked.status != "pending":
+            return Response({"error": "This invite was already used."}, status=status.HTTP_409_CONFLICT)
+        roles = clean_roles(locked.roles)
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            # Staff accounts have no M-Pesa number; the column is unique and required.
+            phone_number=f"staff_{uuid.uuid4().hex[:12]}",
+            is_staff=True,
+            is_superuser=OWNER in roles,
+        )
+        StaffProfile.objects.create(user=user, roles=[r for r in roles if r != OWNER], updated_by=locked.created_by)
+        locked.accepted_at = timezone.now()
+        locked.accepted_user = user
+        locked.save(update_fields=["accepted_at", "accepted_user"])
+        AuditLog.log_action(
+            admin=user, action="invite", resource_type="staff", resource_id=user.id, resource_name=user.username,
+            description=f"{user.username} accepted a staff invite",
+            changes={"invite_id": locked.id, "roles": roles}, request=request,
+        )
 
     refresh = RefreshToken.for_user(user)
     return Response(
@@ -1253,71 +1330,6 @@ class AdminTransactionViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(daily_data)
 
 
-class AdminWithdrawalViewSet(viewsets.ModelViewSet):
-    """
-    Admin withdrawal management endpoint
-    """
-
-    queryset = Withdrawal.objects.all()
-    serializer_class = AdminWithdrawalSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
-    filterset_fields = ["user", "status"]
-
-    @action(detail=True, methods=["post"])
-    def approve_withdrawal(self, request, pk=None):
-        """Approve a withdrawal request"""
-        withdrawal = self.get_object()
-        if withdrawal.status != "pending":
-            return Response(
-                {"error": "Withdrawal is not pending"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        withdrawal.status = "approved"
-        withdrawal.processed_at = timezone.now()
-        withdrawal.processed_by = request.user
-        withdrawal.save()
-        return Response({"status": "Withdrawal approved"})
-
-    @action(detail=True, methods=["post"])
-    def reject_withdrawal(self, request, pk=None):
-        """Reject a withdrawal request"""
-        withdrawal = self.get_object()
-        reason = request.data.get("reason", "No reason provided")
-        withdrawal.status = "rejected"
-        withdrawal.processed_at = timezone.now()
-        withdrawal.processed_by = request.user
-        withdrawal.rejection_reason = reason
-        withdrawal.save()
-        return Response({"status": f"Withdrawal rejected. Reason: {reason}"})
-
-    @action(detail=False, methods=["get"])
-    def withdrawal_stats(self, request):
-        """Get withdrawal statistics"""
-        withdrawals = Withdrawal.objects.all()
-
-        total_pending = withdrawals.filter(status="pending").aggregate(Sum("amount"))[
-            "amount__sum"
-        ] or Decimal("0.00")
-        total_approved = withdrawals.filter(status="approved").aggregate(Sum("amount"))[
-            "amount__sum"
-        ] or Decimal("0.00")
-        total_rejected = withdrawals.filter(status="rejected").aggregate(Sum("amount"))[
-            "amount__sum"
-        ] or Decimal("0.00")
-
-        return Response(
-            {
-                "pending_count": withdrawals.filter(status="pending").count(),
-                "pending_amount": str(total_pending),
-                "approved_count": withdrawals.filter(status="approved").count(),
-                "approved_amount": str(total_approved),
-                "rejected_count": withdrawals.filter(status="rejected").count(),
-                "rejected_amount": str(total_rejected),
-                "total_withdrawals": withdrawals.count(),
-            }
-        )
-
-
 class AdminBadgeViewSet(viewsets.ModelViewSet):
     """
     Admin badge management endpoint
@@ -1325,7 +1337,15 @@ class AdminBadgeViewSet(viewsets.ModelViewSet):
 
     queryset = Badge.objects.all()
     serializer_class = AdminBadgeSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, StaffActionPermission]
+    staff_perms = {
+        "*": "console.view",
+        "create": "content.badges",
+        "update": "content.badges",
+        "partial_update": "content.badges",
+        "destroy": "content.badges",
+        "award_to_user": "users.xp",
+    }
     pagination_class = AdminPageNumberPagination
 
     def _audit(self, badge, action_name, description, changes=None):
@@ -1412,7 +1432,8 @@ class AdminDashboardViewSet(viewsets.ViewSet):
     Main dashboard statistics endpoint
     """
 
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, StaffActionPermission]
+    staff_perms = {"*": "console.view"}
 
     @extend_schema(responses={200: OpenApiTypes.OBJECT})
     @action(detail=False, methods=["get"])
@@ -2435,331 +2456,6 @@ def get_support_admins(request):
     return Response({"results": list(admins)})
 
 
-@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
-def get_revenue_report(request):
-    """Get revenue breakdown by category and time period"""
-    # Defense in depth: permission class already enforces is_staff
-    if not request.user.is_staff:
-        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
-
-    from datetime import timedelta
-
-    from django.db.models import Count, Sum
-
-    # Get time period (default: 30 days)
-    period_days = int(request.query_params.get("days", 30))
-    start_date = timezone.now() - timedelta(days=period_days)
-
-    # Revenue from deposits (entry_fee transactions)
-    deposits = WalletTransaction.objects.filter(
-        type="entry_fee", created_at__gte=start_date
-    ).aggregate(total=Sum("amount"), count=Count("id"))
-
-    # Payouts (payout transactions)
-    payouts = WalletTransaction.objects.filter(
-        type="payout", created_at__gte=start_date
-    ).aggregate(total=Sum("amount"), count=Count("id"))
-
-    # Withdrawals processed
-    withdrawals_data = Withdrawal.objects.filter(
-        status="completed", processed_at__gte=start_date
-    ).aggregate(total=Sum("amount"), count=Count("id"))
-
-    # Platform fees collected
-    from apps.admin_api.models import SystemSettings
-
-    settings = SystemSettings.load()
-    fee_percentage = settings.platform_fee_percentage
-
-    total_deposits = deposits["total"] or Decimal("0")
-    platform_fees = total_deposits * (fee_percentage / Decimal("100"))
-
-    # Revenue by day for chart
-    daily_revenue = []
-    for i in range(period_days):
-        day = start_date + timedelta(days=i)
-        day_end = day + timedelta(days=1)
-
-        day_deposits = WalletTransaction.objects.filter(
-            type="entry_fee", created_at__gte=day, created_at__lt=day_end
-        ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
-
-        day_fees = day_deposits * (fee_percentage / Decimal("100"))
-
-        daily_revenue.append(
-            {
-                "date": day.strftime("%Y-%m-%d"),
-                "revenue": float(day_fees),
-                "deposits": float(day_deposits),
-            }
-        )
-
-    return Response(
-        {
-            "summary": {
-                "total_deposits": float(total_deposits),
-                "total_payouts": float(payouts["total"] or 0),
-                "total_withdrawals": float(withdrawals_data["total"] or 0),
-                "platform_fees": float(platform_fees),
-                "net_revenue": float(
-                    platform_fees - (withdrawals_data["total"] or Decimal("0"))
-                ),
-                "deposit_count": deposits["count"],
-                "payout_count": payouts["count"],
-                "withdrawal_count": withdrawals_data["count"],
-            },
-            "daily_data": daily_revenue,
-        }
-    )
-
-
-@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
-def get_user_retention(request):
-    """Get user retention metrics and cohort analysis"""
-    # Defense in depth: permission class already enforces is_staff
-    if not request.user.is_staff:
-        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
-
-    from datetime import timedelta
-
-    from django.db.models import Q
-
-    # Get time period (default: 90 days)
-    period_days = int(request.query_params.get("days", 90))
-    start_date = timezone.now() - timedelta(days=period_days)
-
-    # New users by week
-    weekly_signups = []
-    weeks = period_days // 7
-
-    for i in range(weeks):
-        week_start = start_date + timedelta(weeks=i)
-        week_end = week_start + timedelta(weeks=1)
-
-        new_users = User.objects.filter(
-            date_joined__gte=week_start, date_joined__lt=week_end
-        ).count()
-
-        # Active users in that cohort (users who have transactions/challenges after signup)
-        active_users = (
-            User.objects.filter(date_joined__gte=week_start, date_joined__lt=week_end)
-            .filter(
-                Q(transactions__created_at__gte=week_end)
-                | Q(created_challenges__created_at__gte=week_end)
-            )
-            .distinct()
-            .count()
-        )
-
-        retention_rate = (active_users / new_users * 100) if new_users > 0 else 0
-
-        weekly_signups.append(
-            {
-                "week_start": week_start.strftime("%Y-%m-%d"),
-                "new_users": new_users,
-                "active_users": active_users,
-                "retention_rate": round(retention_rate, 2),
-            }
-        )
-
-    # Overall stats
-    total_users = User.objects.filter(date_joined__gte=start_date).count()
-    active_users = (
-        User.objects.filter(date_joined__gte=start_date, is_active=True)
-        .filter(
-            Q(transactions__created_at__gte=start_date)
-            | Q(created_challenges__created_at__gte=start_date)
-        )
-        .distinct()
-        .count()
-    )
-
-    return Response(
-        {
-            "summary": {
-                "total_users": total_users,
-                "active_users": active_users,
-                "overall_retention": round(
-                    (active_users / total_users * 100) if total_users > 0 else 0, 2
-                ),
-            },
-            "weekly_data": weekly_signups,
-        }
-    )
-
-
-@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
-def get_challenge_analytics(request):
-    """Get challenge success rates and analytics"""
-    # Defense in depth: permission class already enforces is_staff
-    if not request.user.is_staff:
-        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
-
-    from datetime import timedelta
-
-    from django.db.models import Avg, Count, Sum
-
-    # Get time period (default: 30 days)
-    period_days = int(request.query_params.get("days", 30))
-    start_date = timezone.now() - timedelta(days=period_days)
-
-    challenges = Challenge.objects.filter(created_at__gte=start_date)
-
-    # Status breakdown
-    status_breakdown = challenges.values("status").annotate(count=Count("id"))
-    status_dict = {item["status"]: item["count"] for item in status_breakdown}
-
-    # Success metrics
-    completed_challenges = challenges.filter(status="completed").count()
-    cancelled_challenges = challenges.filter(status="cancelled").count()
-    total_challenges = challenges.count()
-
-    completion_rate = (
-        (completed_challenges / total_challenges * 100) if total_challenges > 0 else 0
-    )
-
-    # Average participants (count participants per challenge)
-    challenges_with_count = challenges.annotate(participant_count=Count("participants"))
-    avg_participants = (
-        challenges_with_count.aggregate(avg=Avg("participant_count"))["avg"] or 0
-    )
-
-    # Total prize pool
-    total_pool = challenges.aggregate(total=Sum("total_pool"))["total"] or Decimal("0")
-
-    # Challenge creation trend (daily)
-    daily_challenges = []
-    for i in range(period_days):
-        day = start_date + timedelta(days=i)
-        day_end = day + timedelta(days=1)
-
-        count = Challenge.objects.filter(
-            created_at__gte=day, created_at__lt=day_end
-        ).count()
-
-        daily_challenges.append(
-            {
-                "date": day.strftime("%Y-%m-%d"),
-                "count": count,
-            }
-        )
-
-    # Participant engagement
-    total_participants = Participant.objects.filter(
-        challenge__created_at__gte=start_date
-    ).count()
-
-    # Winners
-    winners_count = Participant.objects.filter(
-        challenge__created_at__gte=start_date, payout__gt=0
-    ).count()
-
-    return Response(
-        {
-            "summary": {
-                "total_challenges": total_challenges,
-                "completed": completed_challenges,
-                "cancelled": cancelled_challenges,
-                "active": status_dict.get("active", 0),
-                "pending": status_dict.get("pending", 0),
-                "completion_rate": round(completion_rate, 2),
-                "avg_participants": round(avg_participants, 2),
-                "total_prize_pool": float(total_pool),
-                "total_participants": total_participants,
-                "winners_count": winners_count,
-            },
-            "daily_data": daily_challenges,
-            "status_breakdown": status_dict,
-        }
-    )
-
-
-@extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
-def get_transaction_trends(request):
-    """Get transaction volume trends over time"""
-    # Defense in depth: permission class already enforces is_staff
-    if not request.user.is_staff:
-        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
-
-    from datetime import timedelta
-
-    from django.db.models import Count, Sum
-
-    # Get time period (default: 30 days)
-    period_days = int(request.query_params.get("days", 30))
-    start_date = timezone.now() - timedelta(days=period_days)
-
-    # Daily transaction data
-    daily_data = []
-    for i in range(period_days):
-        day = start_date + timedelta(days=i)
-        day_end = day + timedelta(days=1)
-
-        day_txs = WalletTransaction.objects.filter(
-            created_at__gte=day, created_at__lt=day_end
-        )
-
-        deposits = day_txs.filter(type="entry_fee").aggregate(
-            total=Sum("amount"), count=Count("id")
-        )
-
-        payouts = day_txs.filter(type="payout").aggregate(
-            total=Sum("amount"), count=Count("id")
-        )
-
-        daily_data.append(
-            {
-                "date": day.strftime("%Y-%m-%d"),
-                "deposit_amount": float(deposits["total"] or 0),
-                "deposit_count": deposits["count"],
-                "payout_amount": float(payouts["total"] or 0),
-                "payout_count": payouts["count"],
-                "total_volume": float(
-                    (deposits["total"] or 0) + (payouts["total"] or 0)
-                ),
-            }
-        )
-
-    # Summary stats
-    period_transactions = WalletTransaction.objects.filter(created_at__gte=start_date)
-
-    total_volume = period_transactions.aggregate(total=Sum("amount"))[
-        "total"
-    ] or Decimal("0")
-    total_count = period_transactions.count()
-
-    deposits_total = period_transactions.filter(type="entry_fee").aggregate(
-        total=Sum("amount")
-    )["total"] or Decimal("0")
-
-    payouts_total = period_transactions.filter(type="payout").aggregate(
-        total=Sum("amount")
-    )["total"] or Decimal("0")
-
-    return Response(
-        {
-            "summary": {
-                "total_volume": float(total_volume),
-                "total_transactions": total_count,
-                "total_deposits": float(deposits_total),
-                "total_payouts": float(payouts_total),
-                "avg_transaction_value": (
-                    float(total_volume / total_count) if total_count > 0 else 0
-                ),
-            },
-            "daily_data": daily_data,
-        }
-    )
-
-
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
 @permission_classes(staff("trust.view"))
@@ -2834,60 +2530,6 @@ def fraud_overview(request):
             "reviewed_flags": reviewed_flags_payload,
         }
     )
-
-
-@extend_schema(
-    request=OpenApiTypes.OBJECT,
-    responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
-)
-@api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
-def action_flag(request, flag_id):
-    from apps.steps.models import FraudFlag, TrustScore
-
-    action = request.data.get("action")
-    admin_note = str(request.data.get("admin_note") or "").strip()
-
-    valid_actions = {
-        "dismiss",
-        "warn",
-        "restrict",
-        "suspend",
-        "ban",
-        "unrestrict",
-        "unsuspend",
-        "unban",
-    }
-    if action not in valid_actions:
-        return Response({"error": "Invalid action"}, status=400)
-    if len(admin_note) > 500:
-        return Response(
-            {"error": "admin_note must be 500 characters or fewer"}, status=400
-        )
-
-    flag = get_object_or_404(FraudFlag, id=flag_id)
-    flag.reviewed = True
-    flag.actioned = action != "dismiss"
-    details = flag.details if isinstance(flag.details, dict) else {}
-    details.update(
-        {
-            "admin_action": action,
-            "reviewed_at": timezone.now().isoformat(),
-        }
-    )
-    if admin_note:
-        details["admin_note"] = admin_note
-    else:
-        details.pop("admin_note", None)
-    flag.details = details
-    flag.save(update_fields=["reviewed", "actioned", "details"])
-
-    trust, _ = TrustScore.objects.get_or_create(user=flag.user)
-    # Same semantics as the trust console (TrustScore.apply_admin_action): an admin
-    # restrict / suspend / ban is locked and not undone by automatic recovery.
-    trust.apply_admin_action(action)
-
-    return Response({"status": f"Flag {action}ed"})
 
 
 # ── Payment Management (PochPay) ──────────────────────────────────────────────
@@ -3091,6 +2733,7 @@ def approve_withdrawal(request, withdrawal_id):
         _notify_user(
             withdrawal.user,
             "withdrawal_approved",
+            admin=request.user,
             amount=withdrawal.amount_kes,
             method=withdrawal.method,
         )
@@ -3152,6 +2795,7 @@ def reject_withdrawal(request, withdrawal_id):
     _notify_user(
         withdrawal.user,
         "withdrawal_rejected",
+        admin=request.user,
         amount=withdrawal.amount_kes,
         reason=reason,
     )

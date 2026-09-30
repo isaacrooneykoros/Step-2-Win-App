@@ -1236,50 +1236,6 @@ def spectator_leaderboard(request, pk):
     )
 
 
-@extend_schema(
-    request=inline_serializer(
-        name="FeatureChallengeRequest",
-        fields={"hours": serializers.IntegerField(required=False)},
-    ),
-    responses={
-        200: inline_serializer(
-            name="FeatureChallengeResponse",
-            fields={
-                "message": serializers.CharField(),
-                "featured_until": serializers.CharField(),
-            },
-        )
-    },
-)
-@api_view(["POST"])
-@permission_classes([IsAdminUser])
-def feature_challenge(request, pk):
-    """
-    Admin marks a challenge as featured.
-    Request body: { "hours": 24 }  — how long to feature it for
-    """
-    from datetime import timedelta
-
-    from django.utils import timezone
-
-    try:
-        challenge = Challenge.objects.get(pk=pk)
-    except Challenge.DoesNotExist:
-        return Response({"error": "Not found"}, status=404)
-
-    hours = request.data.get("hours", 24)
-    challenge.is_featured = True
-    challenge.featured_until = timezone.now() + timedelta(hours=int(hours))
-    challenge.save(update_fields=["is_featured", "featured_until"])
-
-    return Response(
-        {
-            "message": f"Challenge featured for {hours} hours.",
-            "featured_until": challenge.featured_until.isoformat(),
-        }
-    )
-
-
 def _with_payout_review(result: dict | None, user, challenge) -> dict | None:
     """Add the viewer's own payout state to their result.
 
