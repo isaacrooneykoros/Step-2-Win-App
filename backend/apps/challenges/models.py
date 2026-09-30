@@ -192,6 +192,10 @@ class Challenge(models.Model):
         help_text="Visual identity emoji for private challenge cards",
     )
     theme = models.CharField(max_length=10, choices=THEME_CHOICES, default="blue")
+    # Staff hide finished (completed / cancelled) challenges from customer lists instead
+    # of deleting them; participants still see them in their own history.
+    is_archived = models.BooleanField(default=False, db_index=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

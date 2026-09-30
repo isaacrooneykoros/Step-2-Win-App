@@ -7,6 +7,7 @@ from rest_framework.decorators import (api_view, parser_classes,
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
+from apps.admin_api.roles import staff
 
 from .models import LegalDocument, LegalDocumentVersion, UserDocumentAck
 from .serializers import (LegalDocumentAdminSerializer,
@@ -106,7 +107,7 @@ def acknowledge_document(request, slug):
 
 @extend_schema(responses={200: LegalDocumentAdminSerializer(many=True)})
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes(staff("console.view"))
 def list_documents_admin(request):
     """
     Returns all documents (all statuses) for the admin panel.
@@ -131,7 +132,7 @@ def list_documents_admin(request):
     },
 )
 @api_view(["GET", "PUT", "PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes(staff("console.view", write="content.legal"))
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def document_detail_admin(request, pk):
     """
@@ -195,7 +196,7 @@ def document_detail_admin(request, pk):
     },
 )
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes(staff("content.legal"))
 def create_document_admin(request):
     """
     Create a new legal document (e.g. a Cookie Policy).
@@ -238,7 +239,7 @@ def create_document_admin(request):
     },
 )
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes(staff("content.legal"))
 def publish_document(request, pk):
     """
     Publish a document. Increments version, saves to history, notifies users.
@@ -325,7 +326,7 @@ def publish_document(request, pk):
     }
 )
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes(staff("console.view"))
 def document_history(request, pk):
     """
     Returns all historical versions of a document.
@@ -365,7 +366,7 @@ def document_history(request, pk):
     },
 )
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes(staff("content.legal"))
 def restore_version(request, pk, version_id):
     """
     Restore a historical version as the current draft.

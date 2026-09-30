@@ -25,6 +25,7 @@ from django.contrib.auth import get_user_model
 from drf_spectacular.utils import (OpenApiTypes, extend_schema,
                                    inline_serializer)
 
+from apps.admin_api.roles import StaffActionPermission, staff
 from apps.admin_api.console import (AdminPageNumberPagination, filter_users,
                                     step_daily_totals, step_distribution,
                                     step_flag_reasons, user_overview)
@@ -76,10 +77,12 @@ def _admin_profile(user, request=None):
 
 
 class IsAdminUser(permissions.BasePermission):
-    """Custom permission to check if user is admin"""
+    """Legacy check: any active staff account. Admin endpoints use the role-based
+    permissions in apps/admin_api/roles.py (HasStaffPermission / StaffActionPermission)."""
 
     def has_permission(self, request, _view):
-        return request.user and request.user.is_staff
+        user = request.user
+        return bool(user and user.is_authenticated and user.is_active and user.is_staff)
 
 
 @extend_schema(
@@ -91,7 +94,7 @@ class IsAdminUser(permissions.BasePermission):
     },
 )
 @api_view(["GET", "PATCH"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def current_admin_profile(request):
     """Get or update the authenticated admin profile, including profile picture."""
@@ -131,7 +134,7 @@ def current_admin_profile(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def admin_notifications(request):
     """Return the admin notification summary and recent actionable alerts."""
     from apps.admin_api.models import AuditLog, SupportTicket
@@ -451,7 +454,25 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
 
     queryset = User.objects.all()
     serializer_class = AdminUserSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, StaffActionPermission]
+    # Role permission per action (apps/admin_api/roles.py); "*" = reads.
+    staff_perms = {
+        "*": "console.view",
+        "ban_user": "users.ban",
+        "unban_user": "users.ban",
+        "reset_password": "users.edit",
+        "update_user": "users.edit",
+        "update_me": "console.view",
+        "delete_user": "owner.delete_users",
+        "sign_out_everywhere": "users.edit",
+        "unlock_login": "users.edit",
+        "message": "users.edit",
+        "reset_device": "users.devices",
+        "adjust_xp": "users.xp",
+        "revoke_badge": "users.xp",
+        "export": "users.export",
+        "correct_steps": "steps.correct",
+    }
     search_fields = ["username", "email"]
     filterset_fields = ["is_active", "is_staff"]
     pagination_class = AdminPageNumberPagination
@@ -481,6 +502,19 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
         )
 
     @staticmethod
+    def _staff_target_guard(request, user):
+        """Only the owner may change another staff account (password, details, access):
+        otherwise a support agent could take over an owner's account."""
+        from apps.admin_api.roles import is_owner
+
+        if user.is_staff and user.id != request.user.id and not is_owner(request.user):
+            return Response(
+                {"error": "Only the owner can change staff accounts.", "code": "staff_target"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    @staticmethod
     def _deleted_guard(user):
         """Accounts deleted by their owner are anonymised and can't be restored or edited."""
         if getattr(user, "deleted_at", None):
@@ -490,14 +524,6 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
                     "code": "account_deleted",
                 },
                 status=status.HTTP_409_CONFLICT,
-            )
-        return None
-
-    def _superuser_only(self, request):
-        if not request.user.is_superuser:
-            return Response(
-                {"error": "Only superusers can change staff access or delete accounts"},
-                status=status.HTTP_403_FORBIDDEN,
             )
         return None
 
@@ -513,6 +539,8 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
     def ban_user(self, request, pk=None):
         """Ban a specific user"""
         user = self.get_object()
+        if denied := self._staff_target_guard(request, user):
+            return denied
         if user.id == request.user.id:
             return Response(
                 {"error": "You cannot ban your own account"},
@@ -527,47 +555,21 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
     def unban_user(self, request, pk=None):
         """Unban a specific user"""
         user = self.get_object()
-        if denied := self._deleted_guard(user):
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
             return denied
         user.is_active = True
         user.save()
         self._audit(request, user, "unban", f"Unbanned {user.username}", {"is_active": {"old": False, "new": True}})
         return Response({"status": f"User {user.username} has been unbanned"})
 
-    @action(detail=True, methods=["post"])
-    def make_staff(self, request, pk=None):
-        """Promote user to staff"""
-        denied = self._superuser_only(request)
-        if denied:
-            return denied
-        user = self.get_object()
-        user.is_staff = True
-        user.save()
-        self._audit(request, user, "promote", f"Granted staff access to {user.username}", {"is_staff": {"old": False, "new": True}})
-        return Response({"status": f"User {user.username} is now staff"})
-
-    @action(detail=True, methods=["post"])
-    def remove_staff(self, request, pk=None):
-        """Remove staff status from a user"""
-        denied = self._superuser_only(request)
-        if denied:
-            return denied
-        user = self.get_object()
-        if user.id == request.user.id:
-            return Response(
-                {"error": "You cannot remove your own staff access"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        user.is_staff = False
-        user.save()
-        self._audit(request, user, "demote", f"Removed staff access from {user.username}", {"is_staff": {"old": True, "new": False}})
-        return Response({"status": f"User {user.username} is no longer staff"})
+    # Staff access (grant / change roles / remove) lives on the owner-only Staff & roles
+    # endpoints (apps/admin_api/staff_views.py), which record roles and audit them.
 
     @action(detail=True, methods=["post"])
     def reset_password(self, request, pk=None):
         """Reset user password"""
         user = self.get_object()
-        if denied := self._deleted_guard(user):
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
             return denied
         new_password = request.data.get("new_password", "")
 
@@ -590,14 +592,17 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["patch"])
     def update_user(self, request, pk=None):
-        """Update user details - phone_number, email, and username are required fields"""
+        """Update user details: username, email, phone, first/last name, daily goal."""
         user = self.get_object()
-        if denied := self._deleted_guard(user):
+        if denied := self._staff_target_guard(request, user) or self._deleted_guard(user):
             return denied
         before = {
             "username": user.username,
             "email": user.email,
             "phone_number": user.phone_number,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "daily_goal": user.daily_goal,
         }
 
         # Update allowed fields
@@ -606,6 +611,29 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
         phone_number = request.data.get("phone_number")
 
         errors = {}
+
+        for name_field in ("first_name", "last_name"):
+            value = request.data.get(name_field)
+            if value is None:
+                continue
+            value = str(value).strip()
+            if len(value) > 150:
+                errors[name_field] = "Must be 150 characters or fewer"
+            else:
+                setattr(user, name_field, value)
+
+        daily_goal = request.data.get("daily_goal")
+        if daily_goal not in (None, ""):
+            try:
+                goal = int(daily_goal)
+            except (TypeError, ValueError):
+                errors["daily_goal"] = "Daily goal must be a whole number of steps"
+            else:
+                # Same range the app allows (apps/users/views.update_daily_goal).
+                if goal < 1000 or goal > 60000:
+                    errors["daily_goal"] = "Daily goal must be between 1,000 and 60,000 steps"
+                else:
+                    user.daily_goal = goal
 
         # Validate username if provided
         if username is not None and username != user.username:
@@ -651,44 +679,12 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
             if getattr(user, key) != old
         }
         if changed:
-            self._audit(request, user, "update", f"Updated contact details for {user.username}", changed)
+            self._audit(request, user, "update", f"Updated details for {user.username}", changed)
         serializer = AdminUserSerializer(user)
         return Response(serializer.data)
 
-    @action(detail=True, methods=["post"])
-    def reset_steps(self, request, pk=None):
-        """Reset a user's lifetime step counters."""
-        user = self.get_object()
-
-        before_steps = user.total_steps
-        before_best_day_steps = user.best_day_steps
-
-        user.total_steps = 0
-        user.best_day_steps = 0
-        user.save(update_fields=["total_steps", "best_day_steps", "updated_at"])
-
-        from apps.admin_api.models import AuditLog
-
-        AuditLog.log_action(
-            admin=request.user,
-            action="update",
-            resource_type="user",
-            resource_id=user.id,
-            resource_name=user.username,
-            description=f"Admin reset step counters for {user.username}",
-            changes={
-                "total_steps": {"old": before_steps, "new": 0},
-                "best_day_steps": {"old": before_best_day_steps, "new": 0},
-            },
-            request=request,
-        )
-
-        return Response(
-            {
-                "status": f"Step counters reset for {user.username}",
-                "user": AdminUserSerializer(user).data,
-            }
-        )
+    # The old reset_steps (zeroing the lifetime counters) is replaced by per-day step
+    # corrections with recompute: correct_steps below (apps/steps/corrections.py).
 
     @action(detail=False, methods=["patch"], url_path="me")
     def update_me(self, request):
@@ -727,9 +723,6 @@ class AdminUserViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
         (apps/users/account_deletion.py). Wallet, payment and challenge records are kept,
         detached from the person, so nothing cascades and the books still balance.
         """
-        denied = self._superuser_only(request)
-        if denied:
-            return denied
         user = self.get_object()
         if user.id == request.user.id:
             return Response({"error": "Cannot delete your own account"}, status=status.HTTP_400_BAD_REQUEST)
@@ -811,7 +804,21 @@ class AdminChallengeViewSet(NoDefaultWritesMixin, viewsets.ModelViewSet):
 
     queryset = Challenge.objects.all()
     serializer_class = AdminChallengeSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, StaffActionPermission]
+    staff_perms = {
+        "*": "console.view",
+        "approve_challenge": "challenges.manage",
+        "reject_challenge": "challenges.manage",
+        "cancel_challenge": "challenges.manage",
+        "set_featured": "challenges.manage",
+        "update_challenge": "challenges.manage",
+        "delete_challenge": "challenges.manage",
+        "bulk_cancel": "challenges.manage",
+        "bulk_delete": "challenges.manage",
+        "set_archived": "challenges.manage",
+        "create_platform": "challenges.platform",
+        "remove_participant": "challenges.disqualify",
+    }
     filterset_fields = ["status", "creator"]
     pagination_class = AdminPageNumberPagination
 
@@ -1198,7 +1205,8 @@ class AdminTransactionViewSet(viewsets.ReadOnlyModelViewSet):
 
     queryset = WalletTransaction.objects.all()
     serializer_class = AdminTransactionSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, StaffActionPermission]
+    staff_perms = {"*": "finance.view"}
     filterset_fields = ["user", "type"]
 
     @action(detail=False, methods=["get"])
@@ -1743,7 +1751,7 @@ class AdminDashboardViewSet(viewsets.ViewSet):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def get_system_settings(request):
     """Get current system settings"""
     from apps.admin_api.models import SystemSettings
@@ -1759,7 +1767,7 @@ def get_system_settings(request):
     responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("settings.system"))
 def update_system_settings(request):
     """Update system settings"""
     from apps.admin_api.models import AuditLog, SystemSettings
@@ -1834,7 +1842,7 @@ def update_system_settings(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def get_audit_logs(request):
     """Get audit logs with filtering"""
     from apps.admin_api.models import AuditLog
@@ -1909,7 +1917,7 @@ def get_audit_logs(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def get_steps_logs(request):
     """Get historical step logs for all users with pagination and filters."""
 
@@ -2015,7 +2023,7 @@ def get_steps_logs(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def get_steps_hourly_breakdown(request):
     """Get server-side hourly steps breakdown for a user/day."""
 
@@ -2114,7 +2122,7 @@ def get_steps_hourly_breakdown(request):
     responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
 )
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("support.view"))
 def get_support_tickets(request):
     """Get support tickets with filtering and pagination"""
     from apps.admin_api.models import SupportTicket
@@ -2173,7 +2181,7 @@ def get_support_tickets(request):
     responses={200: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT},
 )
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("support.view"))
 def get_support_ticket_detail(request, ticket_id):
     """Get a support ticket and its conversation thread"""
     from apps.admin_api.models import SupportTicket
@@ -2206,7 +2214,7 @@ def get_support_ticket_detail(request, ticket_id):
     },
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("support.reply"))
 def reply_support_ticket(request, ticket_id):
     """Post an admin reply to a support ticket"""
     from apps.admin_api.models import (AuditLog, SupportTicket,
@@ -2299,7 +2307,7 @@ def reply_support_ticket(request, ticket_id):
     },
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("support.reply"))
 def update_support_ticket(request, ticket_id):
     """Update support ticket status, priority, assignment, and admin notes"""
     from apps.admin_api.models import AuditLog, SupportTicket
@@ -2416,7 +2424,7 @@ def update_support_ticket(request, ticket_id):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("support.view"))
 def get_support_admins(request):
     """Get staff users eligible for support ticket assignment"""
     admins = (
@@ -2754,7 +2762,7 @@ def get_transaction_trends(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("trust.view"))
 def fraud_overview(request):
     from apps.steps.models import FraudFlag, TrustScore
 
@@ -2887,7 +2895,7 @@ def action_flag(request, flag_id):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.view"))
 def payments_overview(request):
     """Admin dashboard financial overview."""
     from datetime import timedelta
@@ -2934,7 +2942,7 @@ def payments_overview(request):
     request=None, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT}
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.withdrawals"))
 def retry_payout(request, txn_id):
     """Admin checks current IntaSend status of a failed/pending payout."""
     from apps.payments import intasend
@@ -2973,7 +2981,7 @@ def retry_payout(request, txn_id):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.view"))
 def withdrawal_queue(request):
     """
     Returns all pending withdrawals for admin review.
@@ -3011,7 +3019,7 @@ def withdrawal_queue(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.view"))
 def withdrawal_stats(request):
     """Stats for the admin withdrawal dashboard."""
     from django.db.models import Sum
@@ -3061,7 +3069,7 @@ def withdrawal_stats(request):
     },
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.withdrawals"))
 def approve_withdrawal(request, withdrawal_id):
     """
     Admin approves a withdrawal. This immediately sends it to IntaSend.
@@ -3125,7 +3133,7 @@ def approve_withdrawal(request, withdrawal_id):
     responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.withdrawals"))
 def reject_withdrawal(request, withdrawal_id):
     """
     Admin rejects a withdrawal request.
@@ -3174,7 +3182,7 @@ def reject_withdrawal(request, withdrawal_id):
     },
 )
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff("finance.withdrawals"))
 def retry_failed_withdrawal(request, withdrawal_id):
     """
     Admin checks current IntaSend status of a failed withdrawal.
@@ -3214,7 +3222,7 @@ def retry_failed_withdrawal(request, withdrawal_id):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsAdminUser])
+@permission_classes(staff())
 def ops_monitoring_dashboard(request):
     """
     Aggregated operational monitoring metrics for admin dashboards.

@@ -27,6 +27,7 @@ from apps.admin_api.models import AuditLog
 from apps.admin_api.trust_views import (HISTORY_ACTIONS, _age_hours, _related,
                                         _audit_row, _user_brief)
 from apps.admin_api.views import IsAdminUser
+from apps.admin_api.roles import staff
 from apps.challenges.models import ChallengeResult, HeldPayout
 from apps.challenges.payout_holds import (PayoutReviewError, _release_blocker,
                                           forfeit_hold, forfeit_plan,
@@ -84,7 +85,7 @@ def _counts():
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("finance.view"))
 def payout_reviews(request):
     now = timezone.now()
     status_f = request.query_params.get("status") or HeldPayout.STATUS_HELD
@@ -173,7 +174,7 @@ def _forfeit_preview(h):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("finance.view"))
 def payout_review_detail(request, hold_id):
     now = timezone.now()
     h = get_object_or_404(
@@ -253,13 +254,13 @@ def _decide(request, hold_id, fn):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("finance.payout_review"))
 def payout_review_release(request, hold_id):
     return _decide(request, hold_id, release_hold)
 
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("finance.payout_review"))
 def payout_review_forfeit(request, hold_id):
     return _decide(request, hold_id, forfeit_hold)

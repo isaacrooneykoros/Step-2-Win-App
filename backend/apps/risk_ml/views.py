@@ -21,6 +21,7 @@ from rest_framework.response import Response
 
 from apps.admin_api.models import AuditLog
 from apps.admin_api.views import IsAdminUser
+from apps.admin_api.roles import staff
 
 from .feature_store import local_today
 from .labels import MAX_WINDOW_DAYS, upsert_label
@@ -48,7 +49,7 @@ def _label_row(lab: Label) -> dict:
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def user_risk_scores(request, user_id: int):
     user = get_object_or_404(User, pk=user_id)
     try:
@@ -83,7 +84,7 @@ def _parse_day(v):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={201: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 def label_user_day(request):
     data = request.data
     try:
@@ -130,7 +131,7 @@ def label_user_day(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def model_artifacts(request):
     rows = ModelArtifact.objects.defer("payload").order_by("-created_at")[:50]
     return Response({"shadow": True, "note": SHADOW_NOTE, "results": [

@@ -18,6 +18,7 @@ from rest_framework.response import Response
 
 from apps.admin_api.models import AuditLog
 from apps.admin_api.views import IsAdminUser
+from apps.admin_api.roles import staff
 from apps.challenges.models import Challenge
 
 User = get_user_model()
@@ -75,7 +76,7 @@ def _setting(name, default=None):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff())
 def settings_context(request):
     history = AuditLog.objects.filter(resource_type="settings").order_by("-created_at")[:25]
     staff = User.objects.filter(is_staff=True).order_by("-is_superuser", "username")
