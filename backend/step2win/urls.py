@@ -27,6 +27,8 @@ urlpatterns = [
     path("api/admin/risk-ml/", include("apps.risk_ml.urls")),
     path("api/admin/linkage/", include("apps.linkage.urls")),
     path("api/admin/social/", include("apps.social.admin_urls")),
+    path("api/admin/content/", include("apps.content.admin_urls")),
+    path("api/content/", include("apps.content.urls")),
     path("api/social/", include("apps.social.urls")),
     path("api/admin/", include("apps.admin_api.urls")),
     path("api/payments/", include("apps.payments.urls")),

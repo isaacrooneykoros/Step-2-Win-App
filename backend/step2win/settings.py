@@ -104,6 +104,7 @@ INSTALLED_APPS = [
     "apps.risk_ml",
     "apps.linkage",
     "apps.social",
+    "apps.content",
     "axes",
     "auditlog",
 ]
