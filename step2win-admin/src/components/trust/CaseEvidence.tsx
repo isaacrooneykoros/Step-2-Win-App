@@ -10,6 +10,7 @@ import { Skeleton } from '../ui/Skeleton'
 import { trustApi, type CaseDetail, type IntervalInfo, type RuleHit, type SessionInfo, type Severity, type TrustCase } from './api'
 import { CASE_STATUS_LABEL, caseReason, caseTitle, evidenceLabel, humanizeCode, ruleInfo, TRUST_STATUS_INFO } from './rules'
 import { Age, Figure, ProbabilityMeter, Section, SeverityBadge, TrustScore, When } from './ui'
+import { RiskLabelPanel } from './RiskLabelPanel'
 
 export function CaseStatusBadge({ c }: { c: TrustCase }) {
   const status = c.review_status === 'escalated' ? 'escalated' : c.status
@@ -375,5 +376,10 @@ export function CaseEvidence({ c }: { c: TrustCase }) {
     )
   }
   if (q.error || !q.data) return <ErrorState size="compact" error={q.error} onRetry={() => void q.refetch()} title="Could not load case evidence" />
-  return <Body d={q.data} />
+  return (
+    <div className="space-y-4">
+      <Body d={q.data} />
+      <RiskLabelPanel userId={c.user.id} username={c.user.username} date={c.event_date} />
+    </div>
+  )
 }

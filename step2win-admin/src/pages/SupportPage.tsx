@@ -2,7 +2,7 @@ import { useLiveRefetchInterval } from '../lib/realtime/useAdminRealtime'
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ChevronLeft, ChevronRight, Clock, Inbox, MessageSquareQuote, MessageSquareText, RefreshCw, UserX } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, Clock, Inbox, ListChecks, MessageSquareQuote, MessageSquareText, RefreshCw, Send, Tags, UserX } from 'lucide-react'
 import { PageHeader } from '../components/PageHeader'
 import { StatCard } from '../components/StatCard'
 import { SlideOver } from '../components/SlideOver'
@@ -22,6 +22,7 @@ import { CustomerContext } from '../components/support/CustomerContext'
 import { CATEGORY_LABEL, DEFAULT_TARGET_HOURS, PRIORITY_LABEL, VIEW_EMPTY, VIEW_LABEL } from '../components/support/meta'
 import { TemplatesManager } from '../components/support/SavedReplies'
 import { useTags } from '../components/support/queries'
+import { BulkTickets, OutboundTicketModal, TagManager } from '../components/support/DeskTools'
 import { formatAgeHours, formatNumber } from '../lib/format'
 
 const PAGE_SIZE = 40
@@ -68,6 +69,10 @@ export function SupportPage() {
   const admins = adminsQ.data?.results ?? []
   const tagsQ = useTags()
   const repliesOpen = params.get('panel') === 'replies'
+  const bulkOpen = params.get('panel') === 'bulk'
+  const tagsOpen = params.get('panel') === 'tags'
+  const [outboundOpen, setOutboundOpen] = useState(false)
+  const [deskNotice, setDeskNotice] = useState<string | null>(null)
 
   const rows = useMemo(() => queueQ.data?.results ?? [], [queueQ.data])
   const counts = queueQ.data?.counts
@@ -187,6 +192,15 @@ export function SupportPage() {
         description="Answer customer tickets, keep them moving and see who you are talking to."
         actions={
           <>
+            <Button size="sm" variant="primary" leftIcon={<Send size={13} />} onClick={() => setOutboundOpen(true)}>
+              Message a customer
+            </Button>
+            <Button size="sm" variant="secondary" leftIcon={<ListChecks size={13} />} onClick={() => setParam({ panel: 'bulk' })}>
+              Bulk actions
+            </Button>
+            <Button size="sm" variant="secondary" leftIcon={<Tags size={13} />} onClick={() => setParam({ panel: 'tags' })}>
+              Tags
+            </Button>
             <Button size="sm" variant="secondary" leftIcon={<MessageSquareQuote size={13} />} onClick={() => setParam({ panel: 'replies' })}>
               Saved replies
             </Button>
@@ -197,6 +211,13 @@ export function SupportPage() {
           </>
         }
       />
+
+      {deskNotice && (
+        <div role="status" className="flex items-center gap-3 rounded-md border border-success-line bg-success-soft px-3 py-2 text-sm text-success">
+          <span className="flex-1 font-medium">{deskNotice}</span>
+          <button type="button" className="text-xs underline" onClick={() => setDeskNotice(null)}>Dismiss</button>
+        </div>
+      )}
 
       {!showConversationOnly && (
         <>
@@ -287,6 +308,19 @@ export function SupportPage() {
         headerAside={<Link to="/settings#section-support" className="text-xs font-medium text-brand-text hover:underline">Desk settings</Link>}>
         <TemplatesManager />
       </SlideOver>
+
+      <SlideOver open={bulkOpen} onClose={() => setParam({ panel: null })} title="Bulk actions" width={520}
+        subtitle="Assign, close, resolve or reopen several tickets, or merge duplicates from one customer.">
+        <BulkTickets rows={rows} admins={admins} onDone={(text) => { setDeskNotice(text); setParam({ panel: null }) }} />
+      </SlideOver>
+
+      <SlideOver open={tagsOpen} onClose={() => setParam({ panel: null })} title="Tags" width={440}
+        subtitle="Rename a tag everywhere it is used, or delete it from every ticket.">
+        <TagManager />
+      </SlideOver>
+
+      <OutboundTicketModal open={outboundOpen} onClose={() => setOutboundOpen(false)}
+        onCreated={(id) => { setOutboundOpen(false); setDeskNotice(`Ticket #${id} sent to the customer's Support inbox.`); onChanged(); setPage(1); setParam({ view: 'all', ticket: String(id) }) }} />
 
       <SlideOver open={!xl && customerOpen && !!selectedId && !!selectedUserId} onClose={() => setCustomerOpen(false)} title="Customer" width={400}>
         {selectedId && selectedUserId && (
