@@ -28,6 +28,7 @@ from rest_framework.throttling import SimpleRateThrottle
 from apps.admin_api import scheduler
 from apps.admin_api.models import AuditLog
 from apps.admin_api.views import IsAdminUser
+from apps.admin_api.roles import staff
 
 logger = logging.getLogger("apps.admin_api.scheduler")
 
@@ -87,7 +88,7 @@ ADMIN = [permissions.IsAuthenticated, IsAdminUser]
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff())
 def scheduled_jobs(request):
     return Response(
         {
@@ -115,7 +116,7 @@ RUN_NOW_EXECUTOR = _run_in_background
 
 @extend_schema(request=None, responses={202: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("settings.system"))
 def run_scheduled_job_now(request, name):
     job = scheduler.get_job(name)
     if job is None:

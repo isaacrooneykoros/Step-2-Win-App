@@ -192,6 +192,10 @@ class Challenge(models.Model):
         help_text="Visual identity emoji for private challenge cards",
     )
     theme = models.CharField(max_length=10, choices=THEME_CHOICES, default="blue")
+    # Staff hide finished (completed / cancelled) challenges from customer lists instead
+    # of deleting them; participants still see them in their own history.
+    is_archived = models.BooleanField(default=False, db_index=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -234,7 +238,9 @@ class Challenge(models.Model):
 
     @property
     def net_pool(self):
-        return self.total_pool - self.platform_fee
+        """What winners share: entries minus the platform fee, plus any platform bonus
+        (platform challenges; funded from platform revenue at settlement)."""
+        return self.total_pool - self.platform_fee + (self.platform_bonus_kes or Decimal("0.00"))
 
 
 class Participant(models.Model):

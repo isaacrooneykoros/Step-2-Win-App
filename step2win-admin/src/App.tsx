@@ -24,6 +24,8 @@ import { useAuthStore } from './store/authStore';
 
 import { AdminFraudPage } from './pages/AdminFraudPage';
 import SocialModerationPage from './pages/SocialModerationPage';
+import { DepositsPage } from './pages/DepositsPage';
+import { StaffPage } from './pages/StaffPage';
 
 function App() {
   const loadSession = useAuthStore((state) => state.loadSession);
@@ -61,6 +63,8 @@ function App() {
           <Route path="support" element={<SupportPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="legal" element={<LegalDocumentsPage />} />
+          <Route path="deposits" element={<DepositsPage />} />
+          <Route path="staff" element={<StaffPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -9,6 +9,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
+from apps.admin_api.roles import staff
 
 from apps.core.realtime import hub
 
@@ -29,7 +30,7 @@ def _count(fn):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT}, tags=["admin-realtime"])
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsStaff])
+@permission_classes(staff())
 def realtime_pulse(request):
     """
     Live activity counters for the dashboard, refetched when step/user events arrive.
@@ -63,7 +64,7 @@ def realtime_pulse(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT}, tags=["admin-realtime"])
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated, IsStaff])
+@permission_classes(staff())
 def realtime_status(request):
     """Hub counters for this process (diagnostics / load tests)."""
     return Response(hub.snapshot())

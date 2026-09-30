@@ -144,6 +144,8 @@ function classifyRegistrationError(error: unknown): FormErrors {
   return { general: maybeError.message ?? 'Registration failed. Try again.' };
 }
 
+const INVITE_RE = /^[A-Z0-9]{4}(-[A-Z0-9]{4}){3}$/i
+
 export default function RegisterPage() {
   const [form, setForm] = useState<RegisterForm>({
     username: '',
@@ -201,7 +203,7 @@ export default function RegisterPage() {
     }
 
     if (!form.admin_code.trim()) {
-      nextErrors.admin_code = 'Admin registration code is required.';
+      nextErrors.admin_code = 'Enter your invite code (or the first-admin setup code).';
     }
 
     setErrors(nextErrors);
@@ -221,7 +223,10 @@ export default function RegisterPage() {
         email: form.email.trim().toLowerCase(),
         password: form.password,
         confirm_password: form.confirm_password,
-        admin_code: form.admin_code.trim(),
+        // Staff invites look like ABCD-EFGH-JKLM-NPQR; anything else is the first-admin setup code.
+        ...(INVITE_RE.test(form.admin_code.trim())
+          ? { invite_code: form.admin_code.trim().toUpperCase(), admin_code: '' }
+          : { admin_code: form.admin_code.trim() }),
       },
       {
         onError: (error: unknown) => {
@@ -235,11 +240,11 @@ export default function RegisterPage() {
     <AuthLayout mode="register">
       <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-brand-text">
         <ShieldCheck size={14} aria-hidden />
-        First admin setup
+        Staff sign-up
       </p>
-      <h1 className="text-lg font-semibold text-ink-primary">Create an admin account</h1>
+      <h1 className="text-lg font-semibold text-ink-primary">Create your staff account</h1>
       <p className="mb-5 mt-1 text-sm text-ink-secondary">
-        Requires the one-time registration code issued by a superuser.
+        Use the email your invite was sent to and the invite code from the owner. The very first admin uses the setup code instead.
       </p>
 
       {errors.general && (
@@ -333,14 +338,14 @@ export default function RegisterPage() {
         />
 
         <AuthInput
-          label="Registration code"
+          label="Invite code"
           type="text"
           autoComplete="one-time-code"
           value={form.admin_code}
           onChange={updateField('admin_code')}
           error={errors.admin_code}
           icon={<KeyRound size={15} />}
-          hint="One-time setup only. The code is never stored in the browser."
+          hint="Works once and expires after 7 days. The code is never stored in the browser."
           className="mono"
         />
 

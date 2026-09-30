@@ -591,6 +591,67 @@ def process_deposit_callback(payload: dict[str, Any]) -> None:
         log.save(update_fields=["processed"])
 
 
+def settle_deposit_from_gateway(txn_id, invoice: dict[str, Any]) -> str:
+    """Staff "verify with IntaSend and resolve" for one deposit (admin console).
+
+    ``invoice`` is IntaSend's own answer (intasend.query_collection). Pending / initiated
+    deposits go through the normal idempotent callback processing
+    (process_deposit_callback), exactly as if the missed webhook had arrived. A deposit
+    already marked failed / cancelled that IntaSend reports COMPLETE (a late payment) is
+    credited here under the same locks. Crediting happens at most once: the deposit row
+    is locked, its status checked, and the ledger row's reference (the order id) is
+    unique.
+
+    Returns one of: credited, already_completed, failed, pending.
+    """
+    txn = PaymentTransaction.objects.get(id=txn_id, type="deposit")
+    if txn.status == "completed":
+        return "already_completed"
+    state = str(invoice.get("state") or "").upper()
+    mpesa_ref = invoice.get("mpesa_reference") or ""
+    if state not in ("COMPLETE", "FAILED", "CANCELLED", "CANCELED"):
+        return "pending"
+
+    if txn.status in ("initiated", "pending"):
+        payload = {"invoice": {**invoice, "api_ref": txn.order_id}, "source": "admin_verify"}
+        process_deposit_callback(payload)
+        txn.refresh_from_db()
+        return "credited" if txn.status == "completed" else "failed"
+
+    # failed / cancelled locally
+    if state != "COMPLETE":
+        return "failed"
+    log_callback("deposit", {"invoice": {**invoice, "api_ref": txn.order_id}, "source": "admin_verify"}, txn.order_id)
+    with db_transaction.atomic():
+        locked = PaymentTransaction.objects.select_for_update().get(id=txn.id)
+        if locked.status == "completed":
+            return "already_completed"
+        if WalletTransaction.objects.filter(reference_id=locked.order_id).exists():
+            locked.status = "completed"
+            locked.save(update_fields=["status", "updated_at"])
+            return "already_completed"
+        user = locked.user.__class__.objects.select_for_update().get(id=locked.user_id)
+        before = user.wallet_balance
+        user.wallet_balance = before + locked.amount_kes
+        user.save(update_fields=["wallet_balance", "updated_at"])
+        WalletTransaction.objects.create(
+            user=user,
+            type="deposit",
+            amount=locked.amount_kes,
+            balance_before=before,
+            balance_after=user.wallet_balance,
+            description=f"M-Pesa deposit via {mpesa_ref or 'verification'}",
+            reference_id=locked.order_id,
+            metadata={"payment_gateway": "intasend", "mpesa_reference": mpesa_ref, "source": "admin_verify"},
+        )
+        locked.status = "completed"
+        locked.mpesa_reference = mpesa_ref
+        locked.fail_reason = ""
+        locked.callback_received_at = timezone.now()
+        locked.save(update_fields=["status", "mpesa_reference", "fail_reason", "callback_received_at", "updated_at"])
+    return "credited"
+
+
 def _refund_linked_withdrawal(txn: PaymentTransaction, fail_reason: str) -> None:
     withdrawal = WithdrawalRequest.objects.filter(id=txn.order_id).first()
     if withdrawal and withdrawal.status not in (

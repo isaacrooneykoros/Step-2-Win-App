@@ -33,6 +33,7 @@ from rest_framework.response import Response
 
 from apps.admin_api.models import AuditLog, SupportTicket, SupportTicketMessage
 from apps.admin_api.views import IsAdminUser
+from apps.admin_api.roles import staff
 from apps.steps.models import (DailyVerificationSummary, DeviceRegistration,
                                FraudFlag, HealthRecord,
                                IntervalVerificationResult, StepSession,
@@ -328,7 +329,7 @@ def _moderate(request, user, action, reason, message, flag=None):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def trust_summary(request):
     """Queue sizes, enforcement counts and flags per day by severity."""
     now = timezone.now()
@@ -407,7 +408,7 @@ def trust_summary(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def trust_cases(request):
     """Unified triage list: fraud flags + suspicious session reviews.
 
@@ -702,7 +703,7 @@ def _day_payload(user, day):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def trust_case_detail(request, kind, case_id):
     now = timezone.now()
     if kind == "flag":
@@ -768,7 +769,7 @@ def trust_case_detail(request, kind, case_id):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 def trust_flag_action(request, flag_id):
     """Decide a fraud flag: dismiss, or confirm with warn/restrict/suspend/ban.
 
@@ -806,7 +807,7 @@ def trust_flag_action(request, flag_id):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 def trust_session_decision(request, review_id):
     """Record a decision on a suspicious session review.
 
@@ -858,7 +859,7 @@ def trust_session_decision(request, review_id):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def moderation_users(request):
     """Accounts that need a moderation decision (view=queue) or are under an
     enforcement (view=enforced)."""
@@ -929,7 +930,7 @@ def moderation_users(request):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def moderation_history(request):
     """Audit trail of trust & safety decisions (newest first)."""
     p = request.query_params
@@ -955,7 +956,7 @@ def moderation_history(request):
 
 @extend_schema(request=OpenApiTypes.OBJECT, responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT})
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 def moderate_user(request, user_id):
     """Apply a trust enforcement to a user outside a specific flag."""
     action = request.data.get("action")
@@ -979,7 +980,7 @@ def moderate_user(request, user_id):
 
 @extend_schema(responses={200: OpenApiTypes.OBJECT})
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff())
 def ops_history(request):
     """Daily counts behind the ops checks (from stored records, not samples)."""
     from apps.payments.models import CallbackLog, PaymentTransaction, WithdrawalRequest

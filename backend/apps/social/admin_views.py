@@ -15,6 +15,7 @@ from rest_framework.response import Response
 
 from apps.admin_api.models import AuditLog
 from apps.admin_api.views import IsAdminUser
+from apps.admin_api.roles import staff
 
 from . import teams as teams_svc
 from .common import SocialError, current_week_start
@@ -46,7 +47,7 @@ def _settings_payload(s: SocialSettings) -> dict:
 
 
 @api_view(["GET", "PATCH"])
-@permission_classes(ADMIN)
+@permission_classes(staff("console.view", write="settings.system"))
 @social_endpoint
 def social_settings_view(request):
     s = SocialSettings.load()
@@ -83,7 +84,7 @@ def social_settings_view(request):
 
 
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def overview(request):
     ws = current_week_start()
     return Response(
@@ -140,7 +141,7 @@ def _report_row(r: SocialReport) -> dict:
 
 
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def reports(request):
     status = request.query_params.get("status", SocialReport.OPEN)
     qs = SocialReport.objects.select_related("reporter", "target_user", "target_team", "reviewed_by")
@@ -155,7 +156,7 @@ def reports(request):
 
 
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 @social_endpoint
 def resolve_report(request, report_id):
     r = SocialReport.objects.select_related("target_team", "target_user").filter(id=report_id).first()
@@ -186,7 +187,7 @@ def resolve_report(request, report_id):
 
 
 @api_view(["GET"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.view"))
 def teams_list(request):
     qs = Team.objects.all()
     q = (request.query_params.get("q") or "").strip()
@@ -206,7 +207,7 @@ def teams_list(request):
 
 
 @api_view(["POST"])
-@permission_classes(ADMIN)
+@permission_classes(staff("trust.act"))
 @social_endpoint
 def moderate_team(request, team_id):
     team = Team.objects.filter(id=team_id).first()

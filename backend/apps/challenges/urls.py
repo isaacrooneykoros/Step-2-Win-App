@@ -21,7 +21,6 @@ urlpatterns = [
     path("<int:pk>/stats/", views.challenge_stats, name="stats"),
     path("<int:pk>/results/", views.challenge_results, name="results"),
     path("<int:pk>/leave/", views.leave_challenge, name="leave"),
-    path("<int:pk>/feature/", views.feature_challenge, name="feature"),
     path("<int:pk>/rematch/", views.rematch_challenge, name="rematch"),
     path("<int:pk>/chat/", views.challenge_chat, name="chat"),
     path("<int:pk>/social-stats/", views.challenge_social_stats, name="social_stats"),

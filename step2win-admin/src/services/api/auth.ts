@@ -12,6 +12,7 @@ export interface RegisterPayload {
   password: string;
   confirm_password: string;
   admin_code: string;
+  invite_code?: string;
 }
 
 export interface AuthResponse {
