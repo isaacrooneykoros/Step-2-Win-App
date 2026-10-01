@@ -16,6 +16,8 @@ import re
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 
+from apps.core.sanitizers import sanitize_text
+
 from .common import SocialError, current_week_start, require_social_enabled
 from .models import SocialNotification, Team, TeamMembership, new_code
 from .notify import notify
@@ -29,6 +31,7 @@ def name_key(name: str) -> str:
 
 
 def clean_name(name: str) -> str:
+    name = sanitize_text(name or "", max_length=100)
     name = re.sub(r"\s+", " ", (name or "").strip())
     if not NAME_RE.match(name):
         raise SocialError(
@@ -40,6 +43,7 @@ def clean_name(name: str) -> str:
 
 
 def clean_description(text: str) -> str:
+    text = sanitize_text(text or "", max_length=1000)
     text = re.sub(r"\s+", " ", (text or "").strip())
     return text[:160]
 
