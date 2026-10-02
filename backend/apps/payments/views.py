@@ -3,7 +3,7 @@ import logging
 from decimal import Decimal
 
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import transaction as db_transaction
 from django.db.models import Sum
 from django.http import JsonResponse
@@ -572,7 +572,7 @@ def cancel_withdrawal(request, withdrawal_id):
     """
     try:
         withdrawal = WithdrawalRequest.objects.get(id=withdrawal_id, user=request.user)
-    except WithdrawalRequest.DoesNotExist:
+    except (WithdrawalRequest.DoesNotExist, ValidationError, ValueError):
         return Response({"error": "Withdrawal not found"}, status=404)
 
     if withdrawal.status != "pending_review":
