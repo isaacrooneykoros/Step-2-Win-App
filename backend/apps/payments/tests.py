@@ -233,3 +233,14 @@ class PaymentWorkflowTests(APITestCase):
         self.assertEqual(txn.status, "failed")
         self.assertEqual(withdrawal.status, "failed")
         self.assertEqual(self.user.wallet_balance, Decimal("100.00"))
+
+    def test_cancel_withdrawal_with_non_existent_uuid_returns_404(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post("/api/payments/withdrawal/00000000-0000-0000-0000-000000000000/cancel/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data["error"], "Withdrawal not found")
+
+    def test_cancel_withdrawal_with_invalid_uuid_returns_404(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post("/api/payments/withdrawal/invalid-uuid/cancel/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
