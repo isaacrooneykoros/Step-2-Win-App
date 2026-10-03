@@ -16,6 +16,7 @@ from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
 
+from apps.core.sanitizers import sanitize_text
 from . import feed as feed_svc
 from . import friends as friends_svc
 from . import teams as teams_svc
@@ -307,7 +308,7 @@ def report(request):
     reason = data.get("reason")
     if reason not in dict(SocialReport.REASON_CHOICES):
         raise SocialError("invalid_reason", "Choose a reason.", 400)
-    details = str(data.get("details") or "").strip()[:500]
+    details = sanitize_text(str(data.get("details") or "")[:500])
     kwargs = {}
     if target_type == SocialReport.TARGET_USER:
         uid = _int(data.get("user_id"), "user_id")

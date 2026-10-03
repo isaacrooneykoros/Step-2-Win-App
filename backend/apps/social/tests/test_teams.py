@@ -148,6 +148,18 @@ class ReportsAndModerationTests(SocialAPITestCase):
         self.assertEqual(c.post("/api/social/reports/", {"target_type": "user", "user_id": self.reporter.id, "reason": "spam"}, format="json").status_code, 400)
         self.assertEqual(c.post("/api/social/reports/", {"target_type": "team", "team_id": self.team_id, "reason": "nope"}, format="json").status_code, 400)
 
+    def test_report_details_sanitizes_html(self):
+        other = make_user("xssuser")
+        r = self.as_user(self.reporter).post(
+            "/api/social/reports/",
+            {"target_type": "user", "user_id": other.id, "reason": "harassment", "details": "<script>alert('xss')</script>bad text"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201)
+        rep = SocialReport.objects.get(reporter=self.reporter, target_user=other)
+        self.assertNotIn("<script>", rep.details)
+        self.assertIn("alert('xss')bad text", rep.details)
+
     def test_admin_queue_resolve_and_team_moderation(self):
         self.as_user(self.reporter).post(
             "/api/social/reports/", {"target_type": "team", "team_id": self.team_id, "reason": "offensive_name"}, format="json"
