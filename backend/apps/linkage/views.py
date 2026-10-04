@@ -24,6 +24,7 @@ from rest_framework.response import Response
 from apps.admin_api.models import AuditLog
 from apps.admin_api.views import IsAdminUser
 from apps.admin_api.roles import staff
+from apps.core.sanitizers import sanitize_text
 
 from .graph import summarize_pair
 from .models import (HouseholdMark, LinkageRun, LinkageSettings, LinkCluster,
@@ -226,7 +227,7 @@ def linkage_runs(request):
 
 
 def _clean_note(raw):
-    note = str(raw or "").strip()
+    note = sanitize_text(str(raw or ""))
     if len(note) < NOTE_MIN:
         return None, f"A note of at least {NOTE_MIN} characters is required."
     if len(note) > NOTE_MAX:
