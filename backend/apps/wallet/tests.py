@@ -83,3 +83,9 @@ class WalletIntegrationTests(APITestCase):
         self.assertEqual(withdrawal.amount_kes, Decimal("20.00"))
         self.assertEqual(withdrawal.status, "pending_review")
         self.assertEqual(withdrawal.method, "mpesa")
+
+    def test_withdrawal_detail_invalid_uuid_returns_404(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get("/api/wallet/withdrawals/00000000-0000-0000-0000-000000000000/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data, {"error": "Withdrawal not found"})
