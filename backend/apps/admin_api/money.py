@@ -29,6 +29,7 @@ from django.db import transaction as db_transaction
 from django.utils import timezone
 
 from apps.admin_api.models import AuditLog, ConsoleControls, WalletCorrection
+from apps.core.sanitizers import sanitize_text
 from apps.wallet.models import WalletTransaction
 
 User = get_user_model()
@@ -63,10 +64,10 @@ def parse_amount(raw) -> Decimal:
 
 
 def _clean_reason(reason) -> str:
-    reason = str(reason or "").strip()
-    if len(reason) < REASON_MIN:
+    cleaned = sanitize_text(reason or "")
+    if len(cleaned) < REASON_MIN:
         raise CorrectionError(f"A reason of at least {REASON_MIN} characters is required.")
-    return reason[:1000]
+    return cleaned[:1000]
 
 
 def _audit(admin, correction: WalletCorrection, action: str, description: str, request=None, extra=None):
@@ -132,7 +133,7 @@ def request_correction(
     if len(key) < 8:
         raise CorrectionError("An idempotency_key (at least 8 characters) is required.")
     reason = _clean_reason(reason)
-    reference = str(reference or "").strip()[:100]
+    reference = sanitize_text(reference or "")[:100]
     existing = _existing_for_key(
         key, admin=admin, kind=kind, user_id=user.id, amount=amount, target_id=target.id if target else None
     )
@@ -289,7 +290,7 @@ def approve_correction(correction_id: int, *, approver, note: str = "", request=
     if c.status != WalletCorrection.STATUS_PENDING:
         raise CorrectionError(f"This correction is already {c.status}.", 409, "not_pending")
     if note:
-        WalletCorrection.objects.filter(id=c.id).update(decision_note=str(note)[:1000])
+        WalletCorrection.objects.filter(id=c.id).update(decision_note=sanitize_text(note)[:1000])
     return apply_correction(c.id, decided_by=approver, request=request)
 
 
