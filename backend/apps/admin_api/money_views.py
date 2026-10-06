@@ -33,6 +33,7 @@ from apps.admin_api.money import (CorrectionError, approval_threshold, approve_c
                                   request_correction)
 from apps.admin_api.roles import staff
 from apps.core.locks import acquire_lock, release_lock
+from apps.core.sanitizers import sanitize_text
 from apps.payments.models import CallbackLog, PaymentTransaction, WithdrawalRequest
 from apps.wallet.models import WalletTransaction
 
@@ -328,8 +329,8 @@ def withdrawal_resolve(request, withdrawal_id):
     from apps.payments.views import _notify_user
 
     outcome = request.data.get("outcome")
-    reason = str(request.data.get("reason") or "").strip()
-    mpesa_ref = str(request.data.get("mpesa_reference") or "").strip()[:100]
+    reason = sanitize_text(request.data.get("reason") or "")
+    mpesa_ref = sanitize_text(request.data.get("mpesa_reference") or "")[:100]
     if outcome not in ("paid", "failed"):
         return Response({"error": "outcome must be 'paid' or 'failed'"}, status=400)
     if len(reason) < 5:

@@ -136,3 +136,43 @@ class FinanceEndpointsTests(TestCase):
         resp = self.client.get("/api/admin/notifications/")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("100.00", str(resp.json()))
+
+    def test_money_views_sanitizes_xss_inputs(self):
+        from apps.admin_api.models import WalletCorrection
+        self.auth()
+        res = self.client.post(
+            "/api/admin/finance/adjustments/",
+            {
+                "user_id": self.user.id,
+                "amount": "100.00",
+                "reason": "Test <script>alert('xss')</script> reason",
+                "reference": "REF-<b onclick='x'>123</b>",
+                "idempotency_key": "unique-idempotency-key-12345",
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201)
+        corr_id = res.json()["correction"]["id"]
+        c = WalletCorrection.objects.get(id=corr_id)
+        self.assertNotIn("<script>", c.reason)
+        self.assertNotIn("<b>", c.reference)
+        self.assertEqual(c.reason, "Test alert('xss') reason")
+        self.assertEqual(c.reference, "REF-123")
+
+        stuck_w = WithdrawalRequest.objects.create(
+            user=self.user, status="approved", amount_kes=Decimal("50.00"),
+            method="mpesa", phone_number="254712345678",
+        )
+        res_resolve = self.client.post(
+            f"/api/admin/finance/withdrawals/{stuck_w.id}/resolve/",
+            {
+                "outcome": "paid",
+                "reason": "Resolving <iframe src='javascript:alert(1)'>stuck</u> withdrawal",
+                "mpesa_reference": "<script>evil</script>REF999",
+            },
+            format="json",
+        )
+        self.assertEqual(res_resolve.status_code, 200)
+        stuck_w.refresh_from_db()
+        self.assertNotIn("<script>", stuck_w.mpesa_reference)
+        self.assertEqual(stuck_w.mpesa_reference, "evilREF999")
