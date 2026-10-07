@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import Count, F, Q
 from drf_spectacular.utils import extend_schema, inline_serializer
@@ -467,7 +468,7 @@ def leaderboard(request, pk):
     """
     try:
         challenge = Challenge.objects.get(pk=pk)
-    except Challenge.DoesNotExist:
+    except (Challenge.DoesNotExist, ValueError, ValidationError):
         return Response(
             {"error": "Challenge not found"}, status=status.HTTP_404_NOT_FOUND
         )
@@ -526,7 +527,7 @@ def challenge_stats(request, pk):
     """
     try:
         challenge = Challenge.objects.get(pk=pk)
-    except Challenge.DoesNotExist:
+    except (Challenge.DoesNotExist, ValueError, ValidationError):
         return Response(
             {"error": "Challenge not found"}, status=status.HTTP_404_NOT_FOUND
         )
@@ -583,7 +584,7 @@ def leave_challenge(request, pk):
     try:
         challenge = Challenge.objects.get(pk=pk)
         participant = Participant.objects.get(challenge=challenge, user=request.user)
-    except (Challenge.DoesNotExist, Participant.DoesNotExist):
+    except (Challenge.DoesNotExist, Participant.DoesNotExist, ValueError, ValidationError):
         return Response(
             {"error": "Challenge or participation not found"},
             status=status.HTTP_404_NOT_FOUND,
@@ -665,7 +666,7 @@ def rematch_challenge(request, pk):
 
     try:
         source = Challenge.objects.get(pk=pk)
-    except Challenge.DoesNotExist:
+    except (Challenge.DoesNotExist, ValueError, ValidationError):
         return Response(
             {"error": "Challenge not found"}, status=status.HTTP_404_NOT_FOUND
         )
@@ -788,7 +789,7 @@ def challenge_chat(request, pk):
     """
     try:
         challenge = Challenge.objects.get(pk=pk)
-    except Challenge.DoesNotExist:
+    except (Challenge.DoesNotExist, ValueError, ValidationError):
         return Response(
             {"error": "Challenge not found"}, status=status.HTTP_404_NOT_FOUND
         )
@@ -911,7 +912,7 @@ def challenge_social_stats(request, pk):
     """
     try:
         challenge = Challenge.objects.get(pk=pk)
-    except Challenge.DoesNotExist:
+    except (Challenge.DoesNotExist, ValueError, ValidationError):
         return Response(
             {"error": "Challenge not found"}, status=status.HTTP_404_NOT_FOUND
         )
@@ -1158,7 +1159,7 @@ def challenge_lobby_card(request, pk):
         challenge = Challenge.objects.prefetch_related("participants__user").get(
             pk=pk, is_public=True, is_private=False
         )
-    except Challenge.DoesNotExist:
+    except (Challenge.DoesNotExist, ValueError, ValidationError):
         return Response({"error": "Challenge not found"}, status=404)
     if (challenge.status == "pending" or challenge.is_archived) and not challenge.participants.filter(
         user=request.user
@@ -1195,7 +1196,7 @@ def spectator_leaderboard(request, pk):
     """
     try:
         challenge = Challenge.objects.get(pk=pk, is_public=True, is_private=False)
-    except Challenge.DoesNotExist:
+    except (Challenge.DoesNotExist, ValueError, ValidationError):
         return Response({"error": "Challenge not found or not public"}, status=404)
     if challenge.is_archived and not challenge.participants.filter(user=request.user).exists():
         return Response({"error": "Challenge not found or not public"}, status=404)
@@ -1297,7 +1298,7 @@ def challenge_results(request, pk):
 
     try:
         challenge = Challenge.objects.get(pk=pk)
-    except Challenge.DoesNotExist:
+    except (Challenge.DoesNotExist, ValueError, ValidationError):
         return Response({"error": "Challenge not found"}, status=404)
 
     if challenge.status != "completed":
