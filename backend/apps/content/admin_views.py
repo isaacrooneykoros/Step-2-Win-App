@@ -18,6 +18,7 @@ from rest_framework.response import Response
 
 from apps.admin_api.models import AuditLog
 from apps.admin_api.roles import staff
+from apps.core.sanitizers import sanitize_text
 
 from .audience import reach
 from .models import Announcement, HelpArticle, HelpCategory
@@ -90,13 +91,13 @@ def _announcement_input(data, instance: Announcement | None):
             continue
         v = data.get(f)
         if f == "title":
-            v = str(v or "").strip()
+            v = sanitize_text(v or "")
             if not v:
                 errors[f] = "Give the announcement a short title."
             elif len(v) > 120:
                 errors[f] = "Keep the title under 120 characters."
         elif f == "body":
-            v = str(v or "").strip()
+            v = sanitize_text(v or "")
             if len(v) > 1000:
                 errors[f] = "Keep the message under 1,000 characters."
         elif f == "severity":
@@ -289,14 +290,14 @@ def article_admin_json(a: HelpArticle) -> dict:
 def _category_input(data, creating):
     out, errors = {}, {}
     if "title" in data or creating:
-        t = str(data.get("title") or "").strip()
+        t = sanitize_text(data.get("title") or "")
         if not t:
             errors["title"] = "Give the category a name."
         elif len(t) > 80:
             errors["title"] = "Keep the name under 80 characters."
         out["title"] = t
     if "description" in data:
-        d = str(data.get("description") or "").strip()
+        d = sanitize_text(data.get("description") or "")
         if len(d) > 200:
             errors["description"] = "Keep the description under 200 characters."
         out["description"] = d
@@ -387,14 +388,14 @@ def _article_input(data, creating):
         except (TypeError, ValueError, HelpCategory.DoesNotExist):
             errors["category"] = "Pick a category."
     if "title" in data or creating:
-        t = str(data.get("title") or "").strip()
+        t = sanitize_text(data.get("title") or "")
         if not t:
             errors["title"] = "Write the question or title."
         elif len(t) > 160:
             errors["title"] = "Keep the title under 160 characters."
         out["title"] = t
     if "body" in data or creating:
-        b = str(data.get("body") or "").strip()
+        b = sanitize_text(data.get("body") or "")
         if not b:
             errors["body"] = "Write the answer."
         elif len(b) > 10000:
