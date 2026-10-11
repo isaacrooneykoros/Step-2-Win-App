@@ -15,6 +15,7 @@ Staff:
 
 from __future__ import annotations
 
+from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
@@ -61,7 +62,8 @@ def _export_dict(req: DataExportRequest) -> dict:
 
 
 def _app_version(request) -> str:
-    return str(request.headers.get("X-App-Version") or request.data.get("app_version") or "")[:32]
+    data = request.data if isinstance(request.data, dict) else {}
+    return str(request.headers.get("X-App-Version") or data.get("app_version") or "")[:32]
 
 
 @extend_schema(request=None, responses=None)
@@ -72,8 +74,9 @@ def consents(request):
         return Response(consent_mod.overview(request.user))
     if PrivacyWriteThrottle().allow_request(request, None) is False:
         return Response({"error": "Too many changes. Try again later.", "code": "throttled"}, status=429)
-    changes = request.data.get("consents")
-    source = str(request.data.get("source") or "settings")
+    data = request.data if isinstance(request.data, dict) else {}
+    changes = data.get("consents")
+    source = str(data.get("source") or "settings")
     try:
         consent_mod.apply_changes(request.user, changes, source=source, app_version=_app_version(request))
     except consent_mod.ConsentError as exc:
@@ -116,7 +119,10 @@ def exports(request):
 @throttle_classes([ExportDownloadThrottle])
 def export_download(request, export_id):
     # Owner only: someone else's id answers exactly like a missing one.
-    req = DataExportRequest.objects.filter(pk=export_id, user=request.user).first()
+    try:
+        req = DataExportRequest.objects.filter(pk=export_id, user=request.user).first()
+    except (ValidationError, ValueError):
+        return Response({"error": "Not found.", "code": "not_found"}, status=404)
     if req is None:
         return Response({"error": "Not found.", "code": "not_found"}, status=404)
     now = timezone.now()
@@ -186,7 +192,8 @@ def admin_settings(request):
         return Response(_admin_payload(s))
     errors = {}
     updates = {}
-    for key, value in (request.data or {}).items():
+    data = request.data if isinstance(request.data, dict) else {}
+    for key, value in data.items():
         if key not in PrivacySettings.EDITABLE:
             errors[key] = "Not editable."
             continue
