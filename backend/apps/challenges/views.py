@@ -2,7 +2,9 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from apps.core.sanitizers import sanitize_chat_message
 from django.db.models import Count, F, Q
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import generics, serializers, status
@@ -834,19 +836,16 @@ def challenge_chat(request, pk):
     elif request.method == "POST":
         from .models import ChallengeMessage
 
-        content = request.data.get("content", "").strip()
-        if not content:
-            content = request.data.get("message", "").strip()  # Fallback for old format
+        raw_content = request.data.get("content")
+        if raw_content is None or str(raw_content).strip() == "":
+            raw_content = request.data.get("message")  # Fallback for old format
 
-        if not content:
+        try:
+            content = sanitize_chat_message(raw_content or "")
+        except ValidationError as e:
+            msg = e.message if hasattr(e, "message") else str(e)
             return Response(
-                {"error": "Message cannot be empty"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if len(content) > 1000:
-            return Response(
-                {"error": "Message too long (max 1000 chars)"},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": msg}, status=status.HTTP_400_BAD_REQUEST
             )
 
         message = ChallengeMessage.objects.create(
