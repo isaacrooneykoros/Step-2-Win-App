@@ -13,12 +13,14 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiTypes, extend_schema
 from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
+from apps.core.sanitizers import sanitize_text
 from apps.admin_api.models import AuditLog
 from apps.admin_api.views import IsAdminUser
 from apps.admin_api.roles import staff
@@ -107,8 +109,9 @@ def label_user_day(request):
     label = data.get("label")
     if label not in dict(Label.LABEL_CHOICES):
         return Response({"error": "label must be cheat, honest or unsure"}, status=400)
-    notes = str(data.get("notes") or "").strip()
-    if len(notes) > 1000:
+    try:
+        notes = sanitize_text(data.get("notes") or "", max_length=1000)
+    except ValidationError:
         return Response({"error": "notes must be 1000 characters or fewer"}, status=400)
 
     obj, created = upsert_label(user_id=user.pk, date_start=start, date_end=end, label=label,
@@ -139,7 +142,10 @@ def activate_model(request, version: str):
     """
     from .training import TrainingRefused, _activate
 
-    reason = str(request.data.get("reason") or "").strip()
+    try:
+        reason = sanitize_text(request.data.get("reason") or "", max_length=500)
+    except ValidationError as exc:
+        return Response({"error": exc.message}, status=400)
     if len(reason) < 5:
         return Response({"error": "A reason of at least 5 characters is required."}, status=400)
     art = get_object_or_404(ModelArtifact.objects.defer("payload"), version=version)
