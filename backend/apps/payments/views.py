@@ -3,7 +3,7 @@ import logging
 from decimal import Decimal
 
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import transaction as db_transaction
 from django.db.models import Sum
 from django.http import JsonResponse
@@ -571,25 +571,28 @@ def cancel_withdrawal(request, withdrawal_id):
     Refunds the balance immediately.
     """
     try:
-        withdrawal = WithdrawalRequest.objects.get(id=withdrawal_id, user=request.user)
-    except WithdrawalRequest.DoesNotExist:
+        with db_transaction.atomic():
+            withdrawal = WithdrawalRequest.objects.select_for_update().get(
+                id=withdrawal_id, user=request.user
+            )
+
+            if withdrawal.status != "pending_review":
+                return Response(
+                    {"error": f"Cannot cancel a withdrawal with status: {withdrawal.status}"},
+                    status=400,
+                )
+
+            locked_user = request.user.__class__.objects.select_for_update().get(
+                id=request.user.id
+            )
+            locked_user.wallet_balance = locked_user.wallet_balance + withdrawal.amount_kes
+            locked_user.save(update_fields=["wallet_balance", "updated_at"])
+
+            withdrawal.status = "cancelled"
+            withdrawal.save(update_fields=["status", "updated_at"])
+
+    except (WithdrawalRequest.DoesNotExist, ValidationError, ValueError):
         return Response({"error": "Withdrawal not found"}, status=404)
-
-    if withdrawal.status != "pending_review":
-        return Response(
-            {"error": f"Cannot cancel a withdrawal with status: {withdrawal.status}"},
-            status=400,
-        )
-
-    with db_transaction.atomic():
-        locked_user = request.user.__class__.objects.select_for_update().get(
-            id=request.user.id
-        )
-        locked_user.wallet_balance = locked_user.wallet_balance + withdrawal.amount_kes
-        locked_user.save(update_fields=["wallet_balance", "updated_at"])
-
-        withdrawal.status = "cancelled"
-        withdrawal.save(update_fields=["status", "updated_at"])
 
     logger.info(
         f"Withdrawal cancelled by user | id={withdrawal_id} | "
