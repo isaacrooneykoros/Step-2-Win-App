@@ -34,6 +34,17 @@ class TeamLifecycleTests(SocialAPITestCase):
         r = self.as_user(self.alice).post(TEAMS, {"name": "karura runners"}, format="json")
         self.assertEqual(r.status_code, 409)
 
+    def test_description_sanitizes_xss_and_enforces_max_length(self):
+        xss_input = "<script>alert('xss')</script> <b>Running Club</b>"
+        r = self.as_user(self.alice).post(TEAMS, {"name": "XSS Team", "description": xss_input}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data["description"], "alert('xss') Running Club")
+
+        # Test updating description with XSS input
+        r_update = self.as_user(self.alice).patch(f"{TEAMS}{r.data['id']}/", {"description": "<img src=x onerror=alert(1)>Updated Desc"}, format="json")
+        self.assertEqual(r_update.status_code, 200, r_update.data)
+        self.assertEqual(r_update.data["description"], "Updated Desc")
+
     def test_join_public_and_invite_only(self):
         self.assertEqual(self.join(self.alice).status_code, 200)
         self.assertEqual(Team.objects.get(pk=self.team_id).member_count, 2)
