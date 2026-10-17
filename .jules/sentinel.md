@@ -1,0 +1,4 @@
+## 2026-09-29 - Race Condition and Unhandled Exception in Withdrawal Cancellation
+**Vulnerability:** In `cancel_withdrawal`, `WithdrawalRequest.objects.get` was queried outside the atomic database transaction without `select_for_update()`. Concurrent cancellation requests could evaluate `status == 'pending_review'` simultaneously and issue double balance refunds. Additionally, invalid UUID strings in request parameters caused unhandled `ValidationError` 500 responses.
+**Learning:** Checking state and performing mutations across separate database queries without row locking permits race conditions in financial operations.
+**Prevention:** Perform all read-check-update operations on financial models within `db_transaction.atomic()` using `select_for_update()`, and catch `ValidationError`/`ValueError` on string ID parameters.

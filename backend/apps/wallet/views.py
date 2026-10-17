@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.db.models import Sum
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import generics, serializers, status
@@ -266,7 +267,7 @@ def withdrawal_detail(request, withdrawal_id):
                 "updated_at": withdrawal.updated_at.isoformat(),
             }
         )
-    except WithdrawalRequest.DoesNotExist:
+    except (WithdrawalRequest.DoesNotExist, ValidationError, ValueError):
         return Response(
             {"error": "Withdrawal not found"}, status=status.HTTP_404_NOT_FOUND
         )
