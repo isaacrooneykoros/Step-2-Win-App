@@ -107,6 +107,17 @@ class TeamLifecycleTests(SocialAPITestCase):
         names = [m["user"]["username"] for m in self.as_user(self.alice).get(self.url()).data["members"]]
         self.assertNotIn("bob", names)
 
+    def test_team_description_sanitizes_xss(self):
+        xss_payload = "Cool Team <script>alert('xss')</script><b>bold</b>"
+        r = self.as_user(self.alice).post(TEAMS, {"name": "XSS Test Team", "description": xss_payload}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data["description"], "Cool Team alert('xss')bold")
+
+        team_id = r.data["id"]
+        r2 = self.as_user(self.alice).patch(f"{TEAMS}{team_id}/", {"description": "Updated <img src=x onerror=alert(1)>Team"}, format="json")
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r2.data["description"], "Updated Team")
+
     def test_discover_public_teams(self):
         self.as_user(self.alice).post(TEAMS, {"name": "Secret Squad", "visibility": "invite_only"}, format="json")
         r = self.as_user(self.bob).get(f"{TEAMS}discover/", {"q": "kar"})
