@@ -12,9 +12,12 @@ from datetime import date, timedelta
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
+
+from apps.core.sanitizers import sanitize_text
 
 from . import feed as feed_svc
 from . import friends as friends_svc
@@ -307,7 +310,11 @@ def report(request):
     reason = data.get("reason")
     if reason not in dict(SocialReport.REASON_CHOICES):
         raise SocialError("invalid_reason", "Choose a reason.", 400)
-    details = str(data.get("details") or "").strip()[:500]
+    raw_details = str(data.get("details") or "").strip()[:500]
+    try:
+        details = sanitize_text(raw_details, max_length=500)
+    except ValidationError as exc:
+        raise SocialError("invalid_details", exc.message if hasattr(exc, "message") else str(exc.messages[0]), 400)
     kwargs = {}
     if target_type == SocialReport.TARGET_USER:
         uid = _int(data.get("user_id"), "user_id")
