@@ -2,6 +2,7 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth import authenticate
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
@@ -829,7 +830,7 @@ def my_support_ticket_detail(request, ticket_id):
     """Get one support ticket and message thread for current user"""
     try:
         ticket = SupportTicket.objects.get(id=ticket_id, user=request.user)
-    except SupportTicket.DoesNotExist:
+    except (SupportTicket.DoesNotExist, ValidationError, ValueError):
         return Response(
             {"error": "Support ticket not found"}, status=status.HTTP_404_NOT_FOUND
         )
@@ -869,18 +870,33 @@ def reply_support_ticket(request, ticket_id):
     """Add a user reply to an existing support ticket"""
     from apps.admin_api.realtime import (broadcast_support_message,
                                          broadcast_support_ticket)
+    from apps.core.sanitizers import sanitize_text
 
     try:
         ticket = SupportTicket.objects.get(id=ticket_id, user=request.user)
-    except SupportTicket.DoesNotExist:
+    except (SupportTicket.DoesNotExist, ValidationError, ValueError):
         return Response(
             {"error": "Support ticket not found"}, status=status.HTTP_404_NOT_FOUND
         )
 
-    message = str(request.data.get("message", "")).strip()
-    if not message:
+    raw_message = str(request.data.get("message", "")).strip()
+    if not raw_message:
         return Response(
             {"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if len(raw_message) > 5000:
+        return Response(
+            {"error": "Message cannot exceed 5000 characters"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        message = sanitize_text(raw_message, max_length=5000)
+    except ValidationError as exc:
+        return Response(
+            {"error": str(exc.message if hasattr(exc, "message") else exc)},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     reply = SupportTicketMessage.objects.create(
@@ -953,7 +969,7 @@ def update_ticket_status(request, ticket_id):
 
     try:
         ticket = SupportTicket.objects.get(id=ticket_id, user=request.user)
-    except SupportTicket.DoesNotExist:
+    except (SupportTicket.DoesNotExist, ValidationError, ValueError):
         return Response(
             {"error": "Support ticket not found"}, status=status.HTTP_404_NOT_FOUND
         )
