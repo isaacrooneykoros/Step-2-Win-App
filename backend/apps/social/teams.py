@@ -16,6 +16,7 @@ import re
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 
+from apps.core.sanitizers import sanitize_text
 from .common import SocialError, current_week_start, require_social_enabled
 from .models import SocialNotification, Team, TeamMembership, new_code
 from .notify import notify
@@ -40,8 +41,8 @@ def clean_name(name: str) -> str:
 
 
 def clean_description(text: str) -> str:
-    text = re.sub(r"\s+", " ", (text or "").strip())
-    return text[:160]
+    cleaned = sanitize_text(text)
+    return cleaned[:160] if cleaned else ""
 
 
 def _membership(team: Team, user) -> TeamMembership | None:
