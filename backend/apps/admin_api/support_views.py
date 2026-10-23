@@ -24,6 +24,7 @@ from rest_framework.response import Response
 from apps.admin_api.models import (AuditLog, SupportReplyTemplate,
                                    SupportTag, SupportTicket,
                                    SupportTicketMessage)
+from apps.core.sanitizers import sanitize_text
 from apps.admin_api.support_rules import overdue_q, sla_hours, with_wait_start
 from apps.admin_api.serializers import (SupportTicketMessageSerializer,
                                         SupportTicketSerializer)
@@ -383,14 +384,16 @@ def _template_json(t: SupportReplyTemplate):
 def _template_input(data, partial=False):
     errors, out = {}, {}
     if "title" in data or not partial:
-        title = str(data.get("title") or "").strip()
+        raw_title = str(data.get("title") or "").strip()
+        title = sanitize_text(raw_title)
         if not title:
             errors["title"] = "Give the reply a short name."
         elif len(title) > 120:
             errors["title"] = "Keep the name under 120 characters."
         out["title"] = title
     if "body" in data or not partial:
-        body = str(data.get("body") or "").strip()
+        raw_body = str(data.get("body") or "").strip()
+        body = sanitize_text(raw_body)
         if not body:
             errors["body"] = "Write the reply text."
         elif len(body) > 5000:

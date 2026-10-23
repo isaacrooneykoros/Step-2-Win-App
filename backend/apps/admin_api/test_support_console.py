@@ -132,6 +132,29 @@ class SupportConsoleTests(TestCase):
         self.assertNotIn("Suspect chargeback", res.content.decode())
         self.assertNotIn("admin_notes", res.content.decode())
 
+    def test_support_templates_sanitizes_xss_inputs(self):
+        payload = {
+            "title": "<strong>Refund</strong><script>alert('xss')</script>",
+            "body": "<p>Hello</p><script>alert('xss')</script> Your refund is processed.",
+            "category": "payment",
+        }
+        res = self.client.post("/api/admin/support/templates/", payload, format="json")
+        self.assertEqual(res.status_code, 201)
+        data = res.json()
+        self.assertEqual(data["title"], "Refundalert('xss')")
+        self.assertEqual(data["body"], "Helloalert('xss') Your refund is processed.")
+
+        # Test PATCH update sanitization
+        patch_payload = {
+            "title": "<i>Updated Title</i>",
+            "body": "<div>Updated body</div><img src=x onerror=alert(1)>",
+        }
+        res_patch = self.client.patch(f"/api/admin/support/templates/{data['id']}/", patch_payload, format="json")
+        self.assertEqual(res_patch.status_code, 200)
+        data_patch = res_patch.json()
+        self.assertEqual(data_patch["title"], "Updated Title")
+        self.assertEqual(data_patch["body"], "Updated body")
+
 
 class SettingsContextTests(TestCase):
     def setUp(self):
