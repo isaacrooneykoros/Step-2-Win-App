@@ -34,6 +34,7 @@ from rest_framework.response import Response
 from apps.admin_api.models import AuditLog, SupportTicket, SupportTicketMessage
 from apps.admin_api.views import IsAdminUser
 from apps.admin_api.roles import staff
+from apps.core.sanitizers import sanitize_text
 from apps.steps.models import (DailyVerificationSummary, DeviceRegistration,
                                FraudFlag, HealthRecord,
                                IntervalVerificationResult, StepSession,
@@ -256,8 +257,10 @@ def _lock_until(request):
 
 
 def _read_decision_payload(request):
-    reason = str(request.data.get("reason") or "").strip()
-    message = str(request.data.get("message_to_user") or "").strip()
+    raw_reason = str(request.data.get("reason") or "").strip()
+    raw_message = str(request.data.get("message_to_user") or "").strip()
+    reason = sanitize_text(raw_reason) if raw_reason else ""
+    message = sanitize_text(raw_message) if raw_message else ""
     if len(reason) < REASON_MIN:
         return None, None, Response({"error": f"A reason of at least {REASON_MIN} characters is required."}, status=400)
     if len(reason) > REASON_MAX:
