@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.admin_api.models import AuditLog, SupportTicket
+from apps.admin_api.models import AuditLog, SupportTicket, SupportTicketMessage
 from apps.steps.models import (DeviceRegistration, FraudFlag, StepSession,
                                StepSyncEvent, SuspiciousSessionReview,
                                TrustScore)
@@ -150,3 +150,22 @@ class TrustConsoleTests(TestCase):
         res = self.client.get("/api/admin/monitoring/ops/history/", {"days": 7})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(res.data["daily"]), 7)
+
+    def test_decision_payload_sanitizes_xss(self):
+        self.auth()
+        url = f"/api/admin/trust/users/{self.other.id}/moderate/"
+        payload = {
+            "action": "warn",
+            "reason": "<script>alert('xss')</script>Warning for suspicious behavior",
+            "message_to_user": "<b>Hello</b> <iframe src='http://evil.com'></iframe>Please follow terms",
+        }
+        res = self.client.post(url, payload, format="json")
+        self.assertEqual(res.status_code, 200)
+        log = AuditLog.objects.get(action="warn", resource_id=self.other.id)
+        self.assertEqual(log.changes["reason"], "alert('xss')Warning for suspicious behavior")
+        self.assertNotIn("<script>", log.changes["reason"])
+        msg = SupportTicketMessage.objects.filter(ticket__user=self.other).first()
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg.message, "Hello Please follow terms")
+        self.assertNotIn("<iframe>", msg.message)
+        self.assertNotIn("<b>", msg.message)
