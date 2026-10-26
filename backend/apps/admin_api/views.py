@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 import logging
 import os
 from datetime import timedelta
@@ -40,6 +41,7 @@ from apps.admin_api.serializers import (AdminBadgeSerializer,
                                         SupportTicketSerializer)
 from apps.challenges.models import Challenge, Participant
 from apps.core.locks import acquire_lock, release_lock
+from apps.core.sanitizers import sanitize_text
 from apps.core.throttles import AdminLoginRateThrottle
 from apps.core.url_utils import build_absolute_media_url
 from apps.gamification.models import Badge, UserBadge, XPEvent
@@ -2804,10 +2806,17 @@ def reply_support_ticket(request, ticket_id):
             {"error": "Support ticket not found"}, status=status.HTTP_404_NOT_FOUND
         )
 
-    message_text = request.data.get("message", "").strip()
-    if not message_text:
+    raw_message_text = request.data.get("message", "").strip()
+    if not raw_message_text:
         return Response(
             {"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        message_text = sanitize_text(raw_message_text, max_length=5000)
+    except DjangoValidationError as exc:
+        return Response(
+            {"error": exc.message}, status=status.HTTP_400_BAD_REQUEST
         )
 
     reply = SupportTicketMessage.objects.create(
