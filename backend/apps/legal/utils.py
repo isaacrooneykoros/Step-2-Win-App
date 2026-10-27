@@ -8,6 +8,8 @@ PDF  → HTML: extracts text (formatting limited — recommend DOCX for best res
 import importlib
 import logging
 
+from apps.core.sanitizers import sanitize_html
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,7 +39,7 @@ def docx_to_html(file_obj) -> str:
         html = result.value
         if result.messages:
             logger.info(f"mammoth warnings: {result.messages}")
-        return html
+        return sanitize_html(html)
     except ModuleNotFoundError:
         raise ValueError("mammoth not installed. Run: pip install mammoth")
     except Exception as e:
@@ -62,7 +64,7 @@ def pdf_to_html(file_obj) -> str:
                 f"<p>{line.strip()}</p>" for line in text.split("\n") if line.strip()
             ]
             pages.append("\n".join(paragraphs))
-        return "\n<hr/>\n".join(pages)
+        return sanitize_html("\n<hr/>\n".join(pages))
     except ModuleNotFoundError:
         raise ValueError("PyPDF2 not installed. Run: pip install PyPDF2")
     except Exception as e:
@@ -96,7 +98,7 @@ def process_uploaded_file(file_obj, filename: str) -> tuple[str, str]:
     elif file_type == "pdf":
         html = pdf_to_html(file_obj)
     elif file_type == "html":
-        html = file_obj.read().decode("utf-8", errors="replace")
+        html = sanitize_html(file_obj.read().decode("utf-8", errors="replace"))
     elif file_type == "doc":
         raise ValueError(
             "Legacy .doc files are not supported. "
