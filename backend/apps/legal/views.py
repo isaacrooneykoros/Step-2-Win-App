@@ -8,6 +8,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from apps.admin_api.roles import staff
+from apps.core.sanitizers import sanitize_html, sanitize_text
 
 from .models import LegalDocument, LegalDocumentVersion, UserDocumentAck
 from .serializers import (LegalDocumentAdminSerializer,
@@ -185,12 +186,17 @@ def document_detail_admin(request, pk):
     uploaded_file = request.FILES.get("uploaded_file")
     data = request.data.copy()
 
+    if "title" in data and isinstance(data["title"], str):
+        data["title"] = sanitize_text(data["title"], max_length=200)
+
     # Edits are staged as a draft. They only reach users through publish, so
     # saving work on a published policy never changes what users see.
     if "content_html" in data:
         staged = data.get("content_html")
         del data["content_html"]
-        data["draft_html"] = staged or ""
+        data["draft_html"] = sanitize_html(staged or "")
+    elif "draft_html" in data:
+        data["draft_html"] = sanitize_html(data.get("draft_html") or "")
 
     if uploaded_file:
         # Convert file to HTML automatically
@@ -242,7 +248,16 @@ def create_document_admin(request):
     Create a new legal document (e.g. a Cookie Policy).
     POST /api/legal/admin/documents/create/
     """
-    serializer = LegalDocumentAdminSerializer(data=request.data)
+    data = request.data.copy()
+    if "title" in data and isinstance(data["title"], str):
+        data["title"] = sanitize_text(data["title"], max_length=200)
+    if "draft_html" in data and isinstance(data["draft_html"], str):
+        data["draft_html"] = sanitize_html(data["draft_html"])
+    if "content_html" in data and isinstance(data["content_html"], str):
+        data["draft_html"] = sanitize_html(data["content_html"])
+        del data["content_html"]
+
+    serializer = LegalDocumentAdminSerializer(data=data)
     if serializer.is_valid():
         doc = serializer.save(last_edited_by=request.user)
         _audit(request, "create", doc, f"Created legal document {doc.title} (draft)",
@@ -295,6 +310,7 @@ def publish_document(request, pk):
         return Response({"error": "Document not found"}, status=404)
 
     staged = doc.draft_html if doc.draft_html.strip() else doc.content_html
+    staged = sanitize_html(staged)
     if not staged.strip():
         return Response(
             {"error": "Cannot publish an empty document. Add content first."},
@@ -302,7 +318,8 @@ def publish_document(request, pk):
         )
 
     notify = request.data.get("notify_users", False)
-    change_summary = request.data.get("change_summary", "")
+    raw_summary = request.data.get("change_summary", "")
+    change_summary = sanitize_text(str(raw_summary), max_length=500) if raw_summary else ""
 
     # Save historical version BEFORE incrementing
     old_version = doc.version
@@ -425,7 +442,7 @@ def restore_version(request, pk, version_id):
 
     # Restore into the draft; the live version stays online until the admin
     # reviews and publishes it.
-    doc.draft_html = version.content_html
+    doc.draft_html = sanitize_html(version.content_html)
     doc.last_edited_by = request.user
     doc.save()
     _audit(request, "restore", doc, f"Restored v{version.version_label} of {doc.title} into the draft",

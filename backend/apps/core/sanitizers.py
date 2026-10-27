@@ -13,6 +13,38 @@ import re
 import bleach
 from django.core.exceptions import ValidationError
 
+ALLOWED_LEGAL_TAGS = [
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "p", "ul", "ol", "li", "strong", "em", "u", "s",
+    "blockquote", "code", "table", "thead", "tbody", "tr", "th", "td",
+    "a", "hr", "br",
+]
+
+ALLOWED_LEGAL_ATTRIBUTES = {
+    "a": ["href", "title", "target"],
+}
+
+ALLOWED_LEGAL_PROTOCOLS = ["http", "https", "mailto"]
+
+
+def sanitize_html(value: str) -> str:
+    """
+    Sanitizes rich HTML documents (e.g. legal policies, markdown renders)
+    allowing safe structural tags while stripping scripts, event handlers,
+    and dangerous URL schemes like javascript:.
+    """
+    if not value:
+        return value or ""
+
+    cleaned = bleach.clean(
+        str(value),
+        tags=ALLOWED_LEGAL_TAGS,
+        attributes=ALLOWED_LEGAL_ATTRIBUTES,
+        protocols=ALLOWED_LEGAL_PROTOCOLS,
+        strip=True,
+    )
+    return cleaned.strip()
+
 
 def sanitize_text(value: str, max_length: int = None) -> str:
     """
