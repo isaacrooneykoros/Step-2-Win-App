@@ -832,20 +832,19 @@ def challenge_chat(request, pk):
         return Response({"messages": data, "count": len(data)})
 
     elif request.method == "POST":
+        from django.core.exceptions import ValidationError
+        from apps.core.sanitizers import sanitize_chat_message
         from .models import ChallengeMessage
 
-        content = request.data.get("content", "").strip()
-        if not content:
-            content = request.data.get("message", "").strip()  # Fallback for old format
+        raw_content = request.data.get("content", "").strip()
+        if not raw_content:
+            raw_content = request.data.get("message", "").strip()  # Fallback for old format
 
-        if not content:
+        try:
+            content = sanitize_chat_message(raw_content)
+        except ValidationError as e:
             return Response(
-                {"error": "Message cannot be empty"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if len(content) > 1000:
-            return Response(
-                {"error": "Message too long (max 1000 chars)"},
+                {"error": e.message if hasattr(e, "message") else str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
