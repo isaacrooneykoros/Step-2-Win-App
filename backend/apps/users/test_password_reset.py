@@ -153,6 +153,11 @@ class RequestTests(PasswordResetBase):
     def test_missing_identifier_is_400(self):
         self.assertEqual(self.post(REQUEST, {}).status_code, 400)
 
+    def test_non_dict_payload_returns_400_without_500_error(self):
+        res = self.post(REQUEST, [1, 2, 3])
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["code"], "identifier_required")
+
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.dummy.EmailBackend")
     def test_unconfigured_email_does_not_crash(self):
         with self.assertLogs("apps.core.emails", level="ERROR") as logs:
@@ -225,6 +230,11 @@ class VerifyTests(PasswordResetBase):
         self.assertTrue(row.reset_token_hash)
         self.assertEqual(len(row.reset_token_hash), 64)
 
+    def test_non_dict_payload_returns_400_without_500_error(self):
+        res = self.post(VERIFY, ["invalid", "payload"])
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["code"], "invalid_code")
+
 
 class ConfirmTests(PasswordResetBase):
     def test_confirm_sets_password_and_revokes_sessions(self):
@@ -287,6 +297,11 @@ class ConfirmTests(PasswordResetBase):
             })
             self.assertEqual(res.status_code, 400)
             self.assertEqual(res.json()["code"], "invalid_token")
+
+    def test_non_dict_payload_returns_400_without_500_error(self):
+        res = self.post(CONFIRM, ["not", "a", "dict"])
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["code"], "invalid_token")
 
     def test_reset_lifts_login_lockout(self):
         cache.set("login_attempts:wanjiru", 99, 900)
