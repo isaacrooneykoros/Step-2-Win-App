@@ -53,7 +53,8 @@ class PasswordResetIdentifierRateThrottle(SimpleRateThrottle):
     scope = "password_reset_identifier"
 
     def get_cache_key(self, request, view):
-        identifier = str(request.data.get("identifier") or "").strip().lower()
+        data = request.data if isinstance(request.data, dict) else {}
+        identifier = str(data.get("identifier") or "").strip().lower()
         if not identifier:
             return None
         digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:32]

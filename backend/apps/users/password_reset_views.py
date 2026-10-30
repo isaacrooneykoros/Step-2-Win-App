@@ -50,7 +50,8 @@ class PasswordResetRequestView(_PublicView):
         },
     )
     def post(self, request):
-        identifier = svc.normalise_identifier(request.data.get("identifier"))
+        data = request.data if isinstance(request.data, dict) else {}
+        identifier = svc.normalise_identifier(data.get("identifier"))
         if not identifier:
             return Response(
                 {"error": "Enter your email, username or phone number.", "code": "identifier_required"},
@@ -84,8 +85,9 @@ class PasswordResetVerifyView(_PublicView):
         },
     )
     def post(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
         try:
-            token = svc.verify_code(request.data.get("identifier"), request.data.get("code"))
+            token = svc.verify_code(data.get("identifier"), data.get("code"))
         except svc.ResetError as err:
             return Response(err.as_dict(), status=err.status_code)
         return Response({"reset_token": token, "expires_in": int(svc.TOKEN_TTL.total_seconds())})
@@ -111,11 +113,12 @@ class PasswordResetConfirmView(_PublicView):
         },
     )
     def post(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
         try:
             svc.confirm_reset(
-                request.data.get("reset_token"),
-                request.data.get("new_password"),
-                request.data.get("confirm_password"),
+                data.get("reset_token"),
+                data.get("new_password"),
+                data.get("confirm_password"),
             )
         except svc.ResetError as err:
             return Response(err.as_dict(), status=err.status_code)
