@@ -348,7 +348,7 @@ class TickerGatingTests(TestCase):
             self.assertFalse(should_start(argv, runner="builtin"), argv)
 
     def test_started_only_for_daphne_with_builtin_runner(self):
-        daphne = ["/opt/render/project/src/.venv/bin/daphne", "-b", "0.0.0.0", "step2win.asgi:application"]
+        daphne = ["/opt/render/project/src/.venv/bin/daphne", "-b", "0.0.0.0", "step2win.asgi:application"]  # nosec B104
         # Independent of the environment running the suite (QA runs set JOB_TICKER_DISABLED=1).
         with patch.dict("os.environ", {"JOB_TICKER_DISABLED": ""}):
             self.assertTrue(should_start(daphne, runner="builtin"))
