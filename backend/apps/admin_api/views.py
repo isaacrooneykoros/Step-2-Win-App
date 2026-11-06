@@ -2804,7 +2804,19 @@ def reply_support_ticket(request, ticket_id):
             {"error": "Support ticket not found"}, status=status.HTTP_404_NOT_FOUND
         )
 
-    message_text = request.data.get("message", "").strip()
+    from django.core.exceptions import ValidationError
+    from apps.core.sanitizers import sanitize_text
+
+    raw_message = request.data.get("message", "")
+    try:
+        # Sanitize to prevent Stored XSS and enforce length limits
+        message_text = sanitize_text(raw_message, max_length=5000)
+    except ValidationError as e:
+        return Response(
+            {"error": e.message if hasattr(e, "message") else str(e)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     if not message_text:
         return Response(
             {"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST
